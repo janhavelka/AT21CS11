@@ -52,6 +52,8 @@ inline bool staysWithinPage(uint8_t startAddress, size_t len, size_t pageSize) {
   return len <= availableInPage;
 }
 
+static constexpr uint32_t MAX_READY_TIMEOUT_MS = 250;
+
 }  // namespace
 
 namespace AT21CS {
@@ -95,6 +97,10 @@ Status Driver::begin(const Config& config) {
   if (config.writeTimeoutMs == 0) {
     _driverState = DriverState::FAULT;
     return Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be > 0");
+  }
+  if (config.writeTimeoutMs > MAX_READY_TIMEOUT_MS) {
+    _driverState = DriverState::FAULT;
+    return Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be <= 1000");
   }
 
   _config = config;
@@ -326,6 +332,9 @@ Status Driver::waitReady(uint32_t timeoutMs) {
   }
   if (timeoutMs == 0) {
     return Status::Error(Err::INVALID_PARAM, "timeoutMs must be > 0");
+  }
+  if (timeoutMs > MAX_READY_TIMEOUT_MS) {
+    return Status::Error(Err::INVALID_PARAM, "timeoutMs must be <= 1000");
   }
 
   if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
@@ -1094,14 +1103,6 @@ Status Driver::_readCurrentAddressRaw(uint8_t& value) {
 
 bool Driver::_isZoneIndexValid(uint8_t zoneIndex) {
   return zoneIndex < cmd::ROM_ZONE_REGISTER_COUNT;
-}
-
-bool Driver::_isEepromAddressValid(uint8_t address) {
-  return address < cmd::EEPROM_SIZE;
-}
-
-bool Driver::_isSecurityAddressValid(uint8_t address) {
-  return address < cmd::SECURITY_SIZE;
 }
 
 bool Driver::_isSecurityUserAddressValid(uint8_t address) {

@@ -46,6 +46,7 @@ struct SerialNumberInfo {
 };
 
 /// AT21CS01/AT21CS11 driver.
+/// Not thread-safe: serialize access from one task/thread or guard with an external mutex.
 class Driver {
  public:
   // Lifecycle
@@ -185,8 +186,6 @@ class Driver {
 
   // Validation helpers
   static bool _isZoneIndexValid(uint8_t zoneIndex);
-  static bool _isEepromAddressValid(uint8_t address);
-  static bool _isSecurityAddressValid(uint8_t address);
   static bool _isSecurityUserAddressValid(uint8_t address);
 
   void _setSpeedMode(SpeedMode mode);

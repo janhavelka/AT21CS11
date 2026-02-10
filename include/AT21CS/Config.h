@@ -38,6 +38,7 @@ struct Config {
   uint8_t offlineThreshold = 5;
 
   /// Maximum time to wait for t_WR completion in waitReady()/write helpers.
+  /// Range: 1..1000 ms.
   uint32_t writeTimeoutMs = 6;
 
   /// Discovery retries performed by begin() and recover().

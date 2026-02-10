@@ -20,6 +20,14 @@ All notable changes to this project are documented here.
 
 ### Fixed
 - Restored `docs/AT21CS01_AT21CS11_complete_driver_report.md` to static reference content.
+- Hardened driver API bounds and timeout behavior for production use:
+  - read/write range checks now reject out-of-bounds address+length requests
+  - page writes now reject cross-page writes that would wrap and overwrite data unexpectedly
+  - retry loop counter overflow removed for `discoveryRetries=255`
+  - `waitReady()` now validates timeout input and handles presence-pin disconnect during polling
+  - write-ready timeout is now explicitly bounded to 1..1000 ms
+  - `NOT_PRESENT` now always transitions state to `OFFLINE`
+  - `readSerialNumber()` now initializes output structure before use
 
 ## [1.0.0] - 2026-02-10
 
