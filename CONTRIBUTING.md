@@ -1,51 +1,23 @@
 # Contributing
 
-Thank you for considering contributing to this project!
+Thanks for contributing.
 
 ## Quick Start
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Ensure examples build: `pio run -e ex_presence_s3 -e ex_eeprom_s3`
-5. Commit with a clear message: `git commit -m "feat: add X"`
-6. Push and open a Pull Request
+1. Create a branch.
+2. Implement focused changes.
+3. Build examples before PR:
+   - `python -m platformio run -e ex_presence_control_s3 -e ex_memory_security_s3 -e ex_rom_freeze_s3 -e ex_multi_device_s3 -e ex_presence_control_s2`
+4. Update docs/changelog if behavior changed.
+5. Open PR.
 
 ## Guidelines
 
-### Code Style
-- Follow existing code style (see `.clang-format`)
-- Use `constexpr` instead of macros for constants
-- Prefer explicit over implicit
-- No heap allocations in steady-state library code
+- Keep public API changes intentional and documented.
+- Preserve deterministic behavior and bounded waits.
+- Avoid heap allocation in library steady-state paths.
+- Keep protocol-level error granularity (`NACK_DEVICE_ADDRESS`, `NACK_MEMORY_ADDRESS`, `NACK_DATA`).
 
-### Commits
-- Use [Conventional Commits](https://www.conventionalcommits.org/) format:
-  - `feat:` new feature
-  - `fix:` bug fix
-  - `docs:` documentation only
-  - `refactor:` code change that neither fixes a bug nor adds a feature
-  - `test:` adding or updating tests
-  - `chore:` maintenance tasks
+## Commit Style
 
-### Pull Requests
-- Keep PRs focused (one feature/fix per PR)
-- Update documentation if needed
-- Add changelog entry under `[Unreleased]`
-- Ensure CI passes
-
-### What We Accept
-- Bug fixes
-- Documentation improvements
-- Performance improvements (with benchmarks)
-- New examples (if they demonstrate a common use case)
-
-### What We Probably Won't Accept
-- Breaking API changes without discussion
-- Heavy dependencies
-- Platform-specific code in the library core
-- Features that add heap allocations in steady state
-
-## Questions?
-
-Open a GitHub Discussion or Issue for questions.
+Use Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).

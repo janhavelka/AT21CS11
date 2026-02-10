@@ -3,22 +3,22 @@
 #include "AT21CS/AT21CS.h"
 #include "../common/At21Example.h"
 #include "../common/BoardConfig.h"
-#include "../common/Log.h"
 
 AT21CS::Driver gDevice;
 
 void printHelp() {
   Serial.println("Commands:");
   Serial.println("  help                  - show commands");
-  Serial.println("  present               - run isPresent() (presence pin + discovery)");
-  Serial.println("  reset                 - resetAndDiscover()");
-  Serial.println("  probe                 - probe() without health tracking");
-  Serial.println("  recover               - recover() and update health");
-  Serial.println("  high                  - setHighSpeed()");
-  Serial.println("  std                   - setStandardSpeed() (AT21CS01 only)");
-  Serial.println("  is_high               - check High-Speed mode");
-  Serial.println("  is_std                - check Standard Speed mode");
+  Serial.println("  present               - run presence check");
+  Serial.println("  reset                 - reset + discovery");
+  Serial.println("  probe                 - discovery probe (raw)");
+  Serial.println("  recover               - recover from degraded/offline");
+  Serial.println("  high                  - set high speed");
+  Serial.println("  std                   - set standard speed (AT21CS01 only)");
+  Serial.println("  is_high               - check high speed mode");
+  Serial.println("  is_std                - check standard speed mode");
   Serial.println("  part                  - print detected part");
+  Serial.println("  id                    - read manufacturer ID");
   Serial.println("  health                - print health counters/state");
 }
 
@@ -26,14 +26,13 @@ void setup() {
   board::initSerial();
   delay(200);
 
-  Serial.println("\n=== presence_and_discovery ===");
+  Serial.println("\n=== 01_presence_control_cli ===");
   Serial.printf("SI/O=%d presencePin=%d A2:A0=%u\n", board::SIO_PRIMARY,
                 board::PRESENCE_PRIMARY, board::ADDRESS_BITS_PRIMARY);
 
   AT21CS::Config cfg;
   cfg.sioPin = board::SIO_PRIMARY;
   cfg.presencePin = board::PRESENCE_PRIMARY;
-  cfg.presenceActiveHigh = true;
   cfg.addressBits = board::ADDRESS_BITS_PRIMARY;
 
   const AT21CS::Status st = gDevice.begin(cfg);
@@ -57,38 +56,34 @@ void loop() {
     printHelp();
   } else if (line == "present") {
     bool present = false;
-    const AT21CS::Status st = gDevice.isPresent(present);
-    ex::printStatus(st);
+    ex::printStatus(gDevice.isPresent(present));
     Serial.printf("present=%s\n", present ? "true" : "false");
   } else if (line == "reset") {
-    const AT21CS::Status st = gDevice.resetAndDiscover();
-    ex::printStatus(st);
+    ex::printStatus(gDevice.resetAndDiscover());
   } else if (line == "probe") {
-    const AT21CS::Status st = gDevice.probe();
-    ex::printStatus(st);
+    ex::printStatus(gDevice.probe());
   } else if (line == "recover") {
-    const AT21CS::Status st = gDevice.recover();
-    ex::printStatus(st);
+    ex::printStatus(gDevice.recover());
   } else if (line == "high") {
-    const AT21CS::Status st = gDevice.setHighSpeed();
-    ex::printStatus(st);
+    ex::printStatus(gDevice.setHighSpeed());
     Serial.printf("speed=%s\n", ex::speedToStr(gDevice.speedMode()));
   } else if (line == "std") {
-    const AT21CS::Status st = gDevice.setStandardSpeed();
-    ex::printStatus(st);
+    ex::printStatus(gDevice.setStandardSpeed());
     Serial.printf("speed=%s\n", ex::speedToStr(gDevice.speedMode()));
   } else if (line == "is_high") {
     bool enabled = false;
-    const AT21CS::Status st = gDevice.isHighSpeed(enabled);
-    ex::printStatus(st);
+    ex::printStatus(gDevice.isHighSpeed(enabled));
     Serial.printf("isHighSpeed=%s\n", enabled ? "true" : "false");
   } else if (line == "is_std") {
     bool enabled = false;
-    const AT21CS::Status st = gDevice.isStandardSpeed(enabled);
-    ex::printStatus(st);
+    ex::printStatus(gDevice.isStandardSpeed(enabled));
     Serial.printf("isStandardSpeed=%s\n", enabled ? "true" : "false");
   } else if (line == "part") {
-    Serial.printf("detectedPart=%s\n", ex::partToStr(gDevice.detectedPart()));
+    Serial.printf("part=%s\n", ex::partToStr(gDevice.detectedPart()));
+  } else if (line == "id") {
+    uint32_t id = 0;
+    ex::printStatus(gDevice.readManufacturerId(id));
+    Serial.printf("manufacturerId=0x%06lX\n", static_cast<unsigned long>(id));
   } else if (line == "health") {
     ex::printHealth(gDevice);
   } else {

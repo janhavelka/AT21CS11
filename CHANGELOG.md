@@ -1,25 +1,17 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to this project are documented here.
 
 ## [Unreleased]
 
-### Added
-- Complete AT21CS01/AT21CS11 single-wire driver API and implementation.
-- Timing-accurate PHY with bit/byte TX/RX and ACK/NACK slot handling.
-- Reset + discovery handshake and presence helpers.
-- EEPROM, Security register, lock, serial CRC, manufacturer ID, ROM zone, and freeze command support.
-- Speed mode control for High-Speed and Standard Speed (AT21CS01-only support enforced).
-- Driver health model (`READY/DEGRADED/OFFLINE`) with counters and timestamps.
-- Nine interactive PlatformIO examples covering all chip features.
-- Datasheet digest report in `docs/AT21CS01_AT21CS11_complete_driver_report.md`.
-
 ### Changed
-- Renamed library surface to `AT21CS/*` headers and updated metadata/tooling.
-- Updated PlatformIO environments and CI matrix to build new examples.
+- Condensed examples from many single-feature demos into four practical CLI demos.
+- Removed obsolete template compatibility files and legacy placeholders.
+- Replaced generic template metadata with project-specific maintainer and ownership data.
+- Updated AGENTS.md to AT21CS01/AT21CS11 project guidance.
+
+### Fixed
+- Restored `docs/AT21CS01_AT21CS11_complete_driver_report.md` to static reference content.
 
 ## [1.0.0] - 2026-02-10
 
