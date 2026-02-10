@@ -1,8 +1,8 @@
 /// @file test_basic.cpp
-/// @brief Basic unit tests for {DEVICE_NAME} driver
+/// @brief Basic unit tests for AT21CS support types.
 
-#include <cstdio>
 #include <cassert>
+#include <cstdio>
 
 // Include stubs first
 #include "Arduino.h"
@@ -12,38 +12,26 @@
 SerialClass Serial;
 TwoWire Wire;
 
-// Include driver
-#include "{NAMESPACE}/Status.h"
-#include "{NAMESPACE}/Config.h"
+#include "AT21CS/Config.h"
+#include "AT21CS/Status.h"
 
-using namespace {NAMESPACE};
-
-// ============================================================================
-// Test Helpers
-// ============================================================================
+using namespace AT21CS;
 
 static int testsPassed = 0;
 static int testsFailed = 0;
 
 #define TEST(name) void test_##name()
-#define RUN_TEST(name) do { \
-  printf("Running %s... ", #name); \
-  test_##name(); \
-  printf("PASSED\n"); \
-  testsPassed++; \
-} catch (...) { \
-  printf("FAILED\n"); \
-  testsFailed++; \
-}
+#define RUN_TEST(name)                                \
+  do {                                                \
+    printf("Running %s... ", #name);                \
+    test_##name();                                    \
+    printf("PASSED\n");                             \
+    testsPassed++;                                    \
+  } while (0)
 
 #define ASSERT_TRUE(x) assert(x)
 #define ASSERT_FALSE(x) assert(!(x))
 #define ASSERT_EQ(a, b) assert((a) == (b))
-#define ASSERT_NE(a, b) assert((a) != (b))
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 TEST(status_ok) {
   Status st = Status::Ok();
@@ -52,39 +40,27 @@ TEST(status_ok) {
 }
 
 TEST(status_error) {
-  Status st = Status::Error(Err::I2C_ERROR, "Test error", 42);
+  Status st = Status::Error(Err::INVALID_PARAM, "bad", 7);
   ASSERT_FALSE(st.ok());
-  ASSERT_EQ(st.code, Err::I2C_ERROR);
-  ASSERT_EQ(st.detail, 42);
-}
-
-TEST(status_in_progress) {
-  Status st = Status{Err::IN_PROGRESS, 0, "In progress"};
-  ASSERT_FALSE(st.ok());
-  ASSERT_TRUE(st.inProgress());
+  ASSERT_EQ(st.code, Err::INVALID_PARAM);
+  ASSERT_EQ(st.detail, 7);
 }
 
 TEST(config_defaults) {
   Config cfg;
-  ASSERT_EQ(cfg.i2cWrite, nullptr);
-  ASSERT_EQ(cfg.i2cWriteRead, nullptr);
-  ASSERT_EQ(cfg.i2cTimeoutMs, 50);
+  ASSERT_EQ(cfg.sioPin, -1);
+  ASSERT_EQ(cfg.presencePin, -1);
+  ASSERT_EQ(cfg.addressBits, 0);
   ASSERT_EQ(cfg.offlineThreshold, 5);
 }
 
-// ============================================================================
-// Main
-// ============================================================================
-
 int main() {
-  printf("\n=== {DEVICE_NAME} Unit Tests ===\n\n");
-  
+  printf("\n=== AT21CS Unit Tests ===\n\n");
+
   RUN_TEST(status_ok);
   RUN_TEST(status_error);
-  RUN_TEST(status_in_progress);
   RUN_TEST(config_defaults);
-  
+
   printf("\n=== Results: %d passed, %d failed ===\n\n", testsPassed, testsFailed);
-  
   return testsFailed > 0 ? 1 : 0;
 }

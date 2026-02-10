@@ -1,34 +1,37 @@
 {
-  "name": "esp32-platformio-library-template",
-  "version": "0.1.0",
-  "description": "Robust ESP32 Arduino + PlatformIO single-library template with begin/tick/end lifecycle and Status error model.",
+  "name": "AT21CS01_AT21CS11",
+  "version": "1.0.0",
+  "description": "Production-grade Arduino/PlatformIO driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs on ESP32.",
   "keywords": [
+    "microchip",
+    "at21cs01",
+    "at21cs11",
+    "single-wire",
+    "eeprom",
     "esp32",
-    "esp32-s2",
-    "esp32-s3",
     "arduino",
-    "platformio",
-    "embedded",
-    "library-template",
-    "non-blocking"
+    "platformio"
   ],
   "authors": [
     {
-      "name": "Your Name",
-      "email": "your.email@example.com",
-      "url": "https://github.com/YOUR_USERNAME",
+      "name": "Jan Havelka",
       "maintainer": true
     }
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOUR_USERNAME/esp32-platformio-library-template.git"
+    "url": "https://github.com/janhavelka/AT21CS11.git"
   },
   "license": "MIT",
-  "homepage": "https://github.com/YOUR_USERNAME/esp32-platformio-library-template",
-  "frameworks": ["arduino"],
-  "platforms": ["espressif32"],
-  "headers": ["YourLibrary/YourLib.h"],
+  "frameworks": [
+    "arduino"
+  ],
+  "platforms": [
+    "espressif32"
+  ],
+  "headers": [
+    "AT21CS/AT21CS.h"
+  ],
   "build": {
     "includeDir": "include",
     "srcDir": "src"

@@ -13,10 +13,16 @@ jobs:
     strategy:
       matrix:
         environment:
-          - ex_cli_s3
-          - ex_cli_s2
-          - ex_compile_only_s3
-          - ex_compile_only_s2
+          - ex_presence_s3
+          - ex_eeprom_s3
+          - ex_security_user_s3
+          - ex_security_lock_s3
+          - ex_serial_crc_s3
+          - ex_manufacturer_s3
+          - ex_rom_zones_s3
+          - ex_freeze_rom_s3
+          - ex_multi_device_s3
+          - ex_presence_s2
       fail-fast: false
 
     steps:
