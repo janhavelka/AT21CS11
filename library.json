@@ -1,6 +1,6 @@
 {
   "name": "AT21CS01_AT21CS11",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Production-grade Arduino/PlatformIO driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs on ESP32.",
   "keywords": [
     "microchip",

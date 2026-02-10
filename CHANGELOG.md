@@ -4,6 +4,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-10
+
 ### Added
 - `examples/common/LoadCellMap.h` with full typed load-cell memory map helpers:
   - Fixed block/field addresses
@@ -34,5 +36,6 @@ All notable changes to this project are documented here.
 ### Added
 - Initial production-ready release for AT21CS01 + AT21CS11.
 
-[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.1.0
 [1.0.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.0.0
