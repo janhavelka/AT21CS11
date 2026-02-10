@@ -100,6 +100,13 @@ void loop() {
 - `uint32_t totalFailures() const`
 - `uint32_t totalSuccess() const`
 
+## Write-Ready Behavior (Current and Future)
+
+- Current design: write APIs are synchronous and block while waiting for internal write completion (`waitReady()` polling).
+- Default timeout: `Config::writeTimeoutMs = 25` (valid range `1..1000 ms`).
+- Practical effect: the caller task can be blocked for up to the configured timeout on write operations.
+- Future redesign target: non-blocking write flow driven by `tick()` (start-write + poll status API), so no blocking loop in the write call path.
+
 ## Example Use: Load Cell Data Layout
 
 This is a practical layout for a production load-cell module where some fields must be immutable and some must change over time.

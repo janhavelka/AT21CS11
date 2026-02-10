@@ -39,7 +39,7 @@ struct Config {
 
   /// Maximum time to wait for t_WR completion in waitReady()/write helpers.
   /// Range: 1..1000 ms.
-  uint32_t writeTimeoutMs = 6;
+  uint32_t writeTimeoutMs = 25;
 
   /// Discovery retries performed by begin() and recover().
   uint8_t discoveryRetries = 2;
