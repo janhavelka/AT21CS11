@@ -36,7 +36,7 @@ void setup() {
 
   AT21CS::Config cfg;
   cfg.sioPin = 8;
-  cfg.presencePin = 7;      // optional, set -1 if not used
+  cfg.presencePin = 7;      // optional, set -1 if not used; authoritative when set
   cfg.addressBits = 0;      // A2:A0
 
   AT21CS::Status st = dev.begin(cfg);

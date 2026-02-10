@@ -25,6 +25,7 @@ struct Config {
   int sioPin = -1;
 
   /// Optional external presence pin. Set to -1 to disable fast presence checks.
+  /// When configured, the driver treats this pin as authoritative for presence.
   int presencePin = -1;
 
   /// Optional presence pin polarity: true=HIGH means present, false=LOW means present.

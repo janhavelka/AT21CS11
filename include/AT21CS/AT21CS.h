@@ -156,6 +156,7 @@ class Driver {
 
   // GPIO + PHY helpers
   Status _configurePins();
+  bool _presencePinReportsPresent() const;
   void _releaseLine();
   void _lineLow();
   bool _readLine() const;

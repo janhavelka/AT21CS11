@@ -77,6 +77,11 @@ Status Driver::begin(const Config& config) {
     return st;
   }
 
+  if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+    _driverState = DriverState::OFFLINE;
+    return Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent");
+  }
+
   _driverState = DriverState::PROBING;
   Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
   const uint8_t attempts = static_cast<uint8_t>(_config.discoveryRetries + 1U);
@@ -171,6 +176,13 @@ Status Driver::probe() {
     return st;
   }
 
+  if (_config.presencePin >= 0) {
+    if (!_presencePinReportsPresent()) {
+      return Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent");
+    }
+    return Status::Ok();
+  }
+
   const DriverState previous = _driverState;
   _driverState = DriverState::PROBING;
   st = _resetAndDiscoverRaw();
@@ -182,6 +194,11 @@ Status Driver::recover() {
   Status st = _checkInitialized();
   if (!st.ok()) {
     return st;
+  }
+
+  if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+    _driverState = DriverState::OFFLINE;
+    return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
   }
 
   _driverState = DriverState::RECOVERING;
@@ -224,6 +241,11 @@ Status Driver::resetAndDiscover() {
     return st;
   }
 
+  if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+    _driverState = DriverState::OFFLINE;
+    return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
+  }
+
   _driverState = DriverState::PROBING;
   Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
   const uint8_t attempts = static_cast<uint8_t>(_config.discoveryRetries + 1U);
@@ -245,12 +267,8 @@ Status Driver::isPresent(bool& present) {
   }
 
   if (_config.presencePin >= 0) {
-    const int level = digitalRead(_config.presencePin);
-    const bool active = _config.presenceActiveHigh ? (level != 0) : (level == 0);
-    if (!active) {
-      present = false;
-      return Status::Ok();
-    }
+    present = _presencePinReportsPresent();
+    return Status::Ok();
   }
 
   _driverState = DriverState::PROBING;
@@ -272,6 +290,11 @@ Status Driver::waitReady(uint32_t timeoutMs) {
   Status st = _checkInitialized();
   if (!st.ok()) {
     return st;
+  }
+
+  if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+    _driverState = DriverState::OFFLINE;
+    return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
   }
 
   _driverState = DriverState::BUSY;
@@ -724,6 +747,14 @@ Status Driver::_configurePins() {
 #endif
 
   return Status::Ok();
+}
+
+bool Driver::_presencePinReportsPresent() const {
+  if (_config.presencePin < 0) {
+    return true;
+  }
+  const int level = digitalRead(static_cast<uint8_t>(_config.presencePin));
+  return _config.presenceActiveHigh ? (level != 0) : (level == 0);
 }
 
 void Driver::_releaseLine() {
