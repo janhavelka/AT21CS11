@@ -13,11 +13,9 @@ jobs:
     strategy:
       matrix:
         environment:
-          - ex_presence_control_s3
-          - ex_memory_security_s3
-          - ex_rom_freeze_s3
+          - ex_general_control_s3
           - ex_multi_device_s3
-          - ex_presence_control_s2
+          - ex_general_control_s2
       fail-fast: false
 
     steps:

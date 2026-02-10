@@ -113,6 +113,43 @@ This is a practical layout for a production load-cell module where some fields m
 | EEPROM Zone 2 | `0x40..0x5F` | Mutable operating state: installation tare, customer offset trim, filter profile, last service flags, rolling sequence + CRC | Yes |
 | EEPROM Zone 3 | `0x60..0x7F` | Mutable lifecycle counters: overload events, overtemperature events, power cycles, service cycles (wear-leveled journal) | Yes |
 
+### Implemented helper: `LoadCellMap.h`
+
+A full, production-style map helper is provided in:
+
+- `examples/common/LoadCellMap.h`
+
+It includes:
+- Fixed addresses and field offsets for identity/calibration/runtime/counter records.
+- Versioned typed structs with CRC validation.
+- Master+mirror calibration helpers with fallback read.
+- Safe EEPROM/security writes split by 8-byte page boundaries.
+- Typed POD read/write helpers (`float` supported via `readFloat32` / `writeFloat32`).
+
+Quick usage:
+
+```cpp
+#include "examples/common/LoadCellMap.h"
+
+lcmap::CalibrationBlockV1 cal = {};
+cal.capacityGrams = 50000;
+cal.zeroBalanceRaw = -17320;
+cal.spanRawAtCapacity = 947112;
+cal.sensitivityNvPerV = 2000000;
+cal.tempCoeffPpmPerC = -35;
+cal.linearityPpm = 120;
+AT21CS::Status st = lcmap::writeCalibrationBoth(dev, cal);
+
+lcmap::RuntimeBlockV1 runtime = {};
+bool valid = false;
+st = lcmap::readRuntime(dev, runtime, valid);
+if (st.ok() && valid) {
+  runtime.seq += 1;
+  runtime.installTareRaw = -250;
+  st = lcmap::writeRuntime(dev, runtime);
+}
+```
+
 ### Suggested record model
 
 - Keep immutable records self-contained with `magic`, `version`, `payload`, and `crc`.
@@ -162,10 +199,8 @@ Notes:
 
 ## Condensed Examples
 
-1. `examples/01_presence_control_cli`
-2. `examples/02_memory_security_cli`
-3. `examples/03_rom_freeze_cli`
-4. `examples/04_multi_device_demo`
+1. `examples/01_general_control_cli` (all single-device functionality in one CLI)
+2. `examples/02_multi_device_demo` (basic controls for each indexed device instance)
 
 ## Static Reference
 

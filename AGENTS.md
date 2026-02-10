@@ -17,7 +17,7 @@ include/AT21CS/       - Public API headers only
   Version.h           - Auto-generated (do not edit)
 src/                  - Implementation (.cpp)
 examples/
-  01_*/ .. 04_*/      - Interactive demos
+  01_*/ 02_*/         - Interactive demos
   common/             - Example-only helpers
 platformio.ini
 library.json
@@ -28,6 +28,7 @@ AGENTS.md
 
 Rules:
 - `examples/common/` is not part of the library.
+- Keep example set minimal: one full single-device CLI and one multi-device CLI.
 - Public headers must stay in `include/AT21CS/`.
 - No board-specific pin defaults in library code.
 

@@ -6,6 +6,7 @@
 #include <Arduino.h>
 
 #include <climits>
+#include <cstring>
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <driver/gpio.h>
@@ -14,10 +15,6 @@
 #endif
 
 namespace {
-
-inline bool deadlinePassed(uint32_t now, uint32_t deadline) {
-  return static_cast<int32_t>(now - deadline) >= 0;
-}
 
 inline void incrementWrap(uint8_t& value) {
   if (value != UINT8_MAX) {
@@ -31,6 +28,30 @@ inline void incrementWrap(uint32_t& value) {
   }
 }
 
+inline uint16_t retryAttempts(uint8_t retries) {
+  return static_cast<uint16_t>(retries) + 1U;
+}
+
+inline bool rangeFits(uint8_t startAddress, size_t len, size_t totalSize) {
+  if (len == 0) {
+    return false;
+  }
+  if (static_cast<size_t>(startAddress) >= totalSize) {
+    return false;
+  }
+  const size_t available = totalSize - static_cast<size_t>(startAddress);
+  return len <= available;
+}
+
+inline bool staysWithinPage(uint8_t startAddress, size_t len, size_t pageSize) {
+  if (len == 0 || pageSize == 0) {
+    return false;
+  }
+  const size_t pageOffset = static_cast<size_t>(startAddress) % pageSize;
+  const size_t availableInPage = pageSize - pageOffset;
+  return len <= availableInPage;
+}
+
 }  // namespace
 
 namespace AT21CS {
@@ -39,6 +60,10 @@ constexpr Driver::TimingProfile Driver::HIGH_SPEED_TIMING;
 constexpr Driver::TimingProfile Driver::STANDARD_SPEED_TIMING;
 
 Status Driver::begin(const Config& config) {
+  if (_initialized) {
+    end();
+  }
+
   if (config.sioPin < 0) {
     _driverState = DriverState::FAULT;
     return Status::Error(Err::INVALID_CONFIG, "sioPin must be >= 0");
@@ -50,6 +75,14 @@ Status Driver::begin(const Config& config) {
   if (config.presencePin > 63) {
     _driverState = DriverState::FAULT;
     return Status::Error(Err::INVALID_CONFIG, "presencePin must be <= 63");
+  }
+  if (config.presencePin < -1) {
+    _driverState = DriverState::FAULT;
+    return Status::Error(Err::INVALID_CONFIG, "presencePin must be -1 or in range 0..63");
+  }
+  if (config.presencePin >= 0 && config.presencePin == config.sioPin) {
+    _driverState = DriverState::FAULT;
+    return Status::Error(Err::INVALID_CONFIG, "presencePin must be different from sioPin");
   }
   if (config.addressBits > 0x07) {
     _driverState = DriverState::FAULT;
@@ -84,8 +117,8 @@ Status Driver::begin(const Config& config) {
 
   _driverState = DriverState::PROBING;
   Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint8_t attempts = static_cast<uint8_t>(_config.discoveryRetries + 1U);
-  for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
+  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
+  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
     discovery = _resetAndDiscoverRaw();
     if (discovery.ok()) {
       break;
@@ -203,8 +236,8 @@ Status Driver::recover() {
 
   _driverState = DriverState::RECOVERING;
   Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint8_t attempts = static_cast<uint8_t>(_config.discoveryRetries + 1U);
-  for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
+  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
+  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
     discovery = _resetAndDiscoverRaw();
     if (discovery.ok()) {
       break;
@@ -248,8 +281,8 @@ Status Driver::resetAndDiscover() {
 
   _driverState = DriverState::PROBING;
   Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint8_t attempts = static_cast<uint8_t>(_config.discoveryRetries + 1U);
-  for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
+  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
+  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
     discovery = _resetAndDiscoverRaw();
     if (discovery.ok()) {
       return _trackIo(discovery);
@@ -273,8 +306,8 @@ Status Driver::isPresent(bool& present) {
 
   _driverState = DriverState::PROBING;
   Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint8_t attempts = static_cast<uint8_t>(_config.discoveryRetries + 1U);
-  for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
+  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
+  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
     discovery = _resetAndDiscoverRaw();
     if (discovery.ok()) {
       present = true;
@@ -291,6 +324,9 @@ Status Driver::waitReady(uint32_t timeoutMs) {
   if (!st.ok()) {
     return st;
   }
+  if (timeoutMs == 0) {
+    return Status::Error(Err::INVALID_PARAM, "timeoutMs must be > 0");
+  }
 
   if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
     _driverState = DriverState::OFFLINE;
@@ -298,8 +334,13 @@ Status Driver::waitReady(uint32_t timeoutMs) {
   }
 
   _driverState = DriverState::BUSY;
-  const uint32_t deadline = millis() + timeoutMs;
+  const uint32_t startMs = millis();
   while (true) {
+    if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+      _driverState = DriverState::OFFLINE;
+      return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
+    }
+
     bool ack = false;
     st = _addressOnlyRaw(cmd::OPCODE_EEPROM, false, ack);
     if (!st.ok()) {
@@ -309,7 +350,8 @@ Status Driver::waitReady(uint32_t timeoutMs) {
       return _trackIo(Status::Ok());
     }
 
-    if (deadlinePassed(millis(), deadline)) {
+    const uint32_t elapsedMs = millis() - startMs;
+    if (elapsedMs >= timeoutMs) {
       return _trackIo(Status::Error(Err::BUSY_TIMEOUT, "Timed out waiting for write cycle completion"));
     }
 
@@ -332,11 +374,11 @@ Status Driver::readEeprom(uint8_t address, uint8_t* data, size_t len) {
   if (!st.ok()) {
     return st;
   }
-  if (!_isEepromAddressValid(address)) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM address out of range");
+  if (data == nullptr) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM read buffer is null");
   }
-  if (data == nullptr || len == 0 || len > cmd::EEPROM_SIZE) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid EEPROM read buffer/length");
+  if (!rangeFits(address, len, cmd::EEPROM_SIZE)) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM read range out of bounds");
   }
 
   st = _readRandomRaw(cmd::OPCODE_EEPROM, address, data, len);
@@ -352,11 +394,20 @@ Status Driver::writeEepromPage(uint8_t address, const uint8_t* data, size_t len)
   if (!st.ok()) {
     return st;
   }
-  if (!_isEepromAddressValid(address)) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM address out of range");
+  if (data == nullptr) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM write buffer is null");
   }
-  if (data == nullptr || len == 0 || len > cmd::PAGE_SIZE) {
+  if (len > cmd::PAGE_SIZE) {
     return Status::Error(Err::INVALID_PARAM, "EEPROM page write length must be 1..8");
+  }
+  if (len == 0) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM page write length must be 1..8");
+  }
+  if (!rangeFits(address, len, cmd::EEPROM_SIZE)) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM write range out of bounds");
+  }
+  if (!staysWithinPage(address, len, cmd::PAGE_SIZE)) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM page write crosses page boundary");
   }
 
   st = _writeRaw(cmd::OPCODE_EEPROM, address, data, len);
@@ -373,11 +424,11 @@ Status Driver::readSecurity(uint8_t address, uint8_t* data, size_t len) {
   if (!st.ok()) {
     return st;
   }
-  if (!_isSecurityAddressValid(address)) {
-    return Status::Error(Err::INVALID_PARAM, "Security address out of range");
+  if (data == nullptr) {
+    return Status::Error(Err::INVALID_PARAM, "Security read buffer is null");
   }
-  if (data == nullptr || len == 0 || len > cmd::SECURITY_SIZE) {
-    return Status::Error(Err::INVALID_PARAM, "Invalid security read buffer/length");
+  if (!rangeFits(address, len, cmd::SECURITY_SIZE)) {
+    return Status::Error(Err::INVALID_PARAM, "Security read range out of bounds");
   }
 
   st = _readRandomRaw(cmd::OPCODE_SECURITY, address, data, len);
@@ -396,8 +447,18 @@ Status Driver::writeSecurityUserPage(uint8_t address, const uint8_t* data, size_
   if (!_isSecurityUserAddressValid(address)) {
     return Status::Error(Err::INVALID_PARAM, "Security writes are allowed only in 0x10..0x1F");
   }
-  if (data == nullptr || len == 0 || len > cmd::PAGE_SIZE) {
+  if (data == nullptr) {
+    return Status::Error(Err::INVALID_PARAM, "Security write buffer is null");
+  }
+  if (len == 0 || len > cmd::PAGE_SIZE) {
     return Status::Error(Err::INVALID_PARAM, "Security page write length must be 1..8");
+  }
+  const uint16_t endAddress = static_cast<uint16_t>(address) + static_cast<uint16_t>(len);
+  if (endAddress > static_cast<uint16_t>(cmd::SECURITY_USER_MAX) + 1U) {
+    return Status::Error(Err::INVALID_PARAM, "Security write exceeds user area 0x10..0x1F");
+  }
+  if (!staysWithinPage(address, len, cmd::PAGE_SIZE)) {
+    return Status::Error(Err::INVALID_PARAM, "Security page write crosses page boundary");
   }
 
   st = _writeRaw(cmd::OPCODE_SECURITY, address, data, len);
@@ -444,6 +505,8 @@ Status Driver::isSecurityLocked(bool& locked) {
 }
 
 Status Driver::readSerialNumber(SerialNumberInfo& serial) {
+  std::memset(&serial, 0, sizeof(serial));
+
   Status st = readSecurity(cmd::SECURITY_SERIAL_START, serial.bytes, cmd::SECURITY_SERIAL_SIZE);
   if (!st.ok()) {
     return st;
@@ -654,6 +717,10 @@ Status Driver::isStandardSpeed(bool& enabled) {
 }
 
 uint8_t Driver::crc8_31(const uint8_t* data, size_t len) {
+  if (data == nullptr && len > 0) {
+    return 0;
+  }
+
   uint8_t crc = 0x00;
   for (size_t i = 0; i < len; ++i) {
     crc ^= data[i];
@@ -692,6 +759,10 @@ Status Driver::_trackIo(const Status& st) {
 
   if (st.code == Err::PART_MISMATCH || st.code == Err::INVALID_CONFIG) {
     _driverState = DriverState::FAULT;
+    return st;
+  }
+  if (st.code == Err::NOT_PRESENT) {
+    _driverState = DriverState::OFFLINE;
     return st;
   }
 

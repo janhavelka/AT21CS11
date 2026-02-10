@@ -6,6 +6,8 @@
 #pragma once
 
 #include <Arduino.h>
+#include <cerrno>
+#include <climits>
 #include <cstdlib>
 
 #include "AT21CS/AT21CS.h"
@@ -138,6 +140,37 @@ inline bool parseU8(const String& token, uint8_t& value) {
     return false;
   }
   value = static_cast<uint8_t>(parsed);
+  return true;
+}
+
+inline bool parseI32(const String& token, int32_t& value) {
+  if (token.length() == 0) {
+    return false;
+  }
+  errno = 0;
+  char* end = nullptr;
+  const long parsed = strtol(token.c_str(), &end, 0);
+  if (end == nullptr || *end != '\0' || errno != 0) {
+    return false;
+  }
+  if (parsed < INT32_MIN || parsed > INT32_MAX) {
+    return false;
+  }
+  value = static_cast<int32_t>(parsed);
+  return true;
+}
+
+inline bool parseF32(const String& token, float& value) {
+  if (token.length() == 0) {
+    return false;
+  }
+  errno = 0;
+  char* end = nullptr;
+  const float parsed = strtof(token.c_str(), &end);
+  if (end == nullptr || *end != '\0' || errno != 0) {
+    return false;
+  }
+  value = parsed;
   return true;
 }
 

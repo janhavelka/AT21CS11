@@ -7,7 +7,7 @@ Thanks for contributing.
 1. Create a branch.
 2. Implement focused changes.
 3. Build examples before PR:
-   - `python -m platformio run -e ex_presence_control_s3 -e ex_memory_security_s3 -e ex_rom_freeze_s3 -e ex_multi_device_s3 -e ex_presence_control_s2`
+   - `python -m platformio run -e ex_general_control_s3 -e ex_multi_device_s3 -e ex_general_control_s2`
 4. Update docs/changelog if behavior changed.
 5. Open PR.
 

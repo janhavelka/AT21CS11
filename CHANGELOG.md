@@ -4,8 +4,16 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+- `examples/common/LoadCellMap.h` with full typed load-cell memory map helpers:
+  - Fixed block/field addresses
+  - CRC-sealed versioned records
+  - Page-safe write splitting
+  - Calibration master/mirror handling
+  - Typed POD helpers including float read/write
+
 ### Changed
-- Condensed examples from many single-feature demos into four practical CLI demos.
+- Condensed examples into two practical CLI demos (`01_general_control_cli`, `02_multi_device_demo`).
 - Removed obsolete template compatibility files and legacy placeholders.
 - Replaced generic template metadata with project-specific maintainer and ownership data.
 - Updated AGENTS.md to AT21CS01/AT21CS11 project guidance.
