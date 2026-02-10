@@ -100,6 +100,66 @@ void loop() {
 - `uint32_t totalFailures() const`
 - `uint32_t totalSuccess() const`
 
+## Example Use: Load Cell Data Layout
+
+This is a practical layout for a production load-cell module where some fields must be immutable and some must change over time.
+
+| Region | Address range | Example content | Mutable |
+|---|---|---|---|
+| Security (factory) | `0x00..0x07` | Chip serial payload (product ID + UID + CRC from factory) | No |
+| Security (user) | `0x10..0x1F` | Module serial, model ID, HW revision, manufacturing batch, schema version, CRC | Program once, then lock |
+| EEPROM Zone 0 | `0x00..0x1F` | Calibration master block: nominal capacity, zero balance, span/gain coefficients, temp compensation coefficients, CRC32 | No after ROM set |
+| EEPROM Zone 1 | `0x20..0x3F` | Calibration mirror block and backup static metadata (factory date code, fixture ID), CRC32 | No after ROM set |
+| EEPROM Zone 2 | `0x40..0x5F` | Mutable operating state: installation tare, customer offset trim, filter profile, last service flags, rolling sequence + CRC | Yes |
+| EEPROM Zone 3 | `0x60..0x7F` | Mutable lifecycle counters: overload events, overtemperature events, power cycles, service cycles (wear-leveled journal) | Yes |
+
+### Suggested record model
+
+- Keep immutable records self-contained with `magic`, `version`, `payload`, and `crc`.
+- Keep mutable records as append/journal entries with sequence counters to survive brown-outs.
+- Update counters in batches when possible to reduce wear and write latency (`t_WR`).
+
+Example immutable calibration payload (stored in Zone 0 / Zone 1 mirror):
+
+```cpp
+struct CalibrationBlockV1 {
+  uint32_t magic;              // 'LCAL'
+  uint16_t version;            // = 1
+  uint16_t capacityGramsDiv10; // 500000 = 50 kg
+  int32_t zeroBalanceRaw;      // ADC code at no-load
+  int32_t spanRawAtCapacity;   // ADC code at rated load
+  int16_t tempCoeffPpmPerC;    // optional compensation
+  uint16_t reserved;
+  uint32_t crc32;              // of all previous bytes
+}; // 24 B, room left for future fields
+```
+
+Example mutable state entry (Zone 2/3, journal style):
+
+```cpp
+struct RuntimeEntryV1 {
+  uint32_t seq;             // monotonic
+  int32_t installTareRaw;   // field tare
+  uint32_t overloadCount;   // accumulated events
+  uint32_t powerCycleCount; // optional
+  uint16_t flags;           // service/calibration flags
+  uint16_t crc16;
+}; // 20 B
+```
+
+### Recommended production lock sequence
+
+1. Program Security user bytes (`0x10..0x1F`) with module identity + schema + CRC.
+2. Verify readback, then call `lockSecurityRegister()` (irreversible).
+3. Program Zone 0 (calibration master) and Zone 1 (mirror), verify CRC.
+4. Call `setZoneRom(0)` and `setZoneRom(1)` to make calibration immutable.
+5. After final EOL validation, call `freezeRomZones()` so ROM-zone configuration cannot change.
+6. During normal operation, write only to Zone 2/3.
+
+Notes:
+- No password/unlock mechanism exists for security lock, ROM zone setting, or ROM zone freeze.
+- If you need post-sale recalibration, keep at least one zone writable for a signed calibration update record.
+
 ## Condensed Examples
 
 1. `examples/01_presence_control_cli`
