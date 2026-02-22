@@ -10,6 +10,7 @@ namespace AT21CS {
 enum class Err : uint8_t {
   OK = 0,
   NOT_INITIALIZED,
+  INVALID_STATE,
   INVALID_CONFIG,
   INVALID_PARAM,
   NOT_PRESENT,

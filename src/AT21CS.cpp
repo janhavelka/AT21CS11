@@ -64,6 +64,10 @@ constexpr Driver::TimingProfile Driver::STANDARD_SPEED_TIMING;
 Status Driver::begin(const Config& config) {
   if (_initialized) {
     end();
+  } else if (_config.sioPin >= 0) {
+    // Clean up GPIO from a previously failed begin() that configured the pin
+    // but didn't complete initialization.
+    _releaseLine();
   }
 
   if (config.sioPin < 0) {
@@ -100,7 +104,7 @@ Status Driver::begin(const Config& config) {
   }
   if (config.writeTimeoutMs > MAX_READY_TIMEOUT_MS) {
     _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be <= 1000");
+    return Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be <= 250");
   }
 
   _config = config;
@@ -217,16 +221,21 @@ Status Driver::probe() {
 
   if (_config.presencePin >= 0) {
     if (!_presencePinReportsPresent()) {
-      return Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent");
+      return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
     }
-    return Status::Ok();
+    return _trackIo(Status::Ok());
   }
 
   const DriverState previous = _driverState;
   _driverState = DriverState::PROBING;
   st = _resetAndDiscoverRaw();
+  if (!st.ok()) {
+    // Restore previous state; let _trackIo decide degradation.
+    _driverState = previous;
+    return _trackIo(st);
+  }
   _driverState = previous;
-  return st;
+  return _trackIo(st);
 }
 
 Status Driver::recover() {
@@ -269,6 +278,23 @@ Status Driver::recover() {
 
   if (_config.expectedPart != PartType::UNKNOWN && _config.expectedPart != _detectedPart) {
     return _trackIo(Status::Error(Err::PART_MISMATCH, "Detected part does not match expectedPart"));
+  }
+
+  // After reset+discovery, device is always in High-Speed mode.
+  // Re-apply startup speed setting if Standard Speed was configured.
+  if (_config.startupSpeed == SpeedMode::STANDARD_SPEED && _detectedPart == PartType::AT21CS01) {
+    bool ack = false;
+    st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, false, ack);
+    if (!st.ok()) {
+      return _trackIo(st);
+    }
+    if (!ack) {
+      return _trackIo(
+          Status::Error(Err::NACK_DEVICE_ADDRESS, "Standard Speed command NACK during recovery"));
+    }
+    _setSpeedMode(SpeedMode::STANDARD_SPEED);
+  } else {
+    _setSpeedMode(SpeedMode::HIGH_SPEED);
   }
 
   return _trackIo(Status::Ok());
@@ -334,7 +360,7 @@ Status Driver::waitReady(uint32_t timeoutMs) {
     return Status::Error(Err::INVALID_PARAM, "timeoutMs must be > 0");
   }
   if (timeoutMs > MAX_READY_TIMEOUT_MS) {
-    return Status::Error(Err::INVALID_PARAM, "timeoutMs must be <= 1000");
+    return Status::Error(Err::INVALID_PARAM, "timeoutMs must be <= 250");
   }
 
   if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
@@ -726,7 +752,10 @@ Status Driver::isStandardSpeed(bool& enabled) {
 }
 
 uint8_t Driver::crc8_31(const uint8_t* data, size_t len) {
-  if (data == nullptr && len > 0) {
+  if (len == 0) {
+    return 0;
+  }
+  if (data == nullptr) {
     return 0;
   }
 
@@ -787,6 +816,12 @@ Status Driver::_trackIo(const Status& st) {
 Status Driver::_checkInitialized() const {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() must succeed before this operation");
+  }
+  if (_driverState == DriverState::FAULT) {
+    return Status::Error(Err::INVALID_STATE, "Driver in FAULT state; call begin() to reinitialize");
+  }
+  if (_driverState == DriverState::SLEEPING) {
+    return Status::Error(Err::INVALID_STATE, "Driver is sleeping");
   }
   return Status::Ok();
 }

@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-02-22
+
+### Added
+- `Err::INVALID_STATE` error code for state-machine violation reporting.
+
+### Fixed
+- Driver state guards: bus operations from `FAULT` or `SLEEPING` states now return `INVALID_STATE` instead of proceeding with unpredictable behavior.
+- `begin()` GPIO pin leak on re-entry: a previously failed `begin()` that configured the pin but didn't complete initialization now properly releases the line before reconfiguring.
+- `recover()` now re-applies configured startup speed mode after reset+discovery (device always resets to High-Speed; Standard Speed was silently lost).
+- `probe()` now tracks IO results through `_trackIo()` so health counters stay consistent with all other operations.
+- Error messages for `writeTimeoutMs` upper bound now correctly say "250" instead of the incorrect "1000" (matching `MAX_READY_TIMEOUT_MS = 250`).
+- Config comment for `writeTimeoutMs` range corrected from "1..1000 ms" to "1..250 ms".
+- `crc8_31()` guard order: early-return for `len == 0` before null-pointer check, preventing silent masking of caller bugs.
+
 ## [1.1.0] - 2026-02-10
 
 ### Added
@@ -36,6 +50,7 @@ All notable changes to this project are documented here.
 ### Added
 - Initial production-ready release for AT21CS01 + AT21CS11.
 
-[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/janhavelka/AT21CS11/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.1.0
 [1.0.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.0.0
