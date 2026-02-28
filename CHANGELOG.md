@@ -4,20 +4,6 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
-## [1.1.2] - 2026-02-28
-
-### Added
-- Unified `examples/01_basic_bringup_cli` with shared `examples/common/*` framework helpers
-- Expanded safe self-test coverage for major non-hazardous AT21 commands
-- CLI/timing contract validation tools and `docs/UNIFICATION_STANDARD.md`
-
-### Changed
-- Example/CLI command layout and help style aligned with the common I2C library scheme
-- Repository quality profile aligned with unification wave gates (tests/CI/documentation consistency)
-
-### Removed
-- Legacy split example pair (`01_general_control_cli`, `02_multi_device_demo`) in favor of one comprehensive bringup CLI
-
 ## [1.1.1] - 2026-02-22
 
 ### Added
@@ -64,8 +50,7 @@ All notable changes to this project are documented here.
 ### Added
 - Initial production-ready release for AT21CS01 + AT21CS11.
 
-[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.1.2...HEAD
-[1.1.2]: https://github.com/janhavelka/AT21CS11/compare/v1.1.1...v1.1.2
+[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.1.1...HEAD
 [1.1.1]: https://github.com/janhavelka/AT21CS11/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.1.0
 [1.0.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.0.0

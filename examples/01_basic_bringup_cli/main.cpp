@@ -461,6 +461,7 @@ void printHelp() {
 
   helpSection("Common");
   helpItem("help / ?", "Show this help");
+  helpItem("version / ver", "Print firmware and library version info");
   helpItem("scan", "Bus scan helper");
   helpItem("probe", "Probe and detect device");
   helpItem("recover", "Manual recovery");
@@ -513,6 +514,15 @@ void printHelp() {
   helpItem("lc_fread <addr>", "Read float32 via map helper");
 }
 
+void printVersionInfo() {
+  Serial.println("=== Version Info ===");
+  Serial.printf("  Example firmware build: %s %s\n", __DATE__, __TIME__);
+  Serial.printf("  AT21CS library version: %s\n", AT21CS::VERSION);
+  Serial.printf("  AT21CS library full: %s\n", AT21CS::VERSION_FULL);
+  Serial.printf("  AT21CS library build: %s\n", AT21CS::BUILD_TIMESTAMP);
+  Serial.printf("  AT21CS library commit: %s (%s)\n", AT21CS::GIT_COMMIT, AT21CS::GIT_STATUS);
+}
+
 void setup() {
   board::initSerial();
   delay(200);
@@ -552,6 +562,8 @@ void loop() {
 
   if (tokens[0] == "help" || tokens[0] == "?") {
     printHelp();
+  } else if (tokens[0] == "version" || tokens[0] == "ver") {
+    printVersionInfo();
   } else if (tokens[0] == "scan") {
     bus_diag::scan();
   } else if (tokens[0] == "drv") {
