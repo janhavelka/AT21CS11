@@ -204,16 +204,23 @@ Notes:
 - No password/unlock mechanism exists for security lock, ROM zone setting, or ROM zone freeze.
 - If you need post-sale recalibration, keep at least one zone writable for a signed calibration update record.
 
-## Condensed Examples
+## Examples
 
-1. `examples/01_general_control_cli` (all single-device functionality in one CLI)
-2. `examples/02_multi_device_demo` (basic controls for each indexed device instance)
+1. `examples/01_basic_bringup_cli` (single canonical bringup CLI with probe/recover/driver health/read/config/stress/stress_mix/selftest command surface)
 
 ## Static Reference
 
 The chip reference remains in:
 
 - `docs/AT21CS01_AT21CS11_complete_driver_report.md`
+
+## Documentation
+
+- `CHANGELOG.md` - full release history
+- `docs/UNIFICATION_STANDARD.md` - shared API/CLI/test conventions
+- `docs/IDF_PORT.md` - ESP-IDF portability guidance
+- `release_notes.md` - latest release summary
+- `docs/DOXYGEN.md` - how to build and browse API docs
 
 ## License
 
