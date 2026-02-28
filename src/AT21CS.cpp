@@ -187,7 +187,7 @@ Status Driver::begin(const Config& config) {
 
   _initialized = true;
   _driverState = DriverState::READY;
-  _lastOkMs = millis();
+  _lastOkMs = _nowMs();
   _lastTickMs = _lastOkMs;
   _lastError = Status::Ok();
 
@@ -369,7 +369,7 @@ Status Driver::waitReady(uint32_t timeoutMs) {
   }
 
   _driverState = DriverState::BUSY;
-  const uint32_t startMs = millis();
+  const uint32_t startMs = _nowMs();
   while (true) {
     if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
       _driverState = DriverState::OFFLINE;
@@ -385,12 +385,12 @@ Status Driver::waitReady(uint32_t timeoutMs) {
       return _trackIo(Status::Ok());
     }
 
-    const uint32_t elapsedMs = millis() - startMs;
+    const uint32_t elapsedMs = _nowMs() - startMs;
     if (elapsedMs >= timeoutMs) {
       return _trackIo(Status::Error(Err::BUSY_TIMEOUT, "Timed out waiting for write cycle completion"));
     }
 
-    delayMicroseconds(100);
+    _sleepUs(100);
   }
 }
 
@@ -778,7 +778,7 @@ Status Driver::_trackIo(const Status& st) {
     return st;
   }
 
-  const uint32_t nowMs = millis();
+  const uint32_t nowMs = _nowMs();
   if (st.ok()) {
     _lastOkMs = nowMs;
     _lastError = Status::Ok();
@@ -898,7 +898,7 @@ bool Driver::_readLine() const {
 
 void Driver::driveLow(uint32_t lowUs) {
   _lineLow();
-  delayMicroseconds(lowUs);
+  _sleepUs(lowUs);
 }
 
 void Driver::releaseLine() {
@@ -911,37 +911,37 @@ bool Driver::readLine() {
 
 void Driver::txBit0() {
   _lineLow();
-  delayMicroseconds(_timing.low0Us);
+  _sleepUs(_timing.low0Us);
   _releaseLine();
 
   if (_timing.bitUs > _timing.low0Us) {
-    delayMicroseconds(static_cast<uint32_t>(_timing.bitUs - _timing.low0Us));
+    _sleepUs(static_cast<uint32_t>(_timing.bitUs - _timing.low0Us));
   }
 }
 
 void Driver::txBit1() {
   _lineLow();
-  delayMicroseconds(_timing.low1Us);
+  _sleepUs(_timing.low1Us);
   _releaseLine();
 
   if (_timing.bitUs > _timing.low1Us) {
-    delayMicroseconds(static_cast<uint32_t>(_timing.bitUs - _timing.low1Us));
+    _sleepUs(static_cast<uint32_t>(_timing.bitUs - _timing.low1Us));
   }
 }
 
 bool Driver::rxBit() {
   _lineLow();
-  delayMicroseconds(_timing.readLowUs);
+  _sleepUs(_timing.readLowUs);
   _releaseLine();
 
   if (_timing.readSampleUs > 0) {
-    delayMicroseconds(_timing.readSampleUs);
+    _sleepUs(_timing.readSampleUs);
   }
 
   const bool bit = _readLine();
   const uint16_t elapsed = static_cast<uint16_t>(_timing.readLowUs + _timing.readSampleUs);
   if (_timing.bitUs > elapsed) {
-    delayMicroseconds(static_cast<uint32_t>(_timing.bitUs - elapsed));
+    _sleepUs(static_cast<uint32_t>(_timing.bitUs - elapsed));
   }
 
   return bit;
@@ -997,12 +997,12 @@ uint8_t Driver::rxByte(bool ack) {
 
 void Driver::_sendStart() {
   _releaseLine();
-  delayMicroseconds(_timing.htssUs);
+  _sleepUs(_timing.htssUs);
 }
 
 void Driver::_sendStop() {
   _releaseLine();
-  delayMicroseconds(_timing.htssUs);
+  _sleepUs(_timing.htssUs);
 }
 
 uint8_t Driver::_deviceAddress(uint8_t opcode, bool read) const {
@@ -1013,30 +1013,30 @@ uint8_t Driver::_deviceAddress(uint8_t opcode, bool read) const {
 Status Driver::_resetAndDiscoverRaw() {
   driveLow(DISCHARGE_LOW_US);
   releaseLine();
-  delayMicroseconds(RESET_RECOVERY_US);
+  _sleepUs(RESET_RECOVERY_US);
 
 #if defined(ARDUINO_ARCH_ESP32)
   portENTER_CRITICAL(&_timingMux);
 #endif
 
   _lineLow();
-  delayMicroseconds(DISCOVERY_REQUEST_US);
+  _sleepUs(DISCOVERY_REQUEST_US);
   _releaseLine();
 
-  delayMicroseconds(DISCOVERY_STROBE_DELAY_US);
+  _sleepUs(DISCOVERY_STROBE_DELAY_US);
 
   _lineLow();
-  delayMicroseconds(DISCOVERY_STROBE_US);
+  _sleepUs(DISCOVERY_STROBE_US);
   _releaseLine();
 
-  delayMicroseconds(DISCOVERY_SAMPLE_DELAY_US);
+  _sleepUs(DISCOVERY_SAMPLE_DELAY_US);
   const bool present = !_readLine();
 
 #if defined(ARDUINO_ARCH_ESP32)
   portEXIT_CRITICAL(&_timingMux);
 #endif
 
-  delayMicroseconds(HIGH_SPEED_TIMING.htssUs);
+  _sleepUs(HIGH_SPEED_TIMING.htssUs);
 
   if (!present) {
     return Status::Error(Err::DISCOVERY_FAILED, "Discovery response not detected");
@@ -1147,6 +1147,17 @@ bool Driver::_isSecurityUserAddressValid(uint8_t address) {
 void Driver::_setSpeedMode(SpeedMode mode) {
   _speedMode = mode;
   _timing = (mode == SpeedMode::STANDARD_SPEED) ? STANDARD_SPEED_TIMING : HIGH_SPEED_TIMING;
+}
+
+uint32_t Driver::_nowMs() const {
+  return millis();
+}
+
+void Driver::_sleepUs(uint32_t us) const {
+  if (us == 0U) {
+    return;
+  }
+  delayMicroseconds(us);
 }
 
 void Driver::_resetHealth() {
