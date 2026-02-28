@@ -1,19 +1,19 @@
-# AT21CS01 / AT21CS11 — complete driver implementation report (datasheet DS20005857D)
+﻿# AT21CS01 / AT21CS11 -- complete driver implementation report (datasheet DS20005857D)
 
-This is a **driver-focused, datasheet-faithful** report for implementing **all features** of Microchip **AT21CS01** and **AT21CS11** single‑wire, I/O‑powered EEPROMs.
+This is a **driver-focused, datasheet-faithful** report for implementing **all features** of Microchip **AT21CS01** and **AT21CS11** single-wire, I/O-powered EEPROMs.
 
-- Datasheet: **Microchip DS20005857D** (©2020)
+- Datasheet: **Microchip DS20005857D** ((c)2020)
 - Devices: **AT21CS01** (Standard + High-Speed) and **AT21CS11** (High-Speed only)
-- Interface: **single-wire serial** with **I²C-like protocol structure** (Start/Stop + 8-bit bytes + ACK/NACK), but **timed bit frames on one wire**.
+- Interface: **single-wire serial** with **I2C-like protocol structure** (Start/Stop + 8-bit bytes + ACK/NACK), but **timed bit frames on one wire**.
 
 ---
 
-## 0) What this chip “is” in practice
+## 0) What this chip "is" in practice
 
-- A 2‑pin EEPROM (**SI/O + GND**) where **SI/O is both data and power** (powered through the pull-up).
+- A 2-pin EEPROM (**SI/O + GND**) where **SI/O is both data and power** (powered through the pull-up).
 - Master generates **bit frames** by pulling SI/O low for a controlled time.
 - Bytes are **MSb first**, with a **9th ACK/NACK slot** after each 8 data bits.
-- There are **no unused clock cycles** during byte transfer; **don’t insert breaks** inside a byte + ACK/NACK cycle (see §4.6).
+- There are **no unused clock cycles** during byte transfer; **don't insert breaks** inside a byte + ACK/NACK cycle (see Sec. 4.6).
 
 ---
 
@@ -22,8 +22,8 @@ This is a **driver-focused, datasheet-faithful** report for implementing **all f
 ### 1.1 Pull-up voltage range (V_PUP)
 | Part | V_PUP range |
 |---|---|
-| AT21CS01 | **1.7–3.6 V** (High-Speed), **2.7–3.6 V** (Standard Speed) |
-| AT21CS11 | **2.7–4.5 V** (High-Speed only) |
+| AT21CS01 | **1.7-3.6 V** (High-Speed), **2.7-3.6 V** (Standard Speed) |
+| AT21CS11 | **2.7-4.5 V** (High-Speed only) |
 
 ### 1.2 Speed modes
 | Mode | AT21CS01 | AT21CS11 |
@@ -35,51 +35,51 @@ After **Reset + Discovery**, both devices default to **High-Speed**.
 
 ---
 
-## 2) Memory map (“registers” and nonvolatile state)
+## 2) Memory map ("registers" and nonvolatile state)
 
 ### 2.1 Main EEPROM array
-- Organization: **128 × 8 bytes** (1 Kbit)
-- Address range: **0x00–0x7F**
+- Organization: **128 x 8 bytes** (1 Kbit)
+- Address range: **0x00-0x7F**
 - Page size: **8 bytes**
 - Page count: **16 pages**
 
 **Page boundaries** (8 bytes):
-- 0x00–0x07, 0x08–0x0F, …, 0x78–0x7F
+- 0x00-0x07, 0x08-0x0F, ..., 0x78-0x7F
 
-### 2.2 Security Register (32 bytes, “256-bit security register”)
-- Size: **32 bytes** (4 pages × 8 bytes)
-- Address range: **0x00–0x1F**
-- Lower 16 bytes (0x00–0x0F): **read-only**
-- Upper 16 bytes (0x10–0x1F): **user-programmable**, can be permanently locked
+### 2.2 Security Register (32 bytes, "256-bit security register")
+- Size: **32 bytes** (4 pages x 8 bytes)
+- Address range: **0x00-0x1F**
+- Lower 16 bytes (0x00-0x0F): **read-only**
+- Upper 16 bytes (0x10-0x1F): **user-programmable**, can be permanently locked
 
-**Factory 64-bit serial number** is stored at Security Register addresses **0x00–0x07** (details §7.4).
+**Factory 64-bit serial number** is stored at Security Register addresses **0x00-0x07** (details Sec. 7.4).
 
 ### 2.3 Shared Address Pointer (important!)
 The device has **one shared Address Pointer** used for:
 - EEPROM accesses, and
 - Security Register accesses
 
-If you switch regions (EEPROM ↔ Security), the first read in the new region should be a **Random Read** (“dummy write”) to set the Address Pointer to a known value.
+If you switch regions (EEPROM ↔ Security), the first read in the new region should be a **Random Read** ("dummy write") to set the Address Pointer to a known value.
 
 ### 2.4 ROM Zones (permanent read-only sections of EEPROM)
-EEPROM is split into **four 256‑bit zones** (32 bytes each):
+EEPROM is split into **four 256-bit zones** (32 bytes each):
 
 | Zone | EEPROM range | ROM Zone Register address |
 |---:|---|---|
-| 0 | 0x00–0x1F | 0x01 |
-| 1 | 0x20–0x3F | 0x02 |
-| 2 | 0x40–0x5F | 0x04 |
-| 3 | 0x60–0x7F | 0x08 |
+| 0 | 0x00-0x1F | 0x01 |
+| 1 | 0x20-0x3F | 0x02 |
+| 2 | 0x40-0x5F | 0x04 |
+| 3 | 0x60-0x7F | 0x08 |
 
 Each zone can be permanently set to ROM (read-only) via **opcode 7h**.
 ROM Zone Registers can be **frozen permanently** via **opcode 1h**.
 
-### 2.5 Nonvolatile “state bits” you must support
-Think of these as persistent “register-like” states:
-- **Security Register locked** (irreversible) — opcode **2h**
-- **ROM Zone bits** (4× one-way bits) — opcode **7h**
-- **ROM Zone freeze** (irreversible) — opcode **1h**
-- **Speed mode** (volatile until reset): Standard/High-Speed — opcodes **Dh / Eh** (AT21CS01), **Eh** only (AT21CS11)
+### 2.5 Nonvolatile "state bits" you must support
+Think of these as persistent "register-like" states:
+- **Security Register locked** (irreversible) -- opcode **2h**
+- **ROM Zone bits** (4x one-way bits) -- opcode **7h**
+- **ROM Zone freeze** (irreversible) -- opcode **1h**
+- **Speed mode** (volatile until reset): Standard/High-Speed -- opcodes **Dh / Eh** (AT21CS01), **Eh** only (AT21CS11)
 
 ---
 
@@ -91,20 +91,20 @@ Think of these as persistent “register-like” states:
 
 ### 3.2 R_PUP limits (from DC characteristics)
 **AT21CS01 (High-Speed / Standard-Speed limits differ by V_PUP):**
-- V_PUP = 1.7 V → R_PUP **130–200 Ω**
-- V_PUP = 2.7 V → R_PUP **0.2–1.8 kΩ**
-- V_PUP = 3.6 V → R_PUP **0.33–4 kΩ**
+- V_PUP = 1.7 V -> R_PUP **130-200 Ω**
+- V_PUP = 2.7 V -> R_PUP **0.2-1.8 kΩ**
+- V_PUP = 3.6 V -> R_PUP **0.33-4 kΩ**
 
 **AT21CS11:**
-- V_PUP = 2.7 V → R_PUP **0.2–1.8 kΩ**
-- V_PUP = 4.5 V → R_PUP **0.4–5.4 kΩ**
+- V_PUP = 2.7 V -> R_PUP **0.2-1.8 kΩ**
+- V_PUP = 4.5 V -> R_PUP **0.4-5.4 kΩ**
 
 ### 3.3 Bus capacitance
 - C_BUS max: **1000 pF**
 
 ### 3.4 Thresholds and hysteresis (high-level)
 - V_IL max: **0.5 V**
-- V_IH min: **0.7 × V_PUP**
+- V_IH min: **0.7 x V_PUP**
 - SI/O hysteresis V_HYS: device-specific (datasheet notes it depends on the internal supply derived from V_PUP, R_PUP, C_BUS, and timing).
 
 ---
@@ -116,13 +116,13 @@ Think of these as persistent “register-like” states:
 ### 4.1 Reset and Discovery timing (High-Speed timing applies after reset)
 | Parameter | Symbol | Standard Speed (AT21CS01) | High-Speed (AT21CS01/11) | Units |
 |---|---|---:|---:|---|
-| Reset low time (inactive) | t_RESET | min **480** | min **96** | µs |
-| Discharge low time (interrupt active op) | t_DSCHG | min **150** | min **150** | µs |
-| Reset recovery time | t_RRT | N/A | min **8** | µs |
-| Discovery Response request | t_DRR | N/A | **1 to (2 − t_PUP)** | µs |
-| Discovery Response acknowledge | t_DACK | N/A | **8–24** | µs |
-| Master strobe (during Discovery) | t_MSDR | N/A | **2–6** | µs |
-| SI/O high time for Start/Stop | t_HTSS | N/A | min **150** | µs |
+| Reset low time (inactive) | t_RESET | min **480** | min **96** | us |
+| Discharge low time (interrupt active op) | t_DSCHG | min **150** | min **150** | us |
+| Reset recovery time | t_RRT | N/A | min **8** | us |
+| Discovery Response request | t_DRR | N/A | **1 to (2 - t_PUP)** | us |
+| Discovery Response acknowledge | t_DACK | N/A | **8-24** | us |
+| Master strobe (during Discovery) | t_MSDR | N/A | **2-6** | us |
+| SI/O high time for Start/Stop | t_HTSS | N/A | min **150** | us |
 
 **Notes from datasheet:**
 - Device defaults to **High-Speed after Reset**, so **High-Speed timing applies** after t_RESET.
@@ -131,15 +131,15 @@ Think of these as persistent “register-like” states:
 ### 4.2 Data communication timing
 | Parameter | Symbol | Standard Speed (AT21CS01) | High-Speed (AT21CS01/11) | Units |
 |---|---|---:|---:|---|
-| Bit frame duration | t_BIT | **40–100** | max **25**; min is constrained by t_LOW0 + t_PUP + t_RCV | µs |
-| Start/Stop high time | t_HTSS | min **600** | min **150** | µs |
-| SI/O low time for logic 0 | t_LOW0 | **24–64** | **6–16** | µs |
-| SI/O low time for logic 1 | t_LOW1 | **4–8** | **1–2** | µs |
-| Master low time during read (strobe) | t_RD | **4–8** | **1–2** | µs |
-| Master read strobe time (sample window relation) | t_MRS | t_RD + 8 (+t_PUP) | t_RD + 2 (+t_PUP) | µs |
-| Data output hold time for logic 0 | t_HLD0 | **8–24** | **2–6** | µs |
-| Slave recovery time | t_RCV | min **8** | min **2** | µs |
-| Noise filtering capability | t_NOISE | min **0.5** | — | µs |
+| Bit frame duration | t_BIT | **40-100** | max **25**; min is constrained by t_LOW0 + t_PUP + t_RCV | us |
+| Start/Stop high time | t_HTSS | min **600** | min **150** | us |
+| SI/O low time for logic 0 | t_LOW0 | **24-64** | **6-16** | us |
+| SI/O low time for logic 1 | t_LOW1 | **4-8** | **1-2** | us |
+| Master low time during read (strobe) | t_RD | **4-8** | **1-2** | us |
+| Master read strobe time (sample window relation) | t_MRS | t_RD + 8 (+t_PUP) | t_RD + 2 (+t_PUP) | us |
+| Data output hold time for logic 0 | t_HLD0 | **8-24** | **2-6** | us |
+| Slave recovery time | t_RCV | min **8** | min **2** | us |
+| Noise filtering capability | t_NOISE | min **0.5** | -- | us |
 
 **Constraint formula given by datasheet:**
 - **t_BIT = t_LOW0 + t_PUP + t_RCV**
@@ -155,14 +155,14 @@ Think of these as persistent “register-like” states:
 
 ## 5) Physical layer (bit frames)
 
-### 5.1 Input bit frame (master → device)
+### 5.1 Input bit frame (master -> device)
 - Master starts every bit by pulling SI/O below V_IL.
 - Logic value determined by how long master holds low:
   - **Logic 0:** hold low for t_LOW0
   - **Logic 1:** hold low for t_LOW1
 - Device samples after max t_LOW1 and before min t_LOW0.
 
-### 5.2 Output bit frame (device → master)
+### 5.2 Output bit frame (device -> master)
 - Master begins output frame by pulling low for t_RD, then releases.
 - Device responds:
   - **Logic 0:** holds SI/O low for t_HLD0 (so master samples low)
@@ -175,7 +175,7 @@ Think of these as persistent “register-like” states:
 
 ### 6.1 Start/Stop
 - Start and Stop are created by holding SI/O **high at V_PUP** for at least **t_HTSS**.
-- Datasheet calls Stop a “null bit frame with SI/O pulled high”, so the master may not need to actively drive high (release line and wait).
+- Datasheet calls Stop a "null bit frame with SI/O pulled high", so the master may not need to actively drive high (release line and wait).
 
 ### 6.2 Byte + ACK/NACK
 - 8 data bits MSb-first
@@ -191,7 +191,7 @@ Datasheet explicitly states:
 ### 6.4 Communication interruptions (if you absolutely must)
 Datasheet allows resuming if SI/O idle time is less than the maximum allowed t_BIT for the current speed mode.
 Critical warning:
-- **Do not interrupt immediately after an ACK (logic 0) during a write data stream** — the device may interpret it as Stop and start an internal write cycle (busy for t_WR).
+- **Do not interrupt immediately after an ACK (logic 0) during a write data stream** -- the device may interpret it as Stop and start an internal write cycle (busy for t_WR).
 
 ### 6.5 Internal write cycle behavior (busy)
 - While internally writing, device **does not recognize commands**.
@@ -200,12 +200,12 @@ Critical warning:
 
 ### 6.6 Interrupting an active operation (forced reset)
 To interrupt a busy device intentionally:
-- Pull SI/O low for **t_DSCHG** (min 150 µs) to discharge internal power store,
+- Pull SI/O low for **t_DSCHG** (min 150 us) to discharge internal power store,
 - Release and perform normal Discovery sequence.
 
 ---
 
-## 7) Addressing model (I²C-like, but on one wire)
+## 7) Addressing model (I2C-like, but on one wire)
 
 ### 7.1 Device Address byte (8 bits)
 Format:
@@ -213,11 +213,11 @@ Format:
 - Bits [3:1] = **A2:A0** (preprogrammed slave address)
 - Bit [0] = **R/W** (0 write, 1 read)
 
-If opcode invalid or A2:A0 mismatch → device returns to Standby and does not respond (NACK/no drive).
+If opcode invalid or A2:A0 mismatch -> device returns to Standby and does not respond (NACK/no drive).
 
 ### 7.2 Memory Address byte (EEPROM / Security register)
-- Bit 7: don’t care
-- Bits [6:0]: address bits (EEPROM uses 0–127; Security uses 0–31; upper bits are don’t care for Security)
+- Bit 7: don't care
+- Bits [6:0]: address bits (EEPROM uses 0-127; Security uses 0-31; upper bits are don't care for Security)
 
 ---
 
@@ -239,17 +239,17 @@ If opcode invalid or A2:A0 mismatch → device returns to Standby and does not r
 ## 9) Reset + Discovery (required after power-up / reset)
 
 ### 9.1 Reset
-- If device not busy: pull low for **t_RESET** (min 96 µs in High-Speed; 480 µs in Standard Speed spec)
-- If device might be busy or you can’t be sure: pull low for **t_DSCHG** (150 µs) to force discharge reset.
+- If device not busy: pull low for **t_RESET** (min 96 us in High-Speed; 480 us in Standard Speed spec)
+- If device might be busy or you can't be sure: pull low for **t_DSCHG** (150 us) to force discharge reset.
 
 ### 9.2 Discovery Response (presence handshake)
 After releasing SI/O:
-1. Wait **t_RRT** (min 8 µs)
+1. Wait **t_RRT** (min 8 us)
 2. Drive SI/O low for **t_DRR**
 3. Device concurrently drives low and holds for **t_DACK**
 4. Master issues a short strobe **t_MSDR** within t_DACK and samples:
-   - low → device present
-   - high → no device
+   - low -> device present
+   - high -> no device
 5. Wait **t_HTSS** to create Start, then proceed with first command
 
 ---
@@ -271,7 +271,7 @@ Sequence:
 Sequence:
 1. Start
 2. Device address: **Ah + A2:A0 + R/W=0** (dummy write)
-3. Memory address byte (A6:A0; A7 don’t care)
+3. Memory address byte (A6:A0; A7 don't care)
 4. Repeated Start
 5. Device address: **Ah + A2:A0 + R/W=1**
 6. Read byte(s): ACK each to continue
@@ -281,8 +281,8 @@ Sequence:
 ### 10.3 EEPROM Sequential Read
 - Start with Current Address Read or Random Read
 - After each received byte, master sends:
-  - ACK → continue (Address Pointer increments; wraps to 0x00 after 0x7F)
-  - NACK → stop
+  - ACK -> continue (Address Pointer increments; wraps to 0x00 after 0x7F)
+  - NACK -> stop
 
 ### 10.4 Security Register Read (opcode Bh)
 Rules:
@@ -292,7 +292,7 @@ Rules:
 Sequence (Random/Sequential):
 1. Start
 2. Device address: **Bh + A2:A0 + R/W=0** (dummy write)
-3. Security address byte (0x00–0x1F; A7–A5 don’t care)
+3. Security address byte (0x00-0x1F; A7-A5 don't care)
 4. Repeated Start
 5. Device address: **Bh + A2:A0 + R/W=1**
 6. Read bytes (ACK to continue, NACK to end)
@@ -301,8 +301,8 @@ Sequence (Random/Sequential):
 ### 10.5 Serial Number Read (from Security register)
 The first 8 bytes of Security register:
 - Byte 0: product identifier **0xA0**
-- Bytes 1–6: 48-bit unique number
-- Byte 7: CRC of bytes 0–6 using polynomial **X^8 + X^5 + X^4 + 1** (CRC-8 poly 0x31)
+- Bytes 1-6: 48-bit unique number
+- Byte 7: CRC of bytes 0-6 using polynomial **X^8 + X^5 + X^4 + 1** (CRC-8 poly 0x31)
 
 Recommended driver behavior:
 - Read exactly 8 bytes starting at security address **0x00**.
@@ -322,8 +322,8 @@ Sequence:
 4. Stop
 
 Expected 24-bit hex values:
-- AT21CS01 → **00D200h**
-- AT21CS11 → **00D380h**
+- AT21CS01 -> **00D200h**
+- AT21CS11 -> **00D380h**
 
 ---
 
@@ -335,7 +335,7 @@ Sequence structure:
 2. Device address: opcode Ah (EEPROM) or Bh (Security) with **R/W=0**
 3. Memory address byte
 4. Data byte(s) (8-bit)
-5. Stop → triggers internal write cycle (t_WR, max 5 ms)
+5. Stop -> triggers internal write cycle (t_WR, max 5 ms)
 
 **Abort rule:**
 - If Stop is sent somewhere other than a byte boundary, write is aborted.
@@ -355,20 +355,20 @@ Sequence structure:
 
 ### 11.5 Security Register Write (user area only)
 Rules:
-- Only upper 16 bytes (0x10–0x1F) are writable.
+- Only upper 16 bytes (0x10-0x1F) are writable.
 - Same page rules as EEPROM (8-byte pages).
 
 ### 11.6 Locking the Security Register (opcode 2h)
-Irreversible — after lock, entire 32-byte Security register is read-only.
+Irreversible -- after lock, entire 32-byte Security register is read-only.
 
 Lock sequence emulates a Security byte write but:
 - Opcode nibble: **2h**
-- Memory address byte must have **A7..A4 = 0b0110 (6h)**; remaining bits are don’t care.
-- Data byte is don’t care but must be transmitted.
+- Memory address byte must have **A7..A4 = 0b0110 (6h)**; remaining bits are don't care.
+- Data byte is don't care but must be transmitted.
 
 Device responses:
 - If not locked:
-  - ACK to address and data, then Stop triggers t_WR → becomes locked
+  - ACK to address and data, then Stop triggers t_WR -> becomes locked
 - If already locked:
   - NACK indicates locked
 
@@ -386,19 +386,19 @@ Device responses:
 
 ## 12) Speed mode control (AT21CS01 + AT21CS11)
 
-### 12.1 Standard Speed mode (AT21CS01 only) — opcode Dh
+### 12.1 Standard Speed mode (AT21CS01 only) -- opcode Dh
 - Set Standard Speed:
-  - Start → device address **Dh + A2:A0 + R/W=0** → device ACK → ready in Standard mode
+  - Start -> device address **Dh + A2:A0 + R/W=0** -> device ACK -> ready in Standard mode
 - Check Standard Speed:
-  - Start → device address **Dh + A2:A0 + R/W=1**
+  - Start -> device address **Dh + A2:A0 + R/W=1**
   - ACK if in Standard Speed, NACK otherwise
 - AT21CS11: **always NACKs** opcode Dh
 
-### 12.2 High-Speed mode (both) — opcode Eh
+### 12.2 High-Speed mode (both) -- opcode Eh
 - Set High-Speed:
-  - Start → device address **Eh + A2:A0 + R/W=0** → ACK
+  - Start -> device address **Eh + A2:A0 + R/W=0** -> ACK
 - Check High-Speed:
-  - Start → device address **Eh + A2:A0 + R/W=1**
+  - Start -> device address **Eh + A2:A0 + R/W=1**
   - ACK if in High-Speed, NACK otherwise
 
 ---
@@ -413,8 +413,8 @@ Random-read-like sequence:
 4. Repeated Start
 5. Device address: **7h + A2:A0 + R/W=1**
 6. Read 1 byte:
-   - **00h** → zone is EEPROM (writable)
-   - **FFh** → zone is ROM (permanent read-only)
+   - **00h** -> zone is EEPROM (writable)
+   - **FFh** -> zone is ROM (permanent read-only)
 7. NACK + Stop
 
 ### 13.2 Writing a ROM Zone Register (opcode 7h)
@@ -422,7 +422,7 @@ Random-read-like sequence:
 2. Device address: **7h + A2:A0 + R/W=0**
 3. ROM Zone register address
 4. Data byte must be **FFh**
-5. Stop → triggers t_WR
+5. Stop -> triggers t_WR
 
 ### 13.3 Freeze ROM Zone Registers (opcode 1h)
 Irreversible.
@@ -432,15 +432,15 @@ Freeze sequence:
 2. Device address: **1h + A2:A0 + R/W=0**
    - ACK if not frozen; NACK if already frozen
 3. If ACK:
-   - Send fixed address byte **0x55** → device ACK
-   - Send data byte **0xAA** → device ACK
-4. Stop → triggers t_WR
+   - Send fixed address byte **0x55** -> device ACK
+   - Send data byte **0xAA** -> device ACK
+4. Stop -> triggers t_WR
 
 If address != 0x55 or data != 0xAA:
 - Device NACKs and does not freeze.
 
 **Check frozen state (non-destructive):**
-- Start → device address **1h + A2:A0 + R/W=1**
+- Start -> device address **1h + A2:A0 + R/W=1**
 - ACK if not frozen; NACK if frozen
 
 ### 13.4 Device response when writing inside ROM zone
@@ -458,13 +458,13 @@ If EEPROM write targets an address in a ROM zone:
    - ESP32 RMT or another timing peripheral (optional)
 3. Avoid mid-byte interrupts:
    - Use critical sections (disable interrupts briefly) around byte transfers.
-4. Treat writes as “rare but special”:
+4. Treat writes as "rare but special":
    - `write*()` does Stop and starts t_WR
    - `waitReady()` polls for ACK by probing device address until it responds or timeout
    - optionally provide a nonblocking state-machine wrapper around `waitReady()`
 5. For presence:
    - Protocol-level presence is Reset+Discovery
-   - If your product needs “instant presence with no bus transaction”, use a dedicated **presence pin** (recommended).
+   - If your product needs "instant presence with no bus transaction", use a dedicated **presence pin** (recommended).
 
 ---
 
@@ -472,7 +472,7 @@ If EEPROM write targets an address in a ROM zone:
 
 ### Must-have low-level
 - [ ] drive low for exact microseconds
-- [ ] release line (Hi‑Z)
+- [ ] release line (Hi-Z)
 - [ ] read line
 - [ ] input bit frame (0/1)
 - [ ] output bit frame (read bit)
@@ -484,7 +484,7 @@ If EEPROM write targets an address in a ROM zone:
 - [ ] EEPROM read: current, random, sequential
 - [ ] EEPROM write: byte, page
 - [ ] Security register read (random/sequential)
-- [ ] Security user area write (0x10–0x1F only)
+- [ ] Security user area write (0x10-0x1F only)
 - [ ] Security lock + check lock
 - [ ] Serial number read + CRC check
 - [ ] Manufacturer ID read

@@ -1,4 +1,4 @@
-# Prompt for AI coder — implement AT21CS01/AT21CS11 driver (Arduino/PlatformIO) using template repo
+﻿# Prompt for AI coder -- implement AT21CS01/AT21CS11 driver (Arduino/PlatformIO) using template repo
 
 You are implementing a **complete driver** for Microchip **AT21CS01 + AT21CS11** single-wire, I/O-powered EEPROMs.
 
@@ -15,7 +15,7 @@ The user will integrate this library into an ESP32 project (Arduino framework, P
 ## Hard requirements
 
 ### Output
-- Implement the library code in this repo, matching the existing repo’s structure/style.
+- Implement the library code in this repo, matching the existing repo's structure/style.
 - Add the datasheet digest report to **`docs/AT21CS01_AT21CS11_complete_driver_report.md`**.
 - Provide examples that demonstrate **every** chip feature, all the features are available using serial monitor with descriptive help.
 - Update README + API docs so a user can use the library without reading the datasheet.
@@ -50,12 +50,12 @@ Implement low-level primitives with correct timing:
 **Implementation note (ESP32):** avoid slow GPIO functions in the tight path. Use fast GPIO writes (register-level or optimized API) and critical sections around byte transfers to avoid timing jitter.
 
 ### B) Reset + Discovery (presence handshake)
-- Implement `resetAndDiscover()` per report §9.
+- Implement `resetAndDiscover()` per report Sec. 9.
 - Provide `isPresent()`:
   - If `presencePin` configured: check it first (fast path)
   - Else: run `resetAndDiscover()` and return pass/fail
 
-### C) EEPROM (128×8)
+### C) EEPROM (128x8)
 - Current Address Read
 - Random Read + Sequential Read
 - Byte Write
@@ -64,12 +64,12 @@ Implement low-level primitives with correct timing:
 
 ### D) Security Register (32 bytes)
 - Read (random/sequential)
-- Write only user area 0x10–0x1F (enforce range)
+- Write only user area 0x10-0x1F (enforce range)
 - Security Lock (opcode 2h) + Check Lock (read form)
 - After locked: writes must NACK on data byte as per report
 
 ### E) Serial number + CRC
-- Implement `readSerialNumber()` that reads security bytes 0x00–0x07:
+- Implement `readSerialNumber()` that reads security bytes 0x00-0x07:
   - product ID must be 0xA0
   - CRC polynomial: X^8 + X^5 + X^4 + 1 (CRC-8 poly 0x31)
   - return `crc_ok`

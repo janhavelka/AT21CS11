@@ -1,11 +1,11 @@
-# AT21CS11 — ESP-IDF Migration Prompt
+﻿# AT21CS11 -- ESP-IDF Migration Prompt
 
 > **Library**: AT21CS11 (Microchip single-wire EEPROM / serial number IC)
-> **Current version**: 1.1.1 → **Target**: 2.0.0
+> **Current version**: 1.1.1 -> **Target**: 2.0.0
 > **Namespace**: `AT21CS`
 > **Main class**: `AT21CS::Driver`
 > **Include path**: `#include "AT21CS11/AT21CS11.h"`
-> **Difficulty**: Medium — has IDF GPIO already but also Arduino fallback paths
+> **Difficulty**: Medium -- has IDF GPIO already but also Arduino fallback paths
 
 ---
 
@@ -17,7 +17,7 @@ git tag v1.1.1   # freeze Arduino-era version
 
 ---
 
-## Current State — Arduino Dependencies (exact)
+## Current State -- Arduino Dependencies (exact)
 
 | API | Count | Locations |
 |-----|-------|-----------|
@@ -46,18 +46,18 @@ Delete all `#ifdef ARDUINO` / `#else` branches that use `pinMode()`, `digitalWri
 // gpio_set_direction(), gpio_set_level(), gpio_get_level()
 ```
 
-### 3. Replace `delayMicroseconds()` → `esp_rom_delay_us()`
+### 3. Replace `delayMicroseconds()` -> `esp_rom_delay_us()`
 
 All ~17 sites. This is the correct replacement for bit-banging timing on ESP32:
 
 ```cpp
 #include "esp_rom_sys.h"
-// delayMicroseconds(us) → esp_rom_delay_us(us)
+// delayMicroseconds(us) -> esp_rom_delay_us(us)
 ```
 
 `esp_rom_delay_us()` is a busy-wait (identical behavior to `delayMicroseconds`), which is correct for single-wire protocol bit-level timing.
 
-### 4. Replace 4× `millis()` → `nowMs()` helper
+### 4. Replace 4x `millis()` -> `nowMs()` helper
 
 ```cpp
 #include "esp_timer.h"
@@ -69,7 +69,7 @@ static inline uint32_t nowMs() {
 
 ### 5. Keep `portENTER_CRITICAL` / `portEXIT_CRITICAL`
 
-These are already FreeRTOS native — no change needed.
+These are already FreeRTOS native -- no change needed.
 
 ### 6. Add `CMakeLists.txt` (library root)
 
@@ -95,8 +95,8 @@ dependencies:
 
 ### 8. Version bump
 
-- `library.json` → `2.0.0`
-- `Version.h` (if present) → `2.0.0`
+- `library.json` -> `2.0.0`
+- `Version.h` (if present) -> `2.0.0`
 
 ### 9. Replace Arduino example with ESP-IDF example
 

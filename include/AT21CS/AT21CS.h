@@ -17,7 +17,7 @@
 
 namespace AT21CS {
 
-/// Driver runtime state machine.
+/// AT21CS runtime state machine.
 ///
 /// Transition overview:
 /// - UNINIT -> PROBING -> INIT_CONFIG -> READY during begin()
@@ -60,7 +60,7 @@ class Driver {
   Status resetAndDiscover();
   Status isPresent(bool& present);
 
-  // Driver state and health
+  // AT21CS state and health
   DriverState state() const { return _driverState; }
   bool isOnline() const {
     return _driverState != DriverState::UNINIT && _driverState != DriverState::OFFLINE &&
@@ -190,6 +190,8 @@ class Driver {
 
   void _setSpeedMode(SpeedMode mode);
   void _resetHealth();
+  uint32_t _nowMs() const;
+  void _sleepUs(uint32_t us) const;
 
  private:
   Config _config{};
@@ -213,5 +215,4 @@ class Driver {
   mutable portMUX_TYPE _timingMux = portMUX_INITIALIZER_UNLOCKED;
 #endif
 };
-
 }  // namespace AT21CS
