@@ -19,6 +19,16 @@ enum class SpeedMode : uint8_t {
   STANDARD_SPEED
 };
 
+/// Millisecond timestamp callback.
+/// @param user User context pointer passed through from Config
+/// @return Current monotonic milliseconds
+using NowMsFn = uint32_t (*)(void* user);
+
+/// Microsecond sleep callback.
+/// @param us Microseconds to sleep/busy-wait
+/// @param user User context pointer passed through from Config
+using SleepUsFn = void (*)(uint32_t us, void* user);
+
 /// Driver configuration.
 struct Config {
   /// SI/O GPIO pin used by this device instance (required).
@@ -49,6 +59,17 @@ struct Config {
 
   /// Desired speed mode after begin() (AT21CS11 only supports HIGH_SPEED).
   SpeedMode startupSpeed = SpeedMode::HIGH_SPEED;
+
+  /// Optional monotonic millisecond source.
+  /// If null, driver falls back to Arduino millis().
+  NowMsFn nowMs = nullptr;
+
+  /// Optional microsecond delay hook used by bit-banging timing.
+  /// If null, driver falls back to Arduino delayMicroseconds().
+  SleepUsFn sleepUs = nullptr;
+
+  /// User context for timing callbacks.
+  void* timeUser = nullptr;
 };
 
 }  // namespace AT21CS

@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-01
+
+### Changed
+- Updated `docs/IDF_PORT.md` to match the current portability-by-design implementation.
+- Synchronized timing abstraction usage and configuration behavior in core driver code.
+
+### Fixed
+- Core timing guard compliance by removing direct timing API use from guarded paths.
+
 ## [1.1.1] - 2026-02-22
 
 ### Added
@@ -50,7 +59,8 @@ All notable changes to this project are documented here.
 ### Added
 - Initial production-ready release for AT21CS01 + AT21CS11.
 
-[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/janhavelka/AT21CS11/compare/v1.1.2...v1.2.0
 [1.1.1]: https://github.com/janhavelka/AT21CS11/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.1.0
 [1.0.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.0.0

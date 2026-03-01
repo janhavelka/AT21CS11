@@ -1150,11 +1150,18 @@ void Driver::_setSpeedMode(SpeedMode mode) {
 }
 
 uint32_t Driver::_nowMs() const {
+  if (_config.nowMs != nullptr) {
+    return _config.nowMs(_config.timeUser);
+  }
   return millis();
 }
 
 void Driver::_sleepUs(uint32_t us) const {
   if (us == 0U) {
+    return;
+  }
+  if (_config.sleepUs != nullptr) {
+    _config.sleepUs(us, _config.timeUser);
     return;
   }
   delayMicroseconds(us);
