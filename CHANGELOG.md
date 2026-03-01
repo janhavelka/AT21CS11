@@ -13,6 +13,17 @@ All notable changes to this project are documented here.
 ### Fixed
 - Core timing guard compliance by removing direct timing API use from guarded paths.
 
+## [1.1.2] - 2026-02-28
+
+### Added
+- Unified bringup support files in `examples/common/*` (`BusDiag`, `CliShell`, `HealthView`, `TransportAdapter`).
+- Canonical docs for unification and ESP-IDF portability (`docs/UNIFICATION_STANDARD.md`, `docs/IDF_PORT.md`).
+- Repository guard tools for CLI/timing contracts.
+
+### Changed
+- Replaced split demo layout (`01_general_control_cli`, `02_multi_device_demo`) with a single comprehensive `examples/01_basic_bringup_cli`.
+- Normalized CI/test structure to the shared library profile.
+
 ## [1.1.1] - 2026-02-22
 
 ### Added
@@ -61,6 +72,7 @@ All notable changes to this project are documented here.
 
 [Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.2.0...HEAD
 [1.2.0]: https://github.com/janhavelka/AT21CS11/compare/v1.1.2...v1.2.0
+[1.1.2]: https://github.com/janhavelka/AT21CS11/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/janhavelka/AT21CS11/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.1.0
 [1.0.0]: https://github.com/janhavelka/AT21CS11/releases/tag/v1.0.0
