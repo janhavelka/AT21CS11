@@ -13,8 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         environment:
-          - ex_bringup_s3
-          - ex_bringup_s2
+          - ex_cli_s3
+          - ex_cli_s2
 
     steps:
       - name: Checkout repository
