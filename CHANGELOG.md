@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-04-05
+
+### Changed
+- README now explicitly marks `examples/common/LoadCellMap.h` as example-only scaffolding instead of a stable installed header.
+- The load-cell mapping example now tells downstream users to copy or adapt the helper into their own project rather than depending on the example path as public API.
+
 ## [1.2.0] - 2026-03-01
 
 ### Changed
@@ -70,7 +76,8 @@ All notable changes to this project are documented here.
 ### Added
 - Initial production-ready release for AT21CS01 + AT21CS11.
 
-[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/janhavelka/AT21CS11/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/janhavelka/AT21CS11/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/janhavelka/AT21CS11/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/janhavelka/AT21CS11/compare/v1.1.0...v1.1.1

@@ -120,11 +120,15 @@ This is a practical layout for a production load-cell module where some fields m
 | EEPROM Zone 2 | `0x40..0x5F` | Mutable operating state: installation tare, customer offset trim, filter profile, last service flags, rolling sequence + CRC | Yes |
 | EEPROM Zone 3 | `0x60..0x7F` | Mutable lifecycle counters: overload events, overtemperature events, power cycles, service cycles (wear-leveled journal) | Yes |
 
-### Implemented helper: `LoadCellMap.h`
+### Implemented helper: `LoadCellMap.h` (example-only)
 
 A full, production-style map helper is provided in:
 
 - `examples/common/LoadCellMap.h`
+
+This file is part of the example scaffolding, not the public driver include surface.
+Treat it as a reference implementation to copy or adapt into your own project rather
+than a stable library header dependency.
 
 It includes:
 - Fixed addresses and field offsets for identity/calibration/runtime/counter records.
@@ -136,7 +140,7 @@ It includes:
 Quick usage:
 
 ```cpp
-#include "examples/common/LoadCellMap.h"
+#include "examples/common/LoadCellMap.h"  // Example-local helper, not installed as part of the library
 
 lcmap::CalibrationBlockV1 cal = {};
 cal.capacityGrams = 50000;
