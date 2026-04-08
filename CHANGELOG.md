@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-08
+
+### Added
+- **`writeEeprom(addr, data, len)`** — multi-page EEPROM write with automatic page-boundary splitting and `waitReady` between pages.
+- **`writeSecurityUser(addr, data, len)`** — multi-page security register write for the user area (0x10–0x1F).
+- **CLI: `e_dump <addr> <len>`** — hex+ASCII memory dump (16 bytes/line with `|ASCII|` column).
+- **CLI: `e_text <addr> <len>`** — escaped text view of EEPROM contents.
+- **CLI: `e_fill <addr> <value> <len>`** — fill EEPROM region with a byte value.
+- **CLI: `e_verify <addr> <v0> [..vN]`** — verify EEPROM contents against expected bytes with mismatch reporting.
+- **CLI: `e_crc <addr> <len>`** — CRC-32 (IEEE 802.3) over an EEPROM region.
+- **CLI: `e_strings [addr] [len] [min]`** — scan for printable ASCII strings in EEPROM.
+- **CLI: `s_dump <addr> <len>`** — hex+ASCII dump for the security register.
+- **CLI: `stress_rw [N]`** — write-verify stress test (write → waitReady → read → compare).
+- **CLI: `speed [N]`** — per-operation speed benchmark with min/max/avg µs table.
+- Character literal support in CLI byte arguments (e.g. `e_write 0 'A'`).
+
+### Changed
+- `printStatus()` output format unified with other I2C libraries: two-line `Status: OK (code=0, detail=0)` + `Message:` (message line suppressed on success).
+- `printHealth()` output reformatted to labeled multi-line style matching other I2C libraries.
+- `stress` and `stress_mix` summary output unified to `Target/Attempts/Success/Errors/Duration/Rate` format.
+- Help text reorganized into five sections: Common, Device, EEPROM And Security, Diagnostics, Load Cell Map.
+- `e_read` max length increased from 32 to 128 bytes (full EEPROM).
+- `e_fill` now uses the new `writeEeprom()` driver method instead of manual page splitting.
+
 ## [1.2.1] - 2026-04-05
 
 ### Changed
@@ -76,7 +100,8 @@ All notable changes to this project are documented here.
 ### Added
 - Initial production-ready release for AT21CS01 + AT21CS11.
 
-[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/janhavelka/AT21CS11/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/janhavelka/AT21CS11/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/janhavelka/AT21CS11/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/janhavelka/AT21CS11/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/janhavelka/AT21CS11/compare/v1.1.1...v1.1.2
