@@ -45,6 +45,311 @@ void printBytes(const uint8_t* data, size_t len) {
   Serial.println();
 }
 
+// ---------------------------------------------------------------------------
+// Hex dump (MB85RC-style: address column + 16 hex bytes + |ASCII|)
+// ---------------------------------------------------------------------------
+void printHexDump(uint8_t startAddr, const uint8_t* data, size_t len) {
+  for (size_t offset = 0; offset < len;) {
+    const uint8_t lineAddr = static_cast<uint8_t>((startAddr + offset) & 0x7F);
+    size_t lineLen = len - offset;
+    if (lineLen > 16) lineLen = 16;
+    const size_t untilWrap = static_cast<size_t>(AT21CS::cmd::EEPROM_SIZE - lineAddr);
+    if (lineLen > untilWrap) lineLen = untilWrap;
+
+    Serial.printf("  %02X: ", lineAddr);
+    for (size_t i = 0; i < lineLen; ++i) {
+      Serial.printf("%02X ", data[offset + i]);
+    }
+    for (size_t i = lineLen; i < 16; ++i) {
+      Serial.print("   ");
+    }
+    Serial.print(" |");
+    for (size_t i = 0; i < lineLen; ++i) {
+      const char c = static_cast<char>(data[offset + i]);
+      Serial.print((c >= 0x20 && c < 0x7F) ? c : '.');
+    }
+    Serial.println("|");
+    offset += lineLen;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Escaped text view (MB85RC-style)
+// ---------------------------------------------------------------------------
+void printEscapedByte(uint8_t value) {
+  switch (value) {
+    case '\\': Serial.print("\\\\"); return;
+    case '"':  Serial.print("\\\""); return;
+    case '\r': Serial.print("\\r");  return;
+    case '\n': Serial.print("\\n");  return;
+    case '\t': Serial.print("\\t");  return;
+    case '\0': Serial.print("\\0");  return;
+    default: break;
+  }
+  if (value >= 0x20U && value <= 0x7EU) {
+    Serial.write(static_cast<char>(value));
+  } else {
+    Serial.printf("\\x%02X", value);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CRC-32 (IEEE 802.3) over a memory region
+// ---------------------------------------------------------------------------
+uint32_t crc32Update(uint32_t crc, const uint8_t* data, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    crc ^= static_cast<uint32_t>(data[i]);
+    for (uint8_t bit = 0; bit < 8U; ++bit) {
+      if ((crc & 1U) != 0U) {
+        crc = (crc >> 1) ^ 0xEDB88320UL;
+      } else {
+        crc >>= 1;
+      }
+    }
+  }
+  return crc;
+}
+
+// ---------------------------------------------------------------------------
+// Stress stats (MB85RC-style summary block)
+// ---------------------------------------------------------------------------
+struct StressStats {
+  bool active = false;
+  uint32_t startMs = 0;
+  uint32_t endMs = 0;
+  int target = 0;
+  int attempts = 0;
+  int success = 0;
+  uint32_t errors = 0;
+  AT21CS::Status lastError = AT21CS::Status::Ok();
+};
+
+StressStats gStressStats;
+
+void resetStressStats(int target) {
+  gStressStats.active = true;
+  gStressStats.startMs = millis();
+  gStressStats.endMs = 0;
+  gStressStats.target = target;
+  gStressStats.attempts = 0;
+  gStressStats.success = 0;
+  gStressStats.errors = 0;
+  gStressStats.lastError = AT21CS::Status::Ok();
+}
+
+void finishStressStats() {
+  gStressStats.active = false;
+  gStressStats.endMs = millis();
+  const uint32_t durationMs = gStressStats.endMs - gStressStats.startMs;
+
+  Serial.println("=== Stress Summary ===");
+  Serial.printf("  Target: %d\n", gStressStats.target);
+  Serial.printf("  Attempts: %d\n", gStressStats.attempts);
+  Serial.printf("  Success: %s%d%s\n",
+                goodIfNonZeroColor(static_cast<uint32_t>(gStressStats.success)),
+                gStressStats.success,
+                LOG_COLOR_RESET);
+  Serial.printf("  Errors: %s%lu%s\n",
+                goodIfZeroColor(gStressStats.errors),
+                static_cast<unsigned long>(gStressStats.errors),
+                LOG_COLOR_RESET);
+  Serial.printf("  Duration: %lu ms\n", static_cast<unsigned long>(durationMs));
+  if (durationMs > 0) {
+    const float rate = 1000.0f * static_cast<float>(gStressStats.attempts) /
+                       static_cast<float>(durationMs);
+    Serial.printf("  Rate: %.2f ops/s\n", rate);
+  }
+  if (!gStressStats.lastError.ok()) {
+    Serial.printf("  Last error: %s\n", ex::errToStr(gStressStats.lastError.code));
+    if (gStressStats.lastError.msg && gStressStats.lastError.msg[0]) {
+      Serial.printf("  Message: %s\n", gStressStats.lastError.msg);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Write-verify stress (write byte -> waitReady -> read back -> compare)
+// ---------------------------------------------------------------------------
+void runWriteVerifyStress(int count) {
+  resetStressStats(count);
+  const uint32_t succBefore = gDevice.totalSuccess();
+  const uint32_t failBefore = gDevice.totalFailures();
+
+  for (int i = 0; i < count; ++i) {
+    gStressStats.attempts++;
+    const uint8_t addr = static_cast<uint8_t>(i % AT21CS::cmd::EEPROM_SIZE);
+    const uint8_t pattern = static_cast<uint8_t>(i & 0xFF);
+
+    AT21CS::Status st = gDevice.writeEepromByte(addr, pattern);
+    if (!st.ok()) {
+      gStressStats.errors++;
+      gStressStats.lastError = st;
+      if (gVerbose) {
+        Serial.printf("  [%d] write 0x%02X@0x%02X failed: %s\n", i, pattern, addr, ex::errToStr(st.code));
+      }
+      continue;
+    }
+
+    st = gDevice.waitReady(10);
+    if (!st.ok()) {
+      gStressStats.errors++;
+      gStressStats.lastError = st;
+      if (gVerbose) {
+        Serial.printf("  [%d] waitReady failed: %s\n", i, ex::errToStr(st.code));
+      }
+      continue;
+    }
+
+    uint8_t readBack = 0;
+    st = gDevice.readEeprom(addr, &readBack, 1);
+    if (!st.ok()) {
+      gStressStats.errors++;
+      gStressStats.lastError = st;
+      if (gVerbose) {
+        Serial.printf("  [%d] read 0x%02X failed: %s\n", i, addr, ex::errToStr(st.code));
+      }
+      continue;
+    }
+
+    if (readBack != pattern) {
+      gStressStats.errors++;
+      gStressStats.lastError = AT21CS::Status::Error(AT21CS::Err::IO_ERROR, "data mismatch");
+      if (gVerbose) {
+        Serial.printf("  [%d] mismatch @ 0x%02X: wrote 0x%02X read 0x%02X\n", i, addr, pattern, readBack);
+      }
+      continue;
+    }
+
+    gStressStats.success++;
+    gDevice.tick(millis());
+  }
+
+  const uint32_t successDelta = gDevice.totalSuccess() - succBefore;
+  const uint32_t failDelta = gDevice.totalFailures() - failBefore;
+
+  finishStressStats();
+  Serial.printf("  Health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
+                goodIfNonZeroColor(successDelta),
+                static_cast<unsigned long>(successDelta),
+                LOG_COLOR_RESET,
+                goodIfZeroColor(failDelta),
+                static_cast<unsigned long>(failDelta),
+                LOG_COLOR_RESET);
+}
+
+// ---------------------------------------------------------------------------
+// Speed test - per-operation timing (min/max/avg µs)
+// ---------------------------------------------------------------------------
+struct OpTiming {
+  const char* name;
+  uint32_t minUs;
+  uint32_t maxUs;
+  uint64_t totalUs;
+  uint32_t count;
+  uint32_t errors;
+};
+
+void runSpeedTest(int iterations) {
+  OpTiming ops[] = {
+    {"probe",         UINT32_MAX, 0, 0, 0, 0},
+    {"readCurrent",   UINT32_MAX, 0, 0, 0, 0},
+    {"readEeprom(1)", UINT32_MAX, 0, 0, 0, 0},
+    {"readEeprom(8)", UINT32_MAX, 0, 0, 0, 0},
+    {"writeByte+wait",UINT32_MAX, 0, 0, 0, 0},
+    {"readMfgId",     UINT32_MAX, 0, 0, 0, 0},
+    {"readSerial",    UINT32_MAX, 0, 0, 0, 0},
+    {"waitReady",     UINT32_MAX, 0, 0, 0, 0},
+  };
+  const int opCount = static_cast<int>(sizeof(ops) / sizeof(ops[0]));
+
+  Serial.printf("=== Speed Test (%d iterations per operation) ===\n", iterations);
+
+  for (int iter = 0; iter < iterations; ++iter) {
+    for (int op = 0; op < opCount; ++op) {
+      const uint32_t t0 = micros();
+      AT21CS::Status st = AT21CS::Status::Ok();
+
+      switch (op) {
+        case 0:
+          st = gDevice.probe();
+          break;
+        case 1: {
+          uint8_t val = 0;
+          st = gDevice.readCurrentAddress(val);
+          break;
+        }
+        case 2: {
+          uint8_t buf[1];
+          st = gDevice.readEeprom(0x00, buf, 1);
+          break;
+        }
+        case 3: {
+          uint8_t buf[8];
+          st = gDevice.readEeprom(0x00, buf, 8);
+          break;
+        }
+        case 4: {
+          st = gDevice.writeEepromByte(0x7F, static_cast<uint8_t>(iter & 0xFF));
+          if (st.ok()) {
+            st = gDevice.waitReady(10);
+          }
+          break;
+        }
+        case 5: {
+          uint32_t id = 0;
+          st = gDevice.readManufacturerId(id);
+          break;
+        }
+        case 6: {
+          AT21CS::SerialNumberInfo sn = {};
+          st = gDevice.readSerialNumber(sn);
+          break;
+        }
+        case 7:
+          st = gDevice.waitReady(10);
+          break;
+        default:
+          break;
+      }
+
+      const uint32_t elapsed = micros() - t0;
+
+      if (st.ok()) {
+        if (elapsed < ops[op].minUs) ops[op].minUs = elapsed;
+        if (elapsed > ops[op].maxUs) ops[op].maxUs = elapsed;
+        ops[op].totalUs += elapsed;
+        ops[op].count++;
+      } else {
+        ops[op].errors++;
+      }
+    }
+    gDevice.tick(millis());
+  }
+
+  Serial.printf("  %-18s %8s %8s %8s %6s %6s\n", "Operation", "Min(us)", "Max(us)", "Avg(us)", "OK", "Err");
+  Serial.printf("  %-18s %8s %8s %8s %6s %6s\n", "------------------", "--------", "--------", "--------", "------", "------");
+  for (int i = 0; i < opCount; ++i) {
+    const uint32_t avgUs = (ops[i].count > 0) ? static_cast<uint32_t>(ops[i].totalUs / ops[i].count) : 0;
+    Serial.printf("  %-18s %s%8lu%s %s%8lu%s %s%8lu%s %s%6lu%s %s%6lu%s\n",
+                  ops[i].name,
+                  LOG_COLOR_GREEN,
+                  ops[i].count > 0 ? static_cast<unsigned long>(ops[i].minUs) : 0UL,
+                  LOG_COLOR_RESET,
+                  LOG_COLOR_YELLOW,
+                  static_cast<unsigned long>(ops[i].maxUs),
+                  LOG_COLOR_RESET,
+                  LOG_COLOR_CYAN,
+                  static_cast<unsigned long>(avgUs),
+                  LOG_COLOR_RESET,
+                  goodIfNonZeroColor(ops[i].count),
+                  static_cast<unsigned long>(ops[i].count),
+                  LOG_COLOR_RESET,
+                  goodIfZeroColor(ops[i].errors),
+                  static_cast<unsigned long>(ops[i].errors),
+                  LOG_COLOR_RESET);
+  }
+}
+
 const char* sourceToStr(lcmap::CalibrationSource source) {
   switch (source) {
     case lcmap::CalibrationSource::MASTER:
@@ -260,24 +565,23 @@ void runStressMix(int count) {
   }
 
   Serial.println("=== stress_mix summary ===");
-  const float successPct =
-      (count > 0) ? (100.0f * static_cast<float>(totalOk) / static_cast<float>(count)) : 0.0f;
-  Serial.printf("  Total: %sok=%lu%s %sfail=%lu%s (%s%.2f%%%s)\n",
+  Serial.printf("  Target: %d\n", count);
+  Serial.printf("  Attempts: %d\n", count);
+  Serial.printf("  Success: %s%lu%s\n",
                 goodIfNonZeroColor(totalOk),
                 static_cast<unsigned long>(totalOk),
-                LOG_COLOR_RESET,
+                LOG_COLOR_RESET);
+  Serial.printf("  Errors: %s%lu%s\n",
                 goodIfZeroColor(totalFail),
                 static_cast<unsigned long>(totalFail),
-                LOG_COLOR_RESET,
-                successRateColor(successPct),
-                successPct,
                 LOG_COLOR_RESET);
   Serial.printf("  Duration: %lu ms\n", static_cast<unsigned long>(elapsed));
   if (elapsed > 0) {
     Serial.printf("  Rate: %.2f ops/s\n", (1000.0f * static_cast<float>(count)) / elapsed);
   }
+  Serial.println("  Per-operation breakdown:");
   for (int i = 0; i < opCount; ++i) {
-    Serial.printf("  %-11s %sok=%lu%s %sfail=%lu%s\n",
+    Serial.printf("    %-11s %sok=%lu%s %sfail=%lu%s\n",
                   ops[i].name,
                   goodIfNonZeroColor(ops[i].ok),
                   static_cast<unsigned long>(ops[i].ok),
@@ -288,7 +592,7 @@ void runStressMix(int count) {
   }
   const uint32_t successDelta = gDevice.totalSuccess() - succBefore;
   const uint32_t failDelta = gDevice.totalFailures() - failBefore;
-  Serial.printf("  Health delta: %ssuccess +%lu%s failures %s+%lu%s\n",
+  Serial.printf("  Health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
                 goodIfNonZeroColor(successDelta),
                 static_cast<unsigned long>(successDelta),
                 LOG_COLOR_RESET,
@@ -477,13 +781,10 @@ void printHelp() {
   helpItem("scan", "Bus scan helper");
   helpItem("probe", "Probe and detect device");
   helpItem("recover", "Manual recovery");
-  helpItem("drv", "Print health counters and state");
+  helpItem("drv / health", "Print health counters and state");
   helpItem("read", "Read current address byte");
   helpItem("cfg / settings", "Show active config snapshot");
   helpItem("verbose [0|1]", "Set or get verbose mode");
-  helpItem("stress [N]", "Repeat probe N times");
-  helpItem("stress_mix [N]", "Mixed safe operations");
-  helpItem("selftest", "Safe command self-test report");
 
   helpSection("Device");
   helpItem("present", "Run presence check");
@@ -498,13 +799,19 @@ void printHelp() {
   helpItem("crc8 <b0> [b1..bN]", "Compute CRC8-0x31 over bytes");
   helpItem("current", "Current address read");
   helpItem("wait [timeout_ms]", "waitReady polling");
-  helpItem("health", "Print health counters and state");
 
   helpSection("EEPROM And Security");
-  helpItem("e_read <addr> <len>", "EEPROM read");
+  helpItem("e_read <addr> <len>", "EEPROM read (raw hex bytes)");
+  helpItem("e_dump <addr> <len>", "EEPROM hex+ASCII dump");
+  helpItem("e_text <addr> <len>", "EEPROM escaped text view");
   helpItem("e_write <addr> <value>", "EEPROM byte write");
-  helpItem("e_page <addr> <v0> [..v7]", "EEPROM page write");
+  helpItem("e_page <addr> <v0> [..v7]", "EEPROM page write (up to 8 bytes)");
+  helpItem("e_fill <addr> <value> <len>", "Fill EEPROM region with a byte");
+  helpItem("e_verify <addr> <v0> [..vN]", "Verify EEPROM matches expected bytes");
+  helpItem("e_crc <addr> <len>", "CRC-32 over EEPROM region");
+  helpItem("e_strings [addr] [len] [min]", "Scan printable ASCII strings in EEPROM");
   helpItem("s_read <addr> <len>", "Security read");
+  helpItem("s_dump <addr> <len>", "Security hex+ASCII dump");
   helpItem("s_write <addr> <value>", "Security user byte write");
   helpItem("s_page <addr> <v0> [..v7]", "Security user page write");
   helpItem("s_locked", "Check security lock");
@@ -515,6 +822,13 @@ void printHelp() {
   helpItem("set_rom <0..3>", "Set zone to ROM");
   helpItem("frozen", "Check if ROM zones are frozen");
   helpItem("freeze", "Freeze ROM zone configuration");
+
+  helpSection("Diagnostics");
+  helpItem("selftest", "Safe command self-test report");
+  helpItem("stress [N]", "Repeat probe N times (read-only)");
+  helpItem("stress_mix [N]", "Mixed safe operations (read-only)");
+  helpItem("stress_rw [N]", "Write-verify stress (write+read+compare)");
+  helpItem("speed [N]", "Per-operation speed test (min/max/avg µs)");
 
   helpSection("Load Cell Map");
   helpItem("lc_layout", "Print full load-cell map layout");
@@ -637,46 +951,35 @@ void loop() {
       count = tokens[1].toInt();
       if (count <= 0) count = 100;
     }
-    int ok = 0;
-    int fail = 0;
-    bool hasFailure = false;
-    AT21CS::Status firstFailure = AT21CS::Status::Ok();
-    AT21CS::Status lastFailure = AT21CS::Status::Ok();
+    resetStressStats(count);
+    const uint32_t succBefore = gDevice.totalSuccess();
+    const uint32_t failBefore = gDevice.totalFailures();
+
     for (int i = 0; i < count; ++i) {
+      gStressStats.attempts++;
       const AT21CS::Status st = gDevice.probe();
       if (st.ok()) {
-        ++ok;
+        gStressStats.success++;
       } else {
-        ++fail;
-        if (!hasFailure) {
-          firstFailure = st;
-          hasFailure = true;
+        gStressStats.errors++;
+        gStressStats.lastError = st;
+        if (gVerbose) {
+          Serial.printf("  [%d] probe failed: %s\n", i, ex::errToStr(st.code));
         }
-        lastFailure = st;
       }
       gDevice.tick(millis());
     }
-    const float successPct = (count > 0) ? (100.0f * static_cast<float>(ok) / static_cast<float>(count)) : 0.0f;
-    Serial.printf("stress: %sok=%d%s %sfail=%d%s total=%d (%s%.2f%%%s)\n",
-                  goodIfNonZeroColor(static_cast<uint32_t>(ok)),
-                  ok,
+
+    const uint32_t successDelta = gDevice.totalSuccess() - succBefore;
+    const uint32_t failDelta = gDevice.totalFailures() - failBefore;
+    finishStressStats();
+    Serial.printf("  Health delta: %ssuccess +%lu%s, %sfailures +%lu%s\n",
+                  goodIfNonZeroColor(successDelta),
+                  static_cast<unsigned long>(successDelta),
                   LOG_COLOR_RESET,
-                  goodIfZeroColor(static_cast<uint32_t>(fail)),
-                  fail,
-                  LOG_COLOR_RESET,
-                  count,
-                  successRateColor(successPct),
-                  successPct,
+                  goodIfZeroColor(failDelta),
+                  static_cast<unsigned long>(failDelta),
                   LOG_COLOR_RESET);
-    if (hasFailure) {
-      Serial.println("failure details:");
-      Serial.println("  first failure:");
-      ex::printStatus(firstFailure);
-      if (fail > 1) {
-        Serial.println("  last failure:");
-        ex::printStatus(lastFailure);
-      }
-    }
   } else if (tokens[0] == "stress_mix") {
     int count = 100;
     if (argc >= 2) {
@@ -854,6 +1157,20 @@ void loop() {
     }
   } else if (tokens[0] == "selftest") {
     runSelfTest();
+  } else if (tokens[0] == "stress_rw") {
+    int count = 20;
+    if (argc >= 2) {
+      count = tokens[1].toInt();
+      if (count <= 0) count = 20;
+    }
+    runWriteVerifyStress(count);
+  } else if (tokens[0] == "speed") {
+    int iterations = 10;
+    if (argc >= 2) {
+      iterations = tokens[1].toInt();
+      if (iterations <= 0) iterations = 10;
+    }
+    runSpeedTest(iterations);
   } else if (tokens[0] == "present") {
     bool present = false;
     ex::printStatus(gDevice.isPresent(present));
@@ -917,13 +1234,52 @@ void loop() {
   } else if (tokens[0] == "e_read" && argc >= 3) {
     uint8_t addr = 0;
     uint8_t len = 0;
-    if (!ex::parseU8(tokens[1], addr) || !ex::parseU8(tokens[2], len) || len == 0 || len > 32) {
-      Serial.println("Usage: e_read <addr> <len 1..32>");
+    if (!ex::parseU8(tokens[1], addr) || !ex::parseU8(tokens[2], len) || len == 0 || len > 128) {
+      Serial.println("Usage: e_read <addr> <len 1..128>");
     } else {
-      uint8_t data[32] = {0};
-      ex::printStatus(gDevice.readEeprom(addr, data, len));
-      Serial.print("data=");
-      printBytes(data, len);
+      uint8_t data[128] = {0};
+      const AT21CS::Status st = gDevice.readEeprom(addr, data, len);
+      ex::printStatus(st);
+      if (st.ok()) {
+        Serial.print("  data=");
+        printBytes(data, len);
+      }
+    }
+  } else if (tokens[0] == "e_dump" && argc >= 3) {
+    uint8_t addr = 0;
+    uint8_t len = 0;
+    if (!ex::parseU8(tokens[1], addr) || !ex::parseU8(tokens[2], len) || len == 0 || len > 128) {
+      Serial.println("Usage: e_dump <addr> <len 1..128>");
+    } else {
+      uint8_t data[128] = {0};
+      const AT21CS::Status st = gDevice.readEeprom(addr, data, len);
+      ex::printStatus(st);
+      if (st.ok()) {
+        printHexDump(addr, data, len);
+      }
+    }
+  } else if (tokens[0] == "e_text" && argc >= 3) {
+    uint8_t addr = 0;
+    uint8_t len = 0;
+    if (!ex::parseU8(tokens[1], addr) || !ex::parseU8(tokens[2], len) || len == 0 || len > 128) {
+      Serial.println("Usage: e_text <addr> <len 1..128>");
+    } else {
+      uint8_t data[128] = {0};
+      const AT21CS::Status st = gDevice.readEeprom(addr, data, len);
+      ex::printStatus(st);
+      if (st.ok()) {
+        for (size_t offset = 0; offset < len;) {
+          const uint8_t lineAddr = static_cast<uint8_t>((addr + offset) & 0x7F);
+          size_t lineLen = len - offset;
+          if (lineLen > 32U) lineLen = 32U;
+          Serial.printf("  %02X: \"", lineAddr);
+          for (size_t i = 0; i < lineLen; ++i) {
+            printEscapedByte(data[offset + i]);
+          }
+          Serial.println("\"");
+          offset += lineLen;
+        }
+      }
     }
   } else if (tokens[0] == "e_write" && argc >= 3) {
     uint8_t addr = 0;
@@ -954,6 +1310,129 @@ void loop() {
         ex::printStatus(gDevice.writeEepromPage(addr, data, len));
       }
     }
+  } else if (tokens[0] == "e_fill" && argc >= 4) {
+    uint8_t addr = 0;
+    uint8_t value = 0;
+    uint8_t len = 0;
+    if (!ex::parseU8(tokens[1], addr) || !ex::parseU8(tokens[2], value) ||
+        !ex::parseU8(tokens[3], len) || len == 0) {
+      Serial.println("Usage: e_fill <addr> <value> <len>");
+    } else {
+      uint8_t buf[128];
+      memset(buf, value, len);
+      const AT21CS::Status st = gDevice.writeEeprom(addr, buf, len);
+      ex::printStatus(st);
+      if (st.ok()) {
+        Serial.printf("  Filled %u bytes at 0x%02X with 0x%02X\n", len, addr, value);
+      }
+    }
+  } else if (tokens[0] == "e_verify" && argc >= 3) {
+    uint8_t addr = 0;
+    if (!ex::parseU8(tokens[1], addr)) {
+      Serial.println("Usage: e_verify <addr> <v0> [..vN]");
+    } else {
+      uint8_t expected[64] = {0};
+      size_t len = 0;
+      bool parseOk = true;
+      for (int i = 2; i < argc && len < 64; ++i) {
+        uint8_t v = 0;
+        if (!ex::parseU8(tokens[i], v)) {
+          parseOk = false;
+          break;
+        }
+        expected[len++] = v;
+      }
+      if (!parseOk || len == 0) {
+        Serial.println("Usage: e_verify <addr> <v0> [..vN]");
+      } else {
+        uint8_t actual[64] = {0};
+        const AT21CS::Status st = gDevice.readEeprom(addr, actual, len);
+        ex::printStatus(st);
+        if (st.ok()) {
+          bool match = true;
+          for (size_t i = 0; i < len; ++i) {
+            if (actual[i] != expected[i]) {
+              Serial.printf("  %sMismatch%s at 0x%02X: expected=0x%02X actual=0x%02X\n",
+                            LOG_COLOR_RED, LOG_COLOR_RESET,
+                            static_cast<uint8_t>(addr + i), expected[i], actual[i]);
+              match = false;
+            }
+          }
+          if (match) {
+            Serial.printf("  %sVerify OK%s: %u bytes at 0x%02X match\n",
+                          LOG_COLOR_GREEN, LOG_COLOR_RESET,
+                          static_cast<unsigned>(len), addr);
+          }
+        }
+      }
+    }
+  } else if (tokens[0] == "e_crc" && argc >= 3) {
+    uint8_t addr = 0;
+    uint8_t len = 0;
+    if (!ex::parseU8(tokens[1], addr) || !ex::parseU8(tokens[2], len) || len == 0 || len > 128) {
+      Serial.println("Usage: e_crc <addr> <len 1..128>");
+    } else {
+      uint8_t data[128] = {0};
+      const AT21CS::Status st = gDevice.readEeprom(addr, data, len);
+      ex::printStatus(st);
+      if (st.ok()) {
+        uint32_t crc = crc32Update(0xFFFFFFFFUL, data, len);
+        crc ^= 0xFFFFFFFFUL;
+        Serial.printf("  CRC32[0x%02X + %u] = 0x%08lX\n", addr,
+                      static_cast<unsigned>(len), static_cast<unsigned long>(crc));
+      }
+    }
+  } else if (tokens[0] == "e_strings") {
+    uint8_t addr = 0x00;
+    uint8_t len = static_cast<uint8_t>(AT21CS::cmd::EEPROM_SIZE);
+    uint8_t minLen = 4;
+    if (argc >= 2 && !ex::parseU8(tokens[1], addr)) {
+      Serial.println("Usage: e_strings [addr] [len] [minLen]");
+    } else {
+      if (argc >= 3) ex::parseU8(tokens[2], len);
+      if (argc >= 4) ex::parseU8(tokens[3], minLen);
+      if (len == 0 || len > 128) len = static_cast<uint8_t>(AT21CS::cmd::EEPROM_SIZE);
+      if (minLen == 0) minLen = 1;
+      uint8_t data[128] = {0};
+      const AT21CS::Status st = gDevice.readEeprom(addr, data, len);
+      ex::printStatus(st);
+      if (st.ok()) {
+        uint32_t matches = 0;
+        uint8_t strStart = 0;
+        uint8_t strLen = 0;
+        for (uint8_t i = 0; i < len; ++i) {
+          const uint8_t c = data[i];
+          if (c >= 0x20U && c <= 0x7EU) {
+            if (strLen == 0) strStart = static_cast<uint8_t>(addr + i);
+            strLen++;
+          } else {
+            if (strLen >= minLen) {
+              Serial.printf("  %02X len=%u \"", strStart, strLen);
+              for (uint8_t j = static_cast<uint8_t>(i - strLen); j < i; ++j) {
+                printEscapedByte(data[j]);
+              }
+              Serial.println("\"");
+              matches++;
+            }
+            strLen = 0;
+          }
+        }
+        // Flush trailing string
+        if (strLen >= minLen) {
+          Serial.printf("  %02X len=%u \"", strStart, strLen);
+          for (uint8_t j = static_cast<uint8_t>(len - strLen); j < len; ++j) {
+            printEscapedByte(data[j]);
+          }
+          Serial.println("\"");
+          matches++;
+        }
+        if (matches == 0) {
+          Serial.println("  No printable strings found.");
+        } else {
+          Serial.printf("  Found %lu printable string(s).\n", static_cast<unsigned long>(matches));
+        }
+      }
+    }
   } else if (tokens[0] == "s_read" && argc >= 3) {
     uint8_t addr = 0;
     uint8_t len = 0;
@@ -961,9 +1440,25 @@ void loop() {
       Serial.println("Usage: s_read <addr> <len 1..32>");
     } else {
       uint8_t data[32] = {0};
-      ex::printStatus(gDevice.readSecurity(addr, data, len));
-      Serial.print("data=");
-      printBytes(data, len);
+      const AT21CS::Status st = gDevice.readSecurity(addr, data, len);
+      ex::printStatus(st);
+      if (st.ok()) {
+        Serial.print("  data=");
+        printBytes(data, len);
+      }
+    }
+  } else if (tokens[0] == "s_dump" && argc >= 3) {
+    uint8_t addr = 0;
+    uint8_t len = 0;
+    if (!ex::parseU8(tokens[1], addr) || !ex::parseU8(tokens[2], len) || len == 0 || len > 32) {
+      Serial.println("Usage: s_dump <addr> <len 1..32>");
+    } else {
+      uint8_t data[32] = {0};
+      const AT21CS::Status st = gDevice.readSecurity(addr, data, len);
+      ex::printStatus(st);
+      if (st.ok()) {
+        printHexDump(addr, data, len);
+      }
     }
   } else if (tokens[0] == "s_write" && argc >= 3) {
     uint8_t addr = 0;

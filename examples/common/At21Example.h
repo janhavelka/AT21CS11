@@ -96,13 +96,15 @@ inline const char* speedToStr(AT21CS::SpeedMode speed) {
 }
 
 inline void printStatus(const AT21CS::Status& st) {
-  Serial.printf("status=%s%s%s code=%u detail=%ld msg=%s\n",
+  Serial.printf("  Status: %s%s%s (code=%u, detail=%ld)\n",
                 LOG_COLOR_RESULT(st.ok()),
                 errToStr(st.code),
                 LOG_COLOR_RESET,
                 static_cast<unsigned>(st.code),
-                static_cast<long>(st.detail),
-                (st.msg != nullptr) ? st.msg : "");
+                static_cast<long>(st.detail));
+  if (!st.ok() && st.msg && st.msg[0]) {
+    Serial.printf("  Message: %s%s%s\n", LOG_COLOR_YELLOW, st.msg, LOG_COLOR_RESET);
+  }
 }
 
 inline void printHealth(const AT21CS::Driver& driver) {
@@ -121,57 +123,60 @@ inline void printHealth(const AT21CS::Driver& driver) {
           : LOG_COLOR_STATE(online, driver.consecutiveFailures());
 
   Serial.println("=== Driver Health ===");
-  Serial.printf("state=%s%s%s online=%s%s%s\n",
+  Serial.printf("  State: %s%s%s\n",
                 color,
                 stateToStr(state),
-                LOG_COLOR_RESET,
+                LOG_COLOR_RESET);
+  Serial.printf("  Online: %s%s%s\n",
                 online ? LOG_COLOR_GREEN : LOG_COLOR_RED,
                 log_bool_str(online),
                 LOG_COLOR_RESET);
-  const char* failColor = (driver.consecutiveFailures() == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_RED;
-  const char* totalFailColor = (totalFail == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_RED;
-  const char* totalOkColor = (totalOk > 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW;
-  const char* successRateColor = (successRate >= 99.9f) ? LOG_COLOR_GREEN :
-                                 (successRate >= 80.0f) ? LOG_COLOR_YELLOW : LOG_COLOR_RED;
-  Serial.printf("failures=%s%u%s totalFail=%s%lu%s totalOk=%s%lu%s successRate=%s%.1f%%%s\n",
-                failColor,
+  Serial.printf("  Consecutive failures: %s%u%s\n",
+                (driver.consecutiveFailures() == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_RED,
                 driver.consecutiveFailures(),
-                LOG_COLOR_RESET,
-                totalFailColor,
-                static_cast<unsigned long>(totalFail),
-                LOG_COLOR_RESET,
-                totalOkColor,
+                LOG_COLOR_RESET);
+  Serial.printf("  Total success: %s%lu%s\n",
+                (totalOk > 0U) ? LOG_COLOR_GREEN : LOG_COLOR_YELLOW,
                 static_cast<unsigned long>(totalOk),
-                LOG_COLOR_RESET,
-                successRateColor,
+                LOG_COLOR_RESET);
+  Serial.printf("  Total failures: %s%lu%s\n",
+                (totalFail == 0U) ? LOG_COLOR_GREEN : LOG_COLOR_RED,
+                static_cast<unsigned long>(totalFail),
+                LOG_COLOR_RESET);
+  Serial.printf("  Success rate: %s%.1f%%%s\n",
+                (successRate >= 99.9f) ? LOG_COLOR_GREEN :
+                (successRate >= 80.0f) ? LOG_COLOR_YELLOW : LOG_COLOR_RED,
                 successRate,
                 LOG_COLOR_RESET);
 
   const uint32_t lastOkMs = driver.lastOkMs();
-  const uint32_t lastErrorMs = driver.lastErrorMs();
   if (lastOkMs > 0U) {
-    Serial.printf("lastOk=%lu ms ago (at %lu ms)\n",
+    Serial.printf("  Last OK: %lu ms ago (at %lu ms)\n",
                   static_cast<unsigned long>(now - lastOkMs),
                   static_cast<unsigned long>(lastOkMs));
   } else {
-    Serial.println("lastOk=never");
+    Serial.println("  Last OK: never");
   }
+
+  const uint32_t lastErrorMs = driver.lastErrorMs();
   if (lastErrorMs > 0U) {
-    Serial.printf("lastError=%lu ms ago (at %lu ms)\n",
+    Serial.printf("  Last error: %lu ms ago (at %lu ms)\n",
                   static_cast<unsigned long>(now - lastErrorMs),
                   static_cast<unsigned long>(lastErrorMs));
   } else {
-    Serial.println("lastError=never");
+    Serial.println("  Last error: never");
   }
 
   const AT21CS::Status last = driver.lastError();
   if (!last.ok()) {
-    Serial.printf("lastErrorCode=%s%s%s detail=%ld msg=%s\n",
+    Serial.printf("  Error code: %s%s%s\n",
                   LOG_COLOR_RED,
                   errToStr(last.code),
-                  LOG_COLOR_RESET,
-                  static_cast<long>(last.detail),
-                  (last.msg != nullptr) ? last.msg : "");
+                  LOG_COLOR_RESET);
+    Serial.printf("  Error detail: %ld\n", static_cast<long>(last.detail));
+    if (last.msg && last.msg[0]) {
+      Serial.printf("  Error msg: %s\n", last.msg);
+    }
   }
 }
 
@@ -203,6 +208,11 @@ inline bool parseU32(const String& token, uint32_t& value) {
 }
 
 inline bool parseU8(const String& token, uint8_t& value) {
+  // Support character literals: 'A' -> 0x41
+  if (token.length() == 3 && token[0] == '\'' && token[2] == '\'') {
+    value = static_cast<uint8_t>(token[1]);
+    return true;
+  }
   uint32_t parsed = 0;
   if (!parseU32(token, parsed) || parsed > 0xFFU) {
     return false;

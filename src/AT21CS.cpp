@@ -465,6 +465,34 @@ Status Driver::writeEepromPage(uint8_t address, const uint8_t* data, size_t len)
   return st;
 }
 
+Status Driver::writeEeprom(uint8_t address, const uint8_t* data, size_t len) {
+  if (data == nullptr) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM write buffer is null");
+  }
+  if (len == 0) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM write length must be >= 1");
+  }
+  if (!rangeFits(address, len, cmd::EEPROM_SIZE)) {
+    return Status::Error(Err::INVALID_PARAM, "EEPROM write range out of bounds");
+  }
+
+  size_t offset = 0;
+  while (offset < len) {
+    const uint8_t curAddr = static_cast<uint8_t>(address + offset);
+    const uint8_t pageOffset = curAddr % cmd::PAGE_SIZE;
+    size_t chunk = cmd::PAGE_SIZE - pageOffset;
+    if (chunk > len - offset) {
+      chunk = len - offset;
+    }
+    Status st = writeEepromPage(curAddr, data + offset, chunk);
+    if (!st.ok()) {
+      return st;
+    }
+    offset += chunk;
+  }
+  return Status::Ok();
+}
+
 Status Driver::readSecurity(uint8_t address, uint8_t* data, size_t len) {
   Status st = _checkInitialized();
   if (!st.ok()) {
@@ -524,6 +552,38 @@ Status Driver::writeSecurityUserPage(uint8_t address, const uint8_t* data, size_
 
   st = waitReady(_config.writeTimeoutMs);
   return st;
+}
+
+Status Driver::writeSecurityUser(uint8_t address, const uint8_t* data, size_t len) {
+  if (data == nullptr) {
+    return Status::Error(Err::INVALID_PARAM, "Security write buffer is null");
+  }
+  if (len == 0) {
+    return Status::Error(Err::INVALID_PARAM, "Security write length must be >= 1");
+  }
+  if (!_isSecurityUserAddressValid(address)) {
+    return Status::Error(Err::INVALID_PARAM, "Security writes are allowed only in 0x10..0x1F");
+  }
+  const uint16_t endAddress = static_cast<uint16_t>(address) + static_cast<uint16_t>(len);
+  if (endAddress > static_cast<uint16_t>(cmd::SECURITY_USER_MAX) + 1U) {
+    return Status::Error(Err::INVALID_PARAM, "Security write exceeds user area 0x10..0x1F");
+  }
+
+  size_t offset = 0;
+  while (offset < len) {
+    const uint8_t curAddr = static_cast<uint8_t>(address + offset);
+    const uint8_t pageOffset = curAddr % cmd::PAGE_SIZE;
+    size_t chunk = cmd::PAGE_SIZE - pageOffset;
+    if (chunk > len - offset) {
+      chunk = len - offset;
+    }
+    Status st = writeSecurityUserPage(curAddr, data + offset, chunk);
+    if (!st.ok()) {
+      return st;
+    }
+    offset += chunk;
+  }
+  return Status::Ok();
 }
 
 Status Driver::lockSecurityRegister() {

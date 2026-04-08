@@ -91,11 +91,13 @@ class Driver {
   Status readEeprom(uint8_t address, uint8_t* data, size_t len);
   Status writeEepromByte(uint8_t address, uint8_t value);
   Status writeEepromPage(uint8_t address, const uint8_t* data, size_t len);
+  Status writeEeprom(uint8_t address, const uint8_t* data, size_t len);
 
   // Security register
   Status readSecurity(uint8_t address, uint8_t* data, size_t len);
   Status writeSecurityUserByte(uint8_t address, uint8_t value);
   Status writeSecurityUserPage(uint8_t address, const uint8_t* data, size_t len);
+  Status writeSecurityUser(uint8_t address, const uint8_t* data, size_t len);
   Status lockSecurityRegister();
   Status isSecurityLocked(bool& locked);
 
