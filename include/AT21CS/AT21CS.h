@@ -8,6 +8,12 @@
 #if defined(ARDUINO_ARCH_ESP32)
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
+#include <soc/gpio_reg.h>
+#include <esp_cpu.h>
+#include <esp_attr.h>
+#define AT21CS_IRAM IRAM_ATTR
+#else
+#define AT21CS_IRAM
 #endif
 
 #include "AT21CS/CommandTable.h"
@@ -127,9 +133,9 @@ class Driver {
   static constexpr TimingProfile HIGH_SPEED_TIMING = {
       12,  // bitUs
       8,   // low0Us
-      2,   // low1Us
+      1,   // low1Us   (actual ~1.6us with overhead, within t_LOW1 1-2us)
       1,   // readLowUs
-      3,   // readSampleUs
+      1,   // readSampleUs  (sample at t_RD+1 = 2us, within t_MRS ~3us and t_HLD0 min 2us)
       150  // htssUs
   };
 
@@ -147,7 +153,7 @@ class Driver {
   static constexpr uint16_t DISCHARGE_LOW_US = 150;
   static constexpr uint16_t RESET_RECOVERY_US = 10;
   static constexpr uint16_t DISCOVERY_REQUEST_US = 1;
-  static constexpr uint16_t DISCOVERY_STROBE_DELAY_US = 8;
+  static constexpr uint16_t DISCOVERY_STROBE_DELAY_US = 2;
   static constexpr uint16_t DISCOVERY_STROBE_US = 2;
   static constexpr uint16_t DISCOVERY_SAMPLE_DELAY_US = 1;
 
@@ -177,6 +183,7 @@ class Driver {
 
   // Protocol helpers (raw operations)
   uint8_t _deviceAddress(uint8_t opcode, bool read) const;
+  Status _activateDevice();
   Status _resetAndDiscoverRaw();
   Status _addressOnlyRaw(uint8_t opcode, bool read, bool& ack);
   Status _readRandomRaw(uint8_t opcode, uint8_t address, uint8_t* data, size_t len);
@@ -213,6 +220,12 @@ class Driver {
 
 #if defined(ARDUINO_ARCH_ESP32)
   mutable portMUX_TYPE _timingMux = portMUX_INITIALIZER_UNLOCKED;
+  // Direct-register GPIO for sub-microsecond bit-bang timing.
+  volatile uint32_t* _gpioSetReg = nullptr;
+  volatile uint32_t* _gpioClrReg = nullptr;
+  volatile uint32_t* _gpioInReg = nullptr;
+  uint32_t _gpioMask = 0;
+  uint32_t _cyclesPerUs = 240;  // CPU cycles per microsecond (cached at begin)
 #endif
 };
 }  // namespace AT21CS

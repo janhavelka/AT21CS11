@@ -10,6 +10,7 @@
 
 #if defined(ARDUINO_ARCH_ESP32)
 #include <driver/gpio.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
 #endif
@@ -221,21 +222,16 @@ Status Driver::probe() {
 
   if (_config.presencePin >= 0) {
     if (!_presencePinReportsPresent()) {
-      return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
+      return Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent");
     }
-    return _trackIo(Status::Ok());
+    return Status::Ok();
   }
 
   const DriverState previous = _driverState;
   _driverState = DriverState::PROBING;
   st = _resetAndDiscoverRaw();
-  if (!st.ok()) {
-    // Restore previous state; let _trackIo decide degradation.
-    _driverState = previous;
-    return _trackIo(st);
-  }
   _driverState = previous;
-  return _trackIo(st);
+  return st;
 }
 
 Status Driver::recover() {
@@ -400,6 +396,11 @@ Status Driver::readCurrentAddress(uint8_t& value) {
     return st;
   }
 
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   st = _readCurrentAddressRaw(value);
   return _trackIo(st);
 }
@@ -414,6 +415,11 @@ Status Driver::readEeprom(uint8_t address, uint8_t* data, size_t len) {
   }
   if (!rangeFits(address, len, cmd::EEPROM_SIZE)) {
     return Status::Error(Err::INVALID_PARAM, "EEPROM read range out of bounds");
+  }
+
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
   }
 
   st = _readRandomRaw(cmd::OPCODE_EEPROM, address, data, len);
@@ -445,6 +451,11 @@ Status Driver::writeEepromPage(uint8_t address, const uint8_t* data, size_t len)
     return Status::Error(Err::INVALID_PARAM, "EEPROM page write crosses page boundary");
   }
 
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   st = _writeRaw(cmd::OPCODE_EEPROM, address, data, len);
   if (!st.ok()) {
     return _trackIo(st);
@@ -464,6 +475,11 @@ Status Driver::readSecurity(uint8_t address, uint8_t* data, size_t len) {
   }
   if (!rangeFits(address, len, cmd::SECURITY_SIZE)) {
     return Status::Error(Err::INVALID_PARAM, "Security read range out of bounds");
+  }
+
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
   }
 
   st = _readRandomRaw(cmd::OPCODE_SECURITY, address, data, len);
@@ -496,6 +512,11 @@ Status Driver::writeSecurityUserPage(uint8_t address, const uint8_t* data, size_
     return Status::Error(Err::INVALID_PARAM, "Security page write crosses page boundary");
   }
 
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   st = _writeRaw(cmd::OPCODE_SECURITY, address, data, len);
   if (!st.ok()) {
     return _trackIo(st);
@@ -512,6 +533,11 @@ Status Driver::lockSecurityRegister() {
   }
 
   const uint8_t lockData = 0x00;
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   st = _writeRaw(cmd::OPCODE_LOCK_SECURITY, cmd::LOCK_SECURITY_ADDRESS, &lockData, 1);
   if (!st.ok()) {
     return _trackIo(st);
@@ -527,6 +553,11 @@ Status Driver::isSecurityLocked(bool& locked) {
   Status st = _checkInitialized();
   if (!st.ok()) {
     return st;
+  }
+
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
   }
 
   bool ack = false;
@@ -567,6 +598,11 @@ Status Driver::readManufacturerId(uint32_t& manufacturerId) {
     return st;
   }
 
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   st = _readManufacturerIdRaw(manufacturerId);
   return _trackIo(st);
 }
@@ -601,6 +637,11 @@ Status Driver::readRomZoneRegister(uint8_t zoneIndex, uint8_t& value) {
   }
 
   const uint8_t zoneRegisterAddress = cmd::ROM_ZONE_REGISTERS[zoneIndex];
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   st = _readRandomRaw(cmd::OPCODE_ROM_ZONE, zoneRegisterAddress, &value, 1);
   return _trackIo(st);
 }
@@ -628,6 +669,11 @@ Status Driver::setZoneRom(uint8_t zoneIndex) {
 
   const uint8_t zoneRegisterAddress = cmd::ROM_ZONE_REGISTERS[zoneIndex];
   const uint8_t value = cmd::ROM_ZONE_ROM_VALUE;
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   st = _writeRaw(cmd::OPCODE_ROM_ZONE, zoneRegisterAddress, &value, 1);
   if (!st.ok()) {
     return _trackIo(st);
@@ -644,6 +690,11 @@ Status Driver::freezeRomZones() {
   }
 
   const uint8_t data = cmd::FREEZE_ROM_DATA;
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   st = _writeRaw(cmd::OPCODE_FREEZE_ROM, cmd::FREEZE_ROM_ADDR, &data, 1);
   if (!st.ok()) {
     return _trackIo(st);
@@ -661,6 +712,11 @@ Status Driver::areRomZonesFrozen(bool& frozen) {
     return st;
   }
 
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   bool ack = false;
   st = _addressOnlyRaw(cmd::OPCODE_FREEZE_ROM, true, ack);
   if (!st.ok()) {
@@ -675,6 +731,11 @@ Status Driver::setHighSpeed() {
   Status st = _checkInitialized();
   if (!st.ok()) {
     return st;
+  }
+
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
   }
 
   bool ack = false;
@@ -698,6 +759,11 @@ Status Driver::isHighSpeed(bool& enabled) {
     return st;
   }
 
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   bool ack = false;
   st = _addressOnlyRaw(cmd::OPCODE_HIGH_SPEED, true, ack);
   if (!st.ok()) {
@@ -712,6 +778,11 @@ Status Driver::setStandardSpeed() {
   Status st = _checkInitialized();
   if (!st.ok()) {
     return st;
+  }
+
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
   }
 
   bool ack = false;
@@ -741,6 +812,11 @@ Status Driver::isStandardSpeed(bool& enabled) {
     return Status::Error(Err::UNSUPPORTED_COMMAND, "AT21CS11 does not support Standard Speed");
   }
 
+  st = _activateDevice();
+  if (!st.ok()) {
+    return _trackIo(st);
+  }
+
   bool ack = false;
   st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, true, ack);
   if (!st.ok()) {
@@ -763,10 +839,10 @@ uint8_t Driver::crc8_31(const uint8_t* data, size_t len) {
   for (size_t i = 0; i < len; ++i) {
     crc ^= data[i];
     for (uint8_t bit = 0; bit < 8; ++bit) {
-      if ((crc & 0x80U) != 0U) {
-        crc = static_cast<uint8_t>((crc << 1U) ^ 0x31U);
+      if ((crc & 0x01U) != 0U) {
+        crc = static_cast<uint8_t>((crc >> 1U) ^ 0x8CU);
       } else {
-        crc = static_cast<uint8_t>(crc << 1U);
+        crc = static_cast<uint8_t>(crc >> 1U);
       }
     }
   }
@@ -842,6 +918,23 @@ Status Driver::_configurePins() {
     return Status::Error(Err::INVALID_CONFIG, "Failed to release sioPin", _config.sioPin);
   }
 
+  // Cache direct-register pointers for sub-microsecond GPIO access.
+  const uint8_t pin = static_cast<uint8_t>(_config.sioPin);
+  if (pin < 32) {
+    _gpioSetReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT_W1TS_REG);
+    _gpioClrReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT_W1TC_REG);
+    _gpioInReg  = reinterpret_cast<volatile uint32_t*>(GPIO_IN_REG);
+    _gpioMask   = (1U << pin);
+  } else {
+    _gpioSetReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT1_W1TS_REG);
+    _gpioClrReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT1_W1TC_REG);
+    _gpioInReg  = reinterpret_cast<volatile uint32_t*>(GPIO_IN1_REG);
+    _gpioMask   = (1U << (pin - 32));
+  }
+
+  // Cache CPU frequency for cycle-accurate timing.
+  _cyclesPerUs = static_cast<uint32_t>(getCpuFrequencyMhz());
+
   if (_config.presencePin >= 0) {
     gpio_config_t presenceCfg{};
     presenceCfg.pin_bit_mask = (1ULL << static_cast<uint8_t>(_config.presencePin));
@@ -872,44 +965,44 @@ bool Driver::_presencePinReportsPresent() const {
   return _config.presenceActiveHigh ? (level != 0) : (level == 0);
 }
 
-void Driver::_releaseLine() {
+AT21CS_IRAM void Driver::_releaseLine() {
 #if defined(ARDUINO_ARCH_ESP32)
-  (void)gpio_set_level(static_cast<gpio_num_t>(_config.sioPin), 1);
+  *_gpioSetReg = _gpioMask;
 #else
   digitalWrite(static_cast<uint8_t>(_config.sioPin), HIGH);
 #endif
 }
 
-void Driver::_lineLow() {
+AT21CS_IRAM void Driver::_lineLow() {
 #if defined(ARDUINO_ARCH_ESP32)
-  (void)gpio_set_level(static_cast<gpio_num_t>(_config.sioPin), 0);
+  *_gpioClrReg = _gpioMask;
 #else
   digitalWrite(static_cast<uint8_t>(_config.sioPin), LOW);
 #endif
 }
 
-bool Driver::_readLine() const {
+AT21CS_IRAM bool Driver::_readLine() const {
 #if defined(ARDUINO_ARCH_ESP32)
-  return gpio_get_level(static_cast<gpio_num_t>(_config.sioPin)) != 0;
+  return (*_gpioInReg & _gpioMask) != 0;
 #else
   return digitalRead(static_cast<uint8_t>(_config.sioPin)) != 0;
 #endif
 }
 
-void Driver::driveLow(uint32_t lowUs) {
+AT21CS_IRAM void Driver::driveLow(uint32_t lowUs) {
   _lineLow();
   _sleepUs(lowUs);
 }
 
-void Driver::releaseLine() {
+AT21CS_IRAM void Driver::releaseLine() {
   _releaseLine();
 }
 
-bool Driver::readLine() {
+AT21CS_IRAM bool Driver::readLine() {
   return _readLine();
 }
 
-void Driver::txBit0() {
+AT21CS_IRAM void Driver::txBit0() {
   _lineLow();
   _sleepUs(_timing.low0Us);
   _releaseLine();
@@ -919,7 +1012,7 @@ void Driver::txBit0() {
   }
 }
 
-void Driver::txBit1() {
+AT21CS_IRAM void Driver::txBit1() {
   _lineLow();
   _sleepUs(_timing.low1Us);
   _releaseLine();
@@ -929,7 +1022,7 @@ void Driver::txBit1() {
   }
 }
 
-bool Driver::rxBit() {
+AT21CS_IRAM bool Driver::rxBit() {
   _lineLow();
   _sleepUs(_timing.readLowUs);
   _releaseLine();
@@ -947,7 +1040,7 @@ bool Driver::rxBit() {
   return bit;
 }
 
-bool Driver::txByte(uint8_t value) {
+AT21CS_IRAM bool Driver::txByte(uint8_t value) {
 #if defined(ARDUINO_ARCH_ESP32)
   portENTER_CRITICAL(&_timingMux);
 #endif
@@ -970,7 +1063,7 @@ bool Driver::txByte(uint8_t value) {
   return ack;
 }
 
-uint8_t Driver::rxByte(bool ack) {
+AT21CS_IRAM uint8_t Driver::rxByte(bool ack) {
 #if defined(ARDUINO_ARCH_ESP32)
   portENTER_CRITICAL(&_timingMux);
 #endif
@@ -995,12 +1088,12 @@ uint8_t Driver::rxByte(bool ack) {
   return value;
 }
 
-void Driver::_sendStart() {
+AT21CS_IRAM void Driver::_sendStart() {
   _releaseLine();
   _sleepUs(_timing.htssUs);
 }
 
-void Driver::_sendStop() {
+AT21CS_IRAM void Driver::_sendStop() {
   _releaseLine();
   _sleepUs(_timing.htssUs);
 }
@@ -1008,6 +1101,18 @@ void Driver::_sendStop() {
 uint8_t Driver::_deviceAddress(uint8_t opcode, bool read) const {
   const uint8_t rw = read ? 0x01U : 0x00U;
   return static_cast<uint8_t>((opcode << 4U) | ((_config.addressBits & 0x07U) << 1U) | rw);
+}
+
+Status Driver::_activateDevice() {
+  Status st = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
+  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
+  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
+    st = _resetAndDiscoverRaw();
+    if (st.ok()) {
+      return st;
+    }
+  }
+  return st;
 }
 
 Status Driver::_resetAndDiscoverRaw() {
@@ -1156,7 +1261,7 @@ uint32_t Driver::_nowMs() const {
   return millis();
 }
 
-void Driver::_sleepUs(uint32_t us) const {
+AT21CS_IRAM void Driver::_sleepUs(uint32_t us) const {
   if (us == 0U) {
     return;
   }
@@ -1164,7 +1269,16 @@ void Driver::_sleepUs(uint32_t us) const {
     _config.sleepUs(us, _config.timeUser);
     return;
   }
+#if defined(ARDUINO_ARCH_ESP32)
+  // CPU cycle counter spin-wait for sub-microsecond accuracy.
+  // esp_cpu_get_cycle_count() reads the CCOUNT register directly —
+  // zero overhead, wraps safely via unsigned subtraction.
+  const uint32_t target = us * _cyclesPerUs;
+  const uint32_t start = esp_cpu_get_cycle_count();
+  while ((esp_cpu_get_cycle_count() - start) < target) {}
+#else
   delayMicroseconds(us);
+#endif
 }
 
 void Driver::_resetHealth() {

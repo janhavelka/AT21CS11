@@ -1,5 +1,12 @@
 #include <Arduino.h>
 
+#if defined(ARDUINO_ARCH_ESP32)
+#include <driver/gpio.h>
+#include <esp_timer.h>
+#include <esp_cpu.h>
+#include <soc/gpio_reg.h>
+#endif
+
 #include "AT21CS/AT21CS.h"
 #include "../common/At21Example.h"
 #include "../common/BusDiag.h"
@@ -405,7 +412,7 @@ void runSelfTest() {
 
   const uint8_t crcVector[] = {0x01, 0x02, 0x03};
   const uint8_t crc = AT21CS::Driver::crc8_31(crcVector, sizeof(crcVector));
-  reportCheck("crc8_31 known vector", crc == 0xCC, "");
+  reportCheck("crc8_31 known vector", crc == 0xD8, "");
 
   st = gDevice.waitReady(8);
   reportCheck("waitReady", st.ok(), st.ok() ? "" : ex::errToStr(st.code));
@@ -462,6 +469,11 @@ void printHelp() {
   helpSection("Common");
   helpItem("help / ?", "Show this help");
   helpItem("version / ver", "Print firmware and library version info");
+  helpItem("init [addr]", "Re-run begin() with address (default: 0)");
+  helpItem("wire", "Low-level GPIO wire test");
+  helpItem("rawtx [byte]", "Raw bit-bang: reset+discovery+send byte");
+  helpItem("timing", "Measure actual delayMicroseconds accuracy");
+  helpItem("addrscan", "Try all 8 A2:A0 addresses");
   helpItem("scan", "Bus scan helper");
   helpItem("probe", "Probe and detect device");
   helpItem("recover", "Manual recovery");
@@ -562,6 +574,36 @@ void loop() {
 
   if (tokens[0] == "help" || tokens[0] == "?") {
     printHelp();
+  } else if (tokens[0] == "init") {
+    AT21CS::Config cfg;
+    cfg.sioPin = board::SIO_PRIMARY;
+    cfg.presencePin = board::PRESENCE_PRIMARY;
+    cfg.addressBits = board::ADDRESS_BITS_PRIMARY;
+    if (argc >= 2) {
+      cfg.addressBits = static_cast<uint8_t>(tokens[1].toInt() & 0x07);
+    }
+    Serial.printf("Trying A2:A0=%u...\n", cfg.addressBits);
+    const AT21CS::Status st = gDevice.begin(cfg);
+    ex::printStatus(st);
+    Serial.printf("detectedPart=%s speed=%s\n", ex::partToStr(gDevice.detectedPart()),
+                  ex::speedToStr(gDevice.speedMode()));
+  } else if (tokens[0] == "addrscan") {
+    Serial.println("=== Address Scan (A2:A0 = 0..7) ===");
+    for (uint8_t addr = 0; addr < 8; ++addr) {
+      AT21CS::Config cfg;
+      cfg.sioPin = board::SIO_PRIMARY;
+      cfg.presencePin = board::PRESENCE_PRIMARY;
+      cfg.addressBits = addr;
+      const AT21CS::Status st = gDevice.begin(cfg);
+      Serial.printf("  A2:A0=%u: %s (code=%d)\n", addr,
+                    st.ok() ? "ACK - FOUND" : ex::errToStr(st.code),
+                    static_cast<int>(st.code));
+      if (st.ok()) {
+        Serial.printf("  -> detectedPart=%s speed=%s\n",
+                      ex::partToStr(gDevice.detectedPart()),
+                      ex::speedToStr(gDevice.speedMode()));
+      }
+    }
   } else if (tokens[0] == "version" || tokens[0] == "ver") {
     printVersionInfo();
   } else if (tokens[0] == "scan") {
@@ -642,6 +684,174 @@ void loop() {
       if (count <= 0) count = 100;
     }
     runStressMix(count);
+  } else if (tokens[0] == "wire") {
+    Serial.println("=== Wire Test ===");
+    const gpio_num_t pin = static_cast<gpio_num_t>(board::SIO_PRIMARY);
+    // 1. Idle state (pull-up should hold HIGH)
+    bool idle = gpio_get_level(pin) != 0;
+    Serial.printf("1. Idle:     %s (expect HIGH)\n", idle ? "HIGH" : "LOW");
+    // 2. Drive low, verify master can pull line down
+    gpio_set_level(pin, 0);
+    delayMicroseconds(10);
+    bool driven = gpio_get_level(pin) != 0;
+    Serial.printf("2. Driven:   %s (expect LOW)\n", driven ? "HIGH" : "LOW");
+    // 3. Release and let pull-up restore
+    gpio_set_level(pin, 1);
+    delayMicroseconds(50);
+    bool released = gpio_get_level(pin) != 0;
+    Serial.printf("3. Released: %s (expect HIGH)\n", released ? "HIGH" : "LOW");
+    if (idle && !driven && released) {
+      Serial.println("PASS: GPIO and pull-up verified");
+    } else {
+      Serial.println("FAIL: check wiring, pull-up, and pin config");
+    }
+  } else if (tokens[0] == "timing") {
+    // Measure actual delay accuracy for critical timing values
+    Serial.println("=== Timing Measurement ===");
+    volatile uint32_t* setReg;
+    volatile uint32_t* clrReg;
+    uint32_t mask;
+    constexpr int sioPin = board::SIO_PRIMARY;
+    if constexpr (sioPin < 32) {
+      setReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT_W1TS_REG);
+      clrReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT_W1TC_REG);
+      mask = (1U << sioPin);
+    } else {
+      setReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT1_W1TS_REG);
+      clrReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT1_W1TC_REG);
+      mask = (1U << (sioPin - 32));
+    }
+    Serial.println("  -- delayMicroseconds (Arduino) --");
+    const uint32_t targets[] = {1, 2, 3, 5, 8, 12, 150};
+    for (size_t i = 0; i < sizeof(targets)/sizeof(targets[0]); ++i) {
+      portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+      portENTER_CRITICAL(&mux);
+      int64_t t0 = esp_timer_get_time();
+      *clrReg = mask;
+      delayMicroseconds(targets[i]);
+      *setReg = mask;
+      int64_t t1 = esp_timer_get_time();
+      portEXIT_CRITICAL(&mux);
+      Serial.printf("    target=%lu actual=%lld us\n",
+                    (unsigned long)targets[i], (long long)(t1 - t0));
+      delayMicroseconds(200);
+    }
+    Serial.println("  -- esp_timer busy-wait --");
+    for (size_t i = 0; i < sizeof(targets)/sizeof(targets[0]); ++i) {
+      portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+      portENTER_CRITICAL(&mux);
+      *clrReg = mask;
+      int64_t t0 = esp_timer_get_time();
+      int64_t deadline = t0 + static_cast<int64_t>(targets[i]);
+      while (esp_timer_get_time() < deadline) {}
+      *setReg = mask;
+      int64_t t1 = esp_timer_get_time();
+      portEXIT_CRITICAL(&mux);
+      Serial.printf("    target=%lu actual=%lld us\n",
+                    (unsigned long)targets[i], (long long)(t1 - t0));
+      delayMicroseconds(200);
+    }
+    Serial.println("  -- CCOUNT cycle counter (driver uses this) --");
+    const uint32_t cpuMhz = static_cast<uint32_t>(getCpuFrequencyMhz());
+    Serial.printf("    CPU freq: %lu MHz\n", (unsigned long)cpuMhz);
+    for (size_t i = 0; i < sizeof(targets)/sizeof(targets[0]); ++i) {
+      portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+      portENTER_CRITICAL(&mux);
+      *clrReg = mask;
+      int64_t t0 = esp_timer_get_time();
+      uint32_t cyc = targets[i] * cpuMhz;
+      uint32_t start = esp_cpu_get_cycle_count();
+      while ((esp_cpu_get_cycle_count() - start) < cyc) {}
+      *setReg = mask;
+      int64_t t1 = esp_timer_get_time();
+      portEXIT_CRITICAL(&mux);
+      Serial.printf("    target=%lu actual=%lld us\n",
+                    (unsigned long)targets[i], (long long)(t1 - t0));
+      delayMicroseconds(200);
+    }
+  } else if (tokens[0] == "rawtx") {
+    // Raw bit-bang diagnostic: bypass driver, do reset+discovery+send byte
+    const gpio_num_t pin = static_cast<gpio_num_t>(board::SIO_PRIMARY);
+    uint8_t txByte = 0xC1; // manufacturer ID read, addr=0
+    if (argc >= 2) {
+      txByte = static_cast<uint8_t>(strtoul(tokens[1].c_str(), nullptr, 0));
+    }
+    Serial.printf("=== Raw TX: 0x%02X (binary: ", txByte);
+    for (int8_t b = 7; b >= 0; --b) {
+      Serial.print((txByte >> b) & 1);
+    }
+    Serial.println(") ===");
+
+    portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+
+    // 1. Discharge reset (200µs low)
+    gpio_set_level(pin, 0);
+    delayMicroseconds(200);
+    gpio_set_level(pin, 1);
+    delayMicroseconds(20);  // t_RRT (min 8µs, generous)
+
+    // 2. Discovery: DRR low 1µs, release, wait, strobe, sample
+    portENTER_CRITICAL(&mux);
+    gpio_set_level(pin, 0);
+    delayMicroseconds(1);   // t_DRR
+    gpio_set_level(pin, 1);
+    delayMicroseconds(2);   // wait before strobe
+    gpio_set_level(pin, 0);
+    delayMicroseconds(2);   // t_MSDR strobe
+    gpio_set_level(pin, 1);
+    delayMicroseconds(1);   // sample delay
+    bool present = (gpio_get_level(pin) == 0);
+    portEXIT_CRITICAL(&mux);
+
+    Serial.printf("Discovery: %s\n", present ? "PRESENT" : "NOT PRESENT");
+    if (!present) {
+      Serial.println("Aborting - no device");
+    } else {
+      // 3. Start condition: hold high for t_HTSS
+      delayMicroseconds(200);
+
+      // 4. Send byte MSb first with clear timing margins
+      // Using t_LOW0=10µs for '0', t_LOW1=1µs for '1', t_BIT=20µs
+      portENTER_CRITICAL(&mux);
+      int64_t bitTimes[8];
+      for (int8_t bit = 7; bit >= 0; --bit) {
+        bool one = ((txByte >> bit) & 1) != 0;
+        int64_t bt0 = esp_timer_get_time();
+        gpio_set_level(pin, 0);
+        if (one) {
+          // Logic 1: very short low (~1µs)
+          // Inline NOP-based sub-microsecond delay
+          for (int k = 0; k < 60; k++) { __asm__ __volatile__("nop"); }
+        } else {
+          // Logic 0: long low (10µs)
+          delayMicroseconds(10);
+        }
+        gpio_set_level(pin, 1);
+        int64_t bt1 = esp_timer_get_time();
+        bitTimes[7 - bit] = bt1 - bt0;
+        // Pad to 20µs bit frame
+        while ((esp_timer_get_time() - bt0) < 20) {}
+      }
+
+      // 5. Read ACK bit (9th bit)
+      gpio_set_level(pin, 0);
+      for (int k = 0; k < 60; k++) { __asm__ __volatile__("nop"); }
+      gpio_set_level(pin, 1);
+      delayMicroseconds(2);
+      bool ackBit = (gpio_get_level(pin) == 0);  // LOW = ACK
+      portEXIT_CRITICAL(&mux);
+
+      // Stop
+      gpio_set_level(pin, 1);
+      delayMicroseconds(200);
+
+      Serial.println("Bit low-pulse durations:");
+      for (int i = 0; i < 8; i++) {
+        bool one = ((txByte >> (7 - i)) & 1) != 0;
+        Serial.printf("  bit%d (%c): ~%lld us\n", i, one ? '1' : '0', (long long)bitTimes[i]);
+      }
+      Serial.printf("ACK bit: %s\n", ackBit ? "ACK (device responded)" : "NACK (no response)");
+    }
   } else if (tokens[0] == "selftest") {
     runSelfTest();
   } else if (tokens[0] == "present") {
