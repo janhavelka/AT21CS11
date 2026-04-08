@@ -13,6 +13,12 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
+#if __has_include(<esp_cpu.h>)
+#include <esp_cpu.h>
+#endif
+#if !defined(esp_cpu_get_cycle_count)
+#define esp_cpu_get_cycle_count() ((uint32_t)esp_cpu_get_ccount())
+#endif
 #endif
 
 namespace {
