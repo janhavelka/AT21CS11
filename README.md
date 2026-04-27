@@ -100,10 +100,13 @@ void loop() {
 - `uint32_t totalFailures() const`
 - `uint32_t totalSuccess() const`
 
+Validation and precondition errors are returned before protocol I/O and do not update health counters. `probe()` is diagnostic-only: it performs raw discovery and restores the previous state without changing health counters.
+
 ## Write-Ready Behavior (Current and Future)
 
 - Current design: write APIs are synchronous and block while waiting for internal write completion (`waitReady()` polling).
-- Default timeout: `Config::writeTimeoutMs = 25` (valid range `1..1000 ms`).
+- Default timeout: `Config::writeTimeoutMs = 25` (valid range `1..250 ms`).
+- `waitReady()` is bounded by both the configured millisecond timeout and a finite stalled-clock poll guard.
 - Practical effect: the caller task can be blocked for up to the configured timeout on write operations.
 - Future redesign target: non-blocking write flow driven by `tick()` (start-write + poll status API), so no blocking loop in the write call path.
 

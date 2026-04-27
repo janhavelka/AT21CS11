@@ -16,9 +16,6 @@
 #if __has_include(<esp_cpu.h>)
 #include <esp_cpu.h>
 #endif
-#if !defined(esp_cpu_get_cycle_count)
-#define esp_cpu_get_cycle_count() ((uint32_t)esp_cpu_get_ccount())
-#endif
 #endif
 
 namespace {
@@ -59,6 +56,41 @@ inline bool staysWithinPage(uint8_t startAddress, size_t len, size_t pageSize) {
   return len <= availableInPage;
 }
 
+inline bool isValidPartType(AT21CS::PartType part) {
+  switch (part) {
+    case AT21CS::PartType::UNKNOWN:
+    case AT21CS::PartType::AT21CS01:
+    case AT21CS::PartType::AT21CS11:
+      return true;
+  }
+  return false;
+}
+
+inline bool isValidSpeedMode(AT21CS::SpeedMode mode) {
+  switch (mode) {
+    case AT21CS::SpeedMode::HIGH_SPEED:
+    case AT21CS::SpeedMode::STANDARD_SPEED:
+      return true;
+  }
+  return false;
+}
+
+inline uint32_t saturatedAdd(uint32_t lhs, uint32_t rhs) {
+  const uint32_t room = UINT32_MAX - lhs;
+  return (rhs > room) ? UINT32_MAX : (lhs + rhs);
+}
+
+inline uint32_t waitReadyStallGuardIterations(uint32_t timeoutMs) {
+  uint32_t polls = timeoutMs;
+  if (polls > UINT32_MAX / 10U) {
+    polls = UINT32_MAX;
+  } else {
+    polls *= 10U;  // waitReady sleeps 100 us between polls: 10 polls/ms.
+  }
+  polls = saturatedAdd(polls, 16U);
+  return (polls < 32U) ? 32U : polls;
+}
+
 static constexpr uint32_t MAX_READY_TIMEOUT_MS = 250;
 
 }  // namespace
@@ -74,7 +106,13 @@ Status Driver::begin(const Config& config) {
   } else if (_config.sioPin >= 0) {
     // Clean up GPIO from a previously failed begin() that configured the pin
     // but didn't complete initialization.
+#if defined(ARDUINO_ARCH_ESP32)
+    if (_gpioSetReg != nullptr) {
+      _releaseLine();
+    }
+#else
     _releaseLine();
+#endif
   }
 
   if (config.sioPin < 0) {
@@ -112,6 +150,14 @@ Status Driver::begin(const Config& config) {
   if (config.writeTimeoutMs > MAX_READY_TIMEOUT_MS) {
     _driverState = DriverState::FAULT;
     return Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be <= 250");
+  }
+  if (!isValidPartType(config.expectedPart)) {
+    _driverState = DriverState::FAULT;
+    return Status::Error(Err::INVALID_CONFIG, "invalid expectedPart enum");
+  }
+  if (!isValidSpeedMode(config.startupSpeed)) {
+    _driverState = DriverState::FAULT;
+    return Status::Error(Err::INVALID_CONFIG, "invalid startupSpeed enum");
   }
 
   _config = config;
@@ -210,7 +256,13 @@ void Driver::tick(uint32_t nowMs) {
 
 void Driver::end() {
   if (_config.sioPin >= 0) {
+#if defined(ARDUINO_ARCH_ESP32)
+    if (_gpioSetReg != nullptr) {
+      _releaseLine();
+    }
+#else
     _releaseLine();
+#endif
   }
 
   _initialized = false;
@@ -218,6 +270,12 @@ void Driver::end() {
   _detectedPart = PartType::UNKNOWN;
   _setSpeedMode(SpeedMode::HIGH_SPEED);
   _resetHealth();
+#if defined(ARDUINO_ARCH_ESP32)
+  _gpioSetReg = nullptr;
+  _gpioClrReg = nullptr;
+  _gpioInReg = nullptr;
+  _gpioMask = 0;
+#endif
 }
 
 Status Driver::probe() {
@@ -372,6 +430,9 @@ Status Driver::waitReady(uint32_t timeoutMs) {
 
   _driverState = DriverState::BUSY;
   const uint32_t startMs = _nowMs();
+  uint32_t lastObservedMs = startMs;
+  uint32_t stalledPolls = 0;
+  const uint32_t maxStalledPolls = waitReadyStallGuardIterations(timeoutMs);
   while (true) {
     if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
       _driverState = DriverState::OFFLINE;
@@ -390,6 +451,15 @@ Status Driver::waitReady(uint32_t timeoutMs) {
     const uint32_t elapsedMs = _nowMs() - startMs;
     if (elapsedMs >= timeoutMs) {
       return _trackIo(Status::Error(Err::BUSY_TIMEOUT, "Timed out waiting for write cycle completion"));
+    }
+    const uint32_t observedMs = _nowMs();
+    if (observedMs == lastObservedMs) {
+      if (++stalledPolls >= maxStalledPolls) {
+        return _trackIo(Status::Error(Err::BUSY_TIMEOUT, "Timed out waiting for write cycle completion"));
+      }
+    } else {
+      lastObservedMs = observedMs;
+      stalledPolls = 0;
     }
 
     _sleepUs(100);
@@ -472,6 +542,10 @@ Status Driver::writeEepromPage(uint8_t address, const uint8_t* data, size_t len)
 }
 
 Status Driver::writeEeprom(uint8_t address, const uint8_t* data, size_t len) {
+  Status init = _checkInitialized();
+  if (!init.ok()) {
+    return init;
+  }
   if (data == nullptr) {
     return Status::Error(Err::INVALID_PARAM, "EEPROM write buffer is null");
   }
@@ -561,6 +635,10 @@ Status Driver::writeSecurityUserPage(uint8_t address, const uint8_t* data, size_
 }
 
 Status Driver::writeSecurityUser(uint8_t address, const uint8_t* data, size_t len) {
+  Status init = _checkInitialized();
+  if (!init.ok()) {
+    return init;
+  }
   if (data == nullptr) {
     return Status::Error(Err::INVALID_PARAM, "Security write buffer is null");
   }
@@ -1033,6 +1111,9 @@ bool Driver::_presencePinReportsPresent() const {
 
 AT21CS_IRAM void Driver::_releaseLine() {
 #if defined(ARDUINO_ARCH_ESP32)
+  if (_gpioSetReg == nullptr) {
+    return;
+  }
   *_gpioSetReg = _gpioMask;
 #else
   digitalWrite(static_cast<uint8_t>(_config.sioPin), HIGH);
@@ -1041,6 +1122,9 @@ AT21CS_IRAM void Driver::_releaseLine() {
 
 AT21CS_IRAM void Driver::_lineLow() {
 #if defined(ARDUINO_ARCH_ESP32)
+  if (_gpioClrReg == nullptr) {
+    return;
+  }
   *_gpioClrReg = _gpioMask;
 #else
   digitalWrite(static_cast<uint8_t>(_config.sioPin), LOW);
@@ -1049,6 +1133,9 @@ AT21CS_IRAM void Driver::_lineLow() {
 
 AT21CS_IRAM bool Driver::_readLine() const {
 #if defined(ARDUINO_ARCH_ESP32)
+  if (_gpioInReg == nullptr) {
+    return true;
+  }
   return (*_gpioInReg & _gpioMask) != 0;
 #else
   return digitalRead(static_cast<uint8_t>(_config.sioPin)) != 0;

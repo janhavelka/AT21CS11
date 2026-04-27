@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+- `begin()` now validates `expectedPart` and `startupSpeed` enum values before any GPIO/protocol activity.
+- Multi-page write helpers now report `NOT_INITIALIZED` before argument validation when called before a successful `begin()`.
+- README write-ready documentation now matches the enforced `1..250 ms` timeout range and stalled-clock guard behavior.
+
+### Fixed
+- `waitReady()` now has a finite stalled-clock poll guard when an injected millisecond source stops advancing.
+- ESP32 GPIO cleanup after failed initialization now avoids uncached direct-register pointer dereferences.
+- ESP32 cycle-counter usage now relies on the current `esp_cpu_get_cycle_count()` API instead of a removed `esp_cpu_get_ccount()` fallback.
+
 ## [1.3.0] - 2026-04-08
 
 ### Added

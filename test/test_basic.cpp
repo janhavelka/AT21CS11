@@ -85,6 +85,34 @@ void test_begin_rejects_write_timeout_over_limit() {
                           static_cast<uint8_t>(dev.state()));
 }
 
+void test_begin_rejects_invalid_expected_part_enum() {
+  Driver dev;
+  Config cfg;
+  cfg.sioPin = 6;
+  cfg.expectedPart = static_cast<PartType>(0xFF);
+
+  Status st = dev.begin(cfg);
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::FAULT),
+                          static_cast<uint8_t>(dev.state()));
+}
+
+void test_begin_rejects_invalid_startup_speed_enum() {
+  Driver dev;
+  Config cfg;
+  cfg.sioPin = 6;
+  cfg.startupSpeed = static_cast<SpeedMode>(0xFF);
+
+  Status st = dev.begin(cfg);
+
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+                          static_cast<uint8_t>(st.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::FAULT),
+                          static_cast<uint8_t>(dev.state()));
+}
+
 void test_probe_requires_begin() {
   Driver dev;
   Status st = dev.probe();
@@ -95,6 +123,27 @@ void test_probe_requires_begin() {
 void test_recover_requires_begin() {
   Driver dev;
   Status st = dev.recover();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(st.code));
+}
+
+void test_multi_page_write_helpers_check_initialization_first() {
+  Driver dev;
+  uint8_t data = 0;
+
+  Status st = dev.writeEeprom(0, nullptr, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(st.code));
+
+  st = dev.writeEeprom(0, &data, 0);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(st.code));
+
+  st = dev.writeSecurityUser(0x10, nullptr, 1);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
+                          static_cast<uint8_t>(st.code));
+
+  st = dev.writeSecurityUser(0x10, &data, 0);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_INITIALIZED),
                           static_cast<uint8_t>(st.code));
 }
@@ -117,8 +166,11 @@ int main() {
   RUN_TEST(test_begin_rejects_same_presence_and_sio_pin);
   RUN_TEST(test_begin_rejects_zero_offline_threshold);
   RUN_TEST(test_begin_rejects_write_timeout_over_limit);
+  RUN_TEST(test_begin_rejects_invalid_expected_part_enum);
+  RUN_TEST(test_begin_rejects_invalid_startup_speed_enum);
   RUN_TEST(test_probe_requires_begin);
   RUN_TEST(test_recover_requires_begin);
+  RUN_TEST(test_multi_page_write_helpers_check_initialization_first);
   RUN_TEST(test_end_without_begin_keeps_uninit);
   return UNITY_END();
 }
