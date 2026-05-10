@@ -5,6 +5,8 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Changed
+- Doxyfile project metadata now matches `library.json` and references the
+  maintained docs tree instead of removed template files.
 - `begin()` now validates `expectedPart` and `startupSpeed` enum values before any GPIO/protocol activity.
 - Multi-page write helpers now report `NOT_INITIALIZED` before argument validation when called before a successful `begin()`.
 - README write-ready documentation now matches the enforced `1..250 ms` timeout range and stalled-clock guard behavior.
