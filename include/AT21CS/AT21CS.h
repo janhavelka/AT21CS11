@@ -23,7 +23,7 @@
 
 namespace AT21CS {
 
-/// AT21CS runtime state machine.
+/// @brief AT21CS runtime state machine.
 ///
 /// Transition overview:
 /// - UNINIT -> PROBING -> INIT_CONFIG -> READY during begin()
@@ -44,82 +44,271 @@ enum class DriverState : uint8_t {
   FAULT
 };
 
-/// Factory serial number payload from the Security register.
+/// @brief Factory serial number payload from the Security register.
 struct SerialNumberInfo {
-  uint8_t bytes[cmd::SECURITY_SERIAL_SIZE];
-  bool productIdOk;
-  bool crcOk;
+  uint8_t bytes[cmd::SECURITY_SERIAL_SIZE]; ///< Raw 8-byte serial payload.
+  bool productIdOk;                         ///< True when the product marker byte is valid.
+  bool crcOk;                               ///< True when the serial CRC matches.
 };
 
-/// AT21CS01/AT21CS11 driver.
+/// @brief Cached settings and health state, read without bus I/O.
+struct SettingsSnapshot {
+  Config config;                         ///< Active runtime configuration snapshot.
+  DriverState state = DriverState::UNINIT;
+  bool initialized = false;
+  PartType detectedPart = PartType::UNKNOWN;
+  SpeedMode speedMode = SpeedMode::HIGH_SPEED;
+  uint32_t lastOkMs = 0;
+  uint32_t lastErrorMs = 0;
+  Status lastError = Status::Ok();
+  uint8_t consecutiveFailures = 0;
+  uint32_t totalFailures = 0;
+  uint32_t totalSuccess = 0;
+};
+
+/// @brief AT21CS01/AT21CS11 single-wire EEPROM driver.
 /// Not thread-safe: serialize access from one task/thread or guard with an external mutex.
 class Driver {
  public:
   // Lifecycle
+  /// @brief Initialize the driver and discover the attached part.
+  /// @param config GPIO, timing, address, and startup-speed configuration.
+  /// @return Status::Ok() on success, error otherwise.
   Status begin(const Config& config);
+
+  /// @brief Record the caller's current scheduler timestamp.
+  /// @param nowMs Current monotonic time in milliseconds.
   void tick(uint32_t nowMs);
+
+  /// @brief Stop the driver and release the single-wire line.
   void end();
 
   // Diagnostics and recovery
+  /// @brief Check for a responding device without changing health counters.
+  /// @return Status::Ok() when the device responds, error otherwise.
   Status probe();
+
+  /// @brief Run reset/discovery and restore configured speed after a fault.
+  /// @return Status::Ok() on recovery, error otherwise.
   Status recover();
+
+  /// @brief Issue a reset and discovery sequence.
+  /// @return Status::Ok() when discovery succeeds, error otherwise.
   Status resetAndDiscover();
+
+  /// @brief Check whether the device is currently present.
+  /// @param[out] present Set true when presence is detected.
+  /// @return Status::Ok() on a completed check, error otherwise.
   Status isPresent(bool& present);
 
   // AT21CS state and health
+  /// @brief Get current lifecycle/health state.
+  /// @return Current DriverState.
   DriverState state() const { return _driverState; }
+
+  /// @brief Alias for state() for cross-driver diagnostics.
+  /// @return Current DriverState.
+  DriverState driverState() const { return state(); }
+
+  /// @brief Check if begin() has completed successfully.
+  /// @return true after successful begin() and before end().
+  bool isInitialized() const { return _initialized; }
+
+  /// @brief Check whether normal operations are allowed.
+  /// @return true when initialized and not OFFLINE, SLEEPING, or FAULT.
   bool isOnline() const {
-    return _driverState != DriverState::UNINIT && _driverState != DriverState::OFFLINE &&
-           _driverState != DriverState::FAULT;
+    return _initialized && _driverState != DriverState::OFFLINE &&
+           _driverState != DriverState::FAULT && _driverState != DriverState::SLEEPING;
   }
 
+  /// @brief Get the active configuration snapshot.
+  /// @return Active configuration copy.
+  const Config& getConfig() const { return _config; }
+
+  /// @brief Get cached settings and health state without bus I/O.
+  /// @return Settings snapshot.
+  SettingsSnapshot getSettings() const;
+
+  /// @brief Copy cached settings and health state without bus I/O.
+  /// @param[out] out Receives the settings snapshot.
+  /// @return Status::Ok().
+  Status getSettings(SettingsSnapshot& out) const;
+
+  /// @brief Timestamp of the last successful tracked operation.
+  /// @return Milliseconds from the configured timebase.
   uint32_t lastOkMs() const { return _lastOkMs; }
+
+  /// @brief Timestamp of the last failed tracked operation.
+  /// @return Milliseconds from the configured timebase.
   uint32_t lastErrorMs() const { return _lastErrorMs; }
+
+  /// @brief Most recent tracked operation error.
+  /// @return Last error Status.
   Status lastError() const { return _lastError; }
+
+  /// @brief Consecutive tracked failures since the last success.
+  /// @return Saturating failure count.
   uint8_t consecutiveFailures() const { return _consecutiveFailures; }
+
+  /// @brief Lifetime tracked failure count since begin().
+  /// @return Saturating failure count.
   uint32_t totalFailures() const { return _totalFailures; }
+
+  /// @brief Lifetime tracked success count since begin().
+  /// @return Saturating success count.
   uint32_t totalSuccess() const { return _totalSuccess; }
 
+  /// @brief Get the detected AT21CS part type.
+  /// @return Detected part, or UNKNOWN before successful discovery.
   PartType detectedPart() const { return _detectedPart; }
+
+  /// @brief Get the active bit timing profile.
+  /// @return Active speed mode.
   SpeedMode speedMode() const { return _speedMode; }
 
   // Busy poll helper
+  /// @brief Poll for t_WR completion using a bounded timeout.
+  /// @param timeoutMs Timeout in milliseconds, range 1..250.
+  /// @return Status::Ok() when ready, BUSY_TIMEOUT or other error otherwise.
   Status waitReady(uint32_t timeoutMs);
 
   // EEPROM data area
+  /// @brief Read from the device's current EEPROM address pointer.
+  /// @param[out] value Byte read from the current pointer.
+  /// @return Status::Ok() on success, error otherwise.
   Status readCurrentAddress(uint8_t& value);
+
+  /// @brief Read bytes from the EEPROM array.
+  /// @param address Start address in the 128-byte EEPROM area.
+  /// @param[out] data Destination buffer.
+  /// @param len Number of bytes to read.
+  /// @return Status::Ok() on success, error otherwise.
   Status readEeprom(uint8_t address, uint8_t* data, size_t len);
+
+  /// @brief Write one EEPROM byte.
+  /// @param address EEPROM byte address.
+  /// @param value Byte value to write.
+  /// @return Status::Ok() after the write cycle completes, error otherwise.
   Status writeEepromByte(uint8_t address, uint8_t value);
+
+  /// @brief Write bytes within a single EEPROM page.
+  /// @param address EEPROM start address.
+  /// @param data Source buffer.
+  /// @param len Number of bytes to write.
+  /// @return Status::Ok() after the write cycle completes, error otherwise.
   Status writeEepromPage(uint8_t address, const uint8_t* data, size_t len);
+
+  /// @brief Write bytes across EEPROM page boundaries.
+  /// @param address EEPROM start address.
+  /// @param data Source buffer.
+  /// @param len Number of bytes to write.
+  /// @return Status::Ok() after all write cycles complete, error otherwise.
   Status writeEeprom(uint8_t address, const uint8_t* data, size_t len);
 
   // Security register
+  /// @brief Read bytes from the Security register.
+  /// @param address Security register start address.
+  /// @param[out] data Destination buffer.
+  /// @param len Number of bytes to read.
+  /// @return Status::Ok() on success, error otherwise.
   Status readSecurity(uint8_t address, uint8_t* data, size_t len);
+
+  /// @brief Write one user byte in the Security register.
+  /// @param address Security user-byte address.
+  /// @param value Byte value to write.
+  /// @return Status::Ok() after the write cycle completes, error otherwise.
   Status writeSecurityUserByte(uint8_t address, uint8_t value);
+
+  /// @brief Write bytes within one Security user page.
+  /// @param address Security user start address.
+  /// @param data Source buffer.
+  /// @param len Number of bytes to write.
+  /// @return Status::Ok() after the write cycle completes, error otherwise.
   Status writeSecurityUserPage(uint8_t address, const uint8_t* data, size_t len);
+
+  /// @brief Write bytes across Security user pages.
+  /// @param address Security user start address.
+  /// @param data Source buffer.
+  /// @param len Number of bytes to write.
+  /// @return Status::Ok() after all write cycles complete, error otherwise.
   Status writeSecurityUser(uint8_t address, const uint8_t* data, size_t len);
+
+  /// @brief Permanently lock the Security register.
+  /// @return Status::Ok() after the lock write cycle completes, error otherwise.
   Status lockSecurityRegister();
+
+  /// @brief Read the Security register lock state.
+  /// @param[out] locked Set true when locked.
+  /// @return Status::Ok() on success, error otherwise.
   Status isSecurityLocked(bool& locked);
 
   // IDs
+  /// @brief Read and validate the factory serial number.
+  /// @param[out] serial Serial payload and validation flags.
+  /// @return Status::Ok() on read success, error otherwise.
   Status readSerialNumber(SerialNumberInfo& serial);
+
+  /// @brief Read the 24-bit manufacturer/device identifier.
+  /// @param[out] manufacturerId Raw 24-bit identifier.
+  /// @return Status::Ok() on success, error otherwise.
   Status readManufacturerId(uint32_t& manufacturerId);
+
+  /// @brief Detect the attached AT21CS part from manufacturer ID.
+  /// @param[out] part Detected part type.
+  /// @return Status::Ok() on success, error otherwise.
   Status detectPart(PartType& part);
 
   // ROM zones / freeze
+  /// @brief Read one ROM-zone register.
+  /// @param zoneIndex Zone index 0..3.
+  /// @param[out] value Raw zone register value.
+  /// @return Status::Ok() on success, error otherwise.
   Status readRomZoneRegister(uint8_t zoneIndex, uint8_t& value);
+
+  /// @brief Check whether a zone is configured read-only.
+  /// @param zoneIndex Zone index 0..3.
+  /// @param[out] isRom Set true when the zone is ROM.
+  /// @return Status::Ok() on success, error otherwise.
   Status isZoneRom(uint8_t zoneIndex, bool& isRom);
+
+  /// @brief Configure one zone as ROM.
+  /// @param zoneIndex Zone index 0..3.
+  /// @return Status::Ok() after the write cycle completes, error otherwise.
   Status setZoneRom(uint8_t zoneIndex);
+
+  /// @brief Permanently freeze the ROM-zone configuration.
+  /// @return Status::Ok() after the command completes, error otherwise.
   Status freezeRomZones();
+
+  /// @brief Check whether ROM-zone configuration is frozen.
+  /// @param[out] frozen Set true when frozen.
+  /// @return Status::Ok() on success, error otherwise.
   Status areRomZonesFrozen(bool& frozen);
 
   // Speed mode control
+  /// @brief Switch the device to High-Speed mode.
+  /// @return Status::Ok() on acknowledged switch, error otherwise.
   Status setHighSpeed();
+
+  /// @brief Check whether the device acknowledges High-Speed mode.
+  /// @param[out] enabled Set true when High-Speed is active.
+  /// @return Status::Ok() on completed check, error otherwise.
   Status isHighSpeed(bool& enabled);
+
+  /// @brief Switch AT21CS01 to Standard Speed mode.
+  /// @return Status::Ok() on acknowledged switch, error otherwise.
   Status setStandardSpeed();
+
+  /// @brief Check whether AT21CS01 acknowledges Standard Speed mode.
+  /// @param[out] enabled Set true when Standard Speed is active.
+  /// @return Status::Ok() on completed check, error otherwise.
   Status isStandardSpeed(bool& enabled);
 
   // Utilities
+  /// @brief Compute CRC-8 with polynomial 0x31 over a byte buffer.
+  /// @param data Input bytes.
+  /// @param len Number of bytes to process.
+  /// @return CRC byte.
   static uint8_t crc8_31(const uint8_t* data, size_t len);
 
  private:
@@ -161,7 +350,7 @@ class Driver {
 
   // Transport wrappers (raw + tracked)
   Status _trackIo(const Status& st);
-  Status _checkInitialized() const;
+  Status _checkInitialized(bool allowOffline = false) const;
 
   // GPIO + PHY helpers
   Status _configurePins();

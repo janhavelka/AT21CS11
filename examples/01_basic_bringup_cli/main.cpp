@@ -931,16 +931,20 @@ void loop() {
     ex::printStatus(gDevice.readCurrentAddress(value));
     Serial.printf("read=0x%02X\n", value);
   } else if (tokens[0] == "cfg" || tokens[0] == "settings") {
-    Serial.printf("cfg.sioPin=%d cfg.presencePin=%d cfg.addressBits=%u\n",
-                  board::SIO_PRIMARY, board::PRESENCE_PRIMARY, board::ADDRESS_BITS_PRIMARY);
+    AT21CS::SettingsSnapshot snap;
+    (void)gDevice.getSettings(snap);
+    Serial.printf("cfg.sioPin=%d cfg.presencePin=%d cfg.addressBits=%u offlineThreshold=%u\n",
+                  snap.config.sioPin, snap.config.presencePin, snap.config.addressBits,
+                  snap.config.offlineThreshold);
     const bool online = gDevice.isOnline();
-    const char* stateColor = (gDevice.state() == AT21CS::DriverState::UNINIT)
+    const char* stateColor = (snap.state == AT21CS::DriverState::UNINIT)
                                  ? LOG_COLOR_GRAY
-                                 : LOG_COLOR_STATE(online, gDevice.consecutiveFailures());
-    Serial.printf("state=%s%s%s part=%s speed=%s verbose=%s%s%s\n",
-                  stateColor, ex::stateToStr(gDevice.state()), LOG_COLOR_RESET,
-                  ex::partToStr(gDevice.detectedPart()),
-                  ex::speedToStr(gDevice.speedMode()),
+                                 : LOG_COLOR_STATE(online, snap.consecutiveFailures);
+    Serial.printf("initialized=%s state=%s%s%s part=%s speed=%s verbose=%s%s%s\n",
+                  snap.initialized ? "true" : "false",
+                  stateColor, ex::stateToStr(snap.state), LOG_COLOR_RESET,
+                  ex::partToStr(snap.detectedPart),
+                  ex::speedToStr(snap.speedMode),
                   onOffColor(gVerbose), gVerbose ? "true" : "false", LOG_COLOR_RESET);
   } else if (tokens[0] == "verbose") {
     if (argc >= 2) {

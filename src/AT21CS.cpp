@@ -115,52 +115,70 @@ Status Driver::begin(const Config& config) {
 #endif
   }
 
+  _config = Config{};
+  _initialized = false;
+  _driverState = DriverState::UNINIT;
+  _detectedPart = PartType::UNKNOWN;
+  _setSpeedMode(SpeedMode::HIGH_SPEED);
+  _resetHealth();
+  _lastTickMs = 0;
+
+  auto failBegin = [this](Status failure, DriverState state) -> Status {
+    _initialized = false;
+    _driverState = state;
+    _detectedPart = PartType::UNKNOWN;
+    _setSpeedMode(SpeedMode::HIGH_SPEED);
+    _resetHealth();
+    return failure;
+  };
+
   if (config.sioPin < 0) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "sioPin must be >= 0");
+    return failBegin(Status::Error(Err::INVALID_CONFIG, "sioPin must be >= 0"),
+                     DriverState::FAULT);
   }
   if (config.sioPin > 63) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "sioPin must be <= 63");
+    return failBegin(Status::Error(Err::INVALID_CONFIG, "sioPin must be <= 63"),
+                     DriverState::FAULT);
   }
   if (config.presencePin > 63) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "presencePin must be <= 63");
+    return failBegin(Status::Error(Err::INVALID_CONFIG, "presencePin must be <= 63"),
+                     DriverState::FAULT);
   }
   if (config.presencePin < -1) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "presencePin must be -1 or in range 0..63");
+    return failBegin(
+        Status::Error(Err::INVALID_CONFIG, "presencePin must be -1 or in range 0..63"),
+        DriverState::FAULT);
   }
   if (config.presencePin >= 0 && config.presencePin == config.sioPin) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "presencePin must be different from sioPin");
+    return failBegin(
+        Status::Error(Err::INVALID_CONFIG, "presencePin must be different from sioPin"),
+        DriverState::FAULT);
   }
   if (config.addressBits > 0x07) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "addressBits must be in range 0..7");
-  }
-  if (config.offlineThreshold == 0) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "offlineThreshold must be > 0");
+    return failBegin(Status::Error(Err::INVALID_CONFIG, "addressBits must be in range 0..7"),
+                     DriverState::FAULT);
   }
   if (config.writeTimeoutMs == 0) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be > 0");
+    return failBegin(Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be > 0"),
+                     DriverState::FAULT);
   }
   if (config.writeTimeoutMs > MAX_READY_TIMEOUT_MS) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be <= 250");
+    return failBegin(Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be <= 250"),
+                     DriverState::FAULT);
   }
   if (!isValidPartType(config.expectedPart)) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "invalid expectedPart enum");
+    return failBegin(Status::Error(Err::INVALID_CONFIG, "invalid expectedPart enum"),
+                     DriverState::FAULT);
   }
   if (!isValidSpeedMode(config.startupSpeed)) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "invalid startupSpeed enum");
+    return failBegin(Status::Error(Err::INVALID_CONFIG, "invalid startupSpeed enum"),
+                     DriverState::FAULT);
   }
 
   _config = config;
+  if (_config.offlineThreshold == 0) {
+    _config.offlineThreshold = 1;
+  }
   _initialized = false;
   _driverState = DriverState::UNINIT;
   _detectedPart = PartType::UNKNOWN;
@@ -169,13 +187,12 @@ Status Driver::begin(const Config& config) {
 
   Status st = _configurePins();
   if (!st.ok()) {
-    _driverState = DriverState::FAULT;
-    return st;
+    return failBegin(st, DriverState::FAULT);
   }
 
   if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
-    _driverState = DriverState::OFFLINE;
-    return Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent");
+    return failBegin(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"),
+                     DriverState::OFFLINE);
   }
 
   _driverState = DriverState::PROBING;
@@ -188,15 +205,15 @@ Status Driver::begin(const Config& config) {
     }
   }
   if (!discovery.ok()) {
-    _driverState = DriverState::OFFLINE;
-    return Status::Error(Err::NOT_PRESENT, "Device did not respond to reset/discovery");
+    return failBegin(
+        Status::Error(Err::NOT_PRESENT, "Device did not respond to reset/discovery"),
+        DriverState::OFFLINE);
   }
 
   uint32_t manufacturerId = 0;
   st = _readManufacturerIdRaw(manufacturerId);
   if (!st.ok()) {
-    _driverState = DriverState::OFFLINE;
-    return st;
+    return failBegin(st, DriverState::OFFLINE);
   }
 
   PartType detected = PartType::UNKNOWN;
@@ -205,18 +222,21 @@ Status Driver::begin(const Config& config) {
   } else if (manufacturerId == cmd::MANUFACTURER_ID_AT21CS11) {
     detected = PartType::AT21CS11;
   } else {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::PART_MISMATCH, "Unknown manufacturer ID", static_cast<int32_t>(manufacturerId));
+    return failBegin(
+        Status::Error(Err::PART_MISMATCH, "Unknown manufacturer ID",
+                      static_cast<int32_t>(manufacturerId)),
+        DriverState::FAULT);
   }
 
   if (_config.expectedPart != PartType::UNKNOWN && _config.expectedPart != detected) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::PART_MISMATCH, "Detected part does not match expectedPart");
+    return failBegin(Status::Error(Err::PART_MISMATCH, "Detected part does not match expectedPart"),
+                     DriverState::FAULT);
   }
 
   if (_config.startupSpeed == SpeedMode::STANDARD_SPEED && detected == PartType::AT21CS11) {
-    _driverState = DriverState::FAULT;
-    return Status::Error(Err::INVALID_CONFIG, "AT21CS11 does not support Standard Speed");
+    return failBegin(
+        Status::Error(Err::INVALID_CONFIG, "AT21CS11 does not support Standard Speed"),
+        DriverState::FAULT);
   }
 
   _detectedPart = detected;
@@ -226,12 +246,12 @@ Status Driver::begin(const Config& config) {
     bool ack = false;
     st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, false, ack);
     if (!st.ok()) {
-      _driverState = DriverState::OFFLINE;
-      return st;
+      return failBegin(st, DriverState::OFFLINE);
     }
     if (!ack) {
-      _driverState = DriverState::FAULT;
-      return Status::Error(Err::NACK_DEVICE_ADDRESS, "Standard Speed command NACK during begin()");
+      return failBegin(
+          Status::Error(Err::NACK_DEVICE_ADDRESS, "Standard Speed command NACK during begin()"),
+          DriverState::FAULT);
     }
     _setSpeedMode(SpeedMode::STANDARD_SPEED);
   } else {
@@ -265,6 +285,7 @@ void Driver::end() {
 #endif
   }
 
+  _config = Config{};
   _initialized = false;
   _driverState = DriverState::UNINIT;
   _detectedPart = PartType::UNKNOWN;
@@ -278,8 +299,29 @@ void Driver::end() {
 #endif
 }
 
+SettingsSnapshot Driver::getSettings() const {
+  SettingsSnapshot snapshot;
+  (void)getSettings(snapshot);
+  return snapshot;
+}
+
+Status Driver::getSettings(SettingsSnapshot& out) const {
+  out.config = _config;
+  out.initialized = _initialized;
+  out.state = _driverState;
+  out.detectedPart = _detectedPart;
+  out.speedMode = _speedMode;
+  out.lastOkMs = _lastOkMs;
+  out.lastErrorMs = _lastErrorMs;
+  out.lastError = _lastError;
+  out.consecutiveFailures = _consecutiveFailures;
+  out.totalFailures = _totalFailures;
+  out.totalSuccess = _totalSuccess;
+  return Status::Ok();
+}
+
 Status Driver::probe() {
-  Status st = _checkInitialized();
+  Status st = _checkInitialized(true);
   if (!st.ok()) {
     return st;
   }
@@ -299,7 +341,7 @@ Status Driver::probe() {
 }
 
 Status Driver::recover() {
-  Status st = _checkInitialized();
+  Status st = _checkInitialized(true);
   if (!st.ok()) {
     return st;
   }
@@ -1033,9 +1075,12 @@ Status Driver::_trackIo(const Status& st) {
   return st;
 }
 
-Status Driver::_checkInitialized() const {
+Status Driver::_checkInitialized(bool allowOffline) const {
   if (!_initialized) {
     return Status::Error(Err::NOT_INITIALIZED, "begin() must succeed before this operation");
+  }
+  if (!allowOffline && _driverState == DriverState::OFFLINE) {
+    return Status::Error(Err::INVALID_STATE, "Driver is offline; call recover()");
   }
   if (_driverState == DriverState::FAULT) {
     return Status::Error(Err::INVALID_STATE, "Driver in FAULT state; call begin() to reinitialize");
@@ -1257,15 +1302,36 @@ uint8_t Driver::_deviceAddress(uint8_t opcode, bool read) const {
 }
 
 Status Driver::_activateDevice() {
+  const SpeedMode desiredSpeed = _speedMode;
   Status st = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
   const uint16_t attempts = retryAttempts(_config.discoveryRetries);
   for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
     st = _resetAndDiscoverRaw();
     if (st.ok()) {
-      return st;
+      break;
     }
   }
-  return st;
+  if (!st.ok()) {
+    return st;
+  }
+
+  if (desiredSpeed == SpeedMode::STANDARD_SPEED) {
+    if (_detectedPart == PartType::AT21CS11) {
+      return Status::Error(Err::UNSUPPORTED_COMMAND, "AT21CS11 does not support Standard Speed");
+    }
+
+    bool ack = false;
+    st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, false, ack);
+    if (!st.ok()) {
+      return st;
+    }
+    if (!ack) {
+      return Status::Error(Err::NACK_DEVICE_ADDRESS, "Standard Speed command NACK during activation");
+    }
+    _setSpeedMode(SpeedMode::STANDARD_SPEED);
+  }
+
+  return Status::Ok();
 }
 
 Status Driver::_resetAndDiscoverRaw() {

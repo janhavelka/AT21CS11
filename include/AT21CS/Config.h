@@ -6,14 +6,14 @@
 
 namespace AT21CS {
 
-/// Supported device variants.
+/// @brief Supported device variants.
 enum class PartType : uint8_t {
   UNKNOWN = 0,
   AT21CS01,
   AT21CS11
 };
 
-/// Communication speed profile.
+/// @brief Communication speed profile.
 enum class SpeedMode : uint8_t {
   HIGH_SPEED = 0,
   STANDARD_SPEED
@@ -29,7 +29,7 @@ using NowMsFn = uint32_t (*)(void* user);
 /// @param user User context pointer passed through from Config
 using SleepUsFn = void (*)(uint32_t us, void* user);
 
-/// Driver configuration.
+/// @brief Driver configuration.
 struct Config {
   /// SI/O GPIO pin used by this device instance (required).
   int sioPin = -1;
@@ -44,7 +44,7 @@ struct Config {
   /// Device address bits A2:A0 (0-7).
   uint8_t addressBits = 0;
 
-  /// Consecutive failures required to move state to OFFLINE.
+  /// Consecutive failures required to move state to OFFLINE. Clamped to 1 in begin().
   uint8_t offlineThreshold = 5;
 
   /// Maximum time to wait for t_WR completion in waitReady()/write helpers.

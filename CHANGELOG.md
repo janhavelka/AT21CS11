@@ -4,14 +4,22 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+- `SettingsSnapshot`, `getSettings()`, `isInitialized()`, `getConfig()`, and `driverState()` for cache-only runtime/health inspection.
+- Bring-up CLI `cfg` / `settings` output now reports the cached settings snapshot, including initialization state and `offlineThreshold`.
+
 ### Changed
 - Doxyfile project metadata now matches `library.json` and references the
   maintained docs tree instead of removed template files.
+- Reference documentation now separates compact chip notes from full PDF extraction under `docs/extracted-md/` and `docs/pdf-extracted-md/`.
 - `begin()` now validates `expectedPart` and `startupSpeed` enum values before any GPIO/protocol activity.
+- `Config::offlineThreshold = 0` now normalizes to one, failed `begin()` clears stale runtime state, and `end()` clears cached configuration.
+- ESP32 PlatformIO builds now pin pioarduino `platform-espressif32` 54.03.20 and explicitly use C++17.
 - Multi-page write helpers now report `NOT_INITIALIZED` before argument validation when called before a successful `begin()`.
 - README write-ready documentation now matches the enforced `1..250 ms` timeout range and stalled-clock guard behavior.
 
 ### Fixed
+- Normal operations while `OFFLINE` now return `INVALID_STATE` without protocol traffic while `probe()` and `recover()` remain available.
 - `waitReady()` now has a finite stalled-clock poll guard when an injected millisecond source stops advancing.
 - ESP32 GPIO cleanup after failed initialization now avoids uncached direct-register pointer dereferences.
 - ESP32 cycle-counter usage now relies on the current `esp_cpu_get_cycle_count()` API instead of a removed `esp_cpu_get_ccount()` fallback.

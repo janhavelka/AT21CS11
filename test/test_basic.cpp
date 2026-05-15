@@ -27,6 +27,7 @@ void test_status_ok() {
 void test_status_error() {
   Status st = Status::Error(Err::INVALID_PARAM, "bad", 7);
   TEST_ASSERT_FALSE(st.ok());
+  TEST_ASSERT_FALSE(st.inProgress());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_PARAM), static_cast<uint8_t>(st.code));
   TEST_ASSERT_EQUAL_INT32(7, st.detail);
 }
@@ -61,16 +62,18 @@ void test_begin_rejects_same_presence_and_sio_pin() {
                           static_cast<uint8_t>(dev.state()));
 }
 
-void test_begin_rejects_zero_offline_threshold() {
+void test_begin_normalizes_zero_offline_threshold_before_probe() {
   Driver dev;
   Config cfg;
   cfg.sioPin = 6;
   cfg.offlineThreshold = 0;
   Status st = dev.begin(cfg);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::INVALID_CONFIG),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NOT_PRESENT),
                           static_cast<uint8_t>(st.code));
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::FAULT),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
                           static_cast<uint8_t>(dev.state()));
+  TEST_ASSERT_FALSE(dev.isInitialized());
+  TEST_ASSERT_EQUAL_UINT8(1u, dev.getConfig().offlineThreshold);
 }
 
 void test_begin_rejects_write_timeout_over_limit() {
@@ -157,6 +160,25 @@ void test_end_without_begin_keeps_uninit() {
   TEST_ASSERT_EQUAL_UINT32(0u, dev.totalFailures());
 }
 
+void test_settings_snapshot_reports_cached_state_without_io() {
+  Driver dev;
+
+  SettingsSnapshot snap;
+  TEST_ASSERT_TRUE(dev.getSettings(snap).ok());
+  TEST_ASSERT_FALSE(snap.initialized);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::UNINIT),
+                          static_cast<uint8_t>(snap.state));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(PartType::UNKNOWN),
+                          static_cast<uint8_t>(snap.detectedPart));
+  TEST_ASSERT_EQUAL_UINT8(5u, snap.config.offlineThreshold);
+  TEST_ASSERT_EQUAL_UINT32(0u, snap.totalSuccess);
+  TEST_ASSERT_EQUAL_UINT32(0u, snap.totalFailures);
+
+  const SettingsSnapshot byValue = dev.getSettings();
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(snap.state),
+                          static_cast<uint8_t>(byValue.state));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_status_ok);
@@ -164,7 +186,7 @@ int main() {
   RUN_TEST(test_config_defaults);
   RUN_TEST(test_begin_rejects_missing_sio_pin);
   RUN_TEST(test_begin_rejects_same_presence_and_sio_pin);
-  RUN_TEST(test_begin_rejects_zero_offline_threshold);
+  RUN_TEST(test_begin_normalizes_zero_offline_threshold_before_probe);
   RUN_TEST(test_begin_rejects_write_timeout_over_limit);
   RUN_TEST(test_begin_rejects_invalid_expected_part_enum);
   RUN_TEST(test_begin_rejects_invalid_startup_speed_enum);
@@ -172,5 +194,6 @@ int main() {
   RUN_TEST(test_recover_requires_begin);
   RUN_TEST(test_multi_page_write_helpers_check_initialization_first);
   RUN_TEST(test_end_without_begin_keeps_uninit);
+  RUN_TEST(test_settings_snapshot_reports_cached_state_without_io);
   return UNITY_END();
 }

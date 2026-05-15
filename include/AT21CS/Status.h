@@ -6,7 +6,7 @@
 
 namespace AT21CS {
 
-/// Error codes for all fallible driver operations.
+/// @brief Error codes for all fallible driver operations.
 enum class Err : uint8_t {
   OK = 0,
   NOT_INITIALIZED,
@@ -25,21 +25,29 @@ enum class Err : uint8_t {
   IO_ERROR
 };
 
-/// Status structure returned by all fallible APIs.
+/// @brief Status structure returned by all fallible APIs.
 struct Status {
-  Err code;
-  int32_t detail;
-  const char* msg;
+  Err code;        ///< Error code, or Err::OK on success.
+  int32_t detail;  ///< Optional implementation-specific detail.
+  const char* msg; ///< Static status message.
 
   /// @return true when code == Err::OK.
   constexpr bool ok() const { return code == Err::OK; }
 
-  /// Create a successful status value.
+  /// @return false; AT21CS has no asynchronous in-progress status.
+  constexpr bool inProgress() const { return false; }
+
+  /// @brief Create a successful status value.
+  /// @return Status with Err::OK.
   static constexpr Status Ok() {
     return Status{Err::OK, 0, "OK"};
   }
 
-  /// Create an error status value.
+  /// @brief Create an error status value.
+  /// @param err Error code.
+  /// @param message Static status message.
+  /// @param detailCode Optional implementation-specific detail.
+  /// @return Status with the given error code.
   static constexpr Status Error(Err err, const char* message, int32_t detailCode = 0) {
     return Status{err, detailCode, message};
   }

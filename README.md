@@ -94,13 +94,23 @@ void loop() {
 
 ### State / Health
 - `DriverState state() const`
+- `DriverState driverState() const`
 - `bool isOnline() const`
+- `bool isInitialized() const`
+- `const Config& getConfig() const`
+- `SettingsSnapshot getSettings() const`
+- `Status getSettings(SettingsSnapshot& out) const`
 - `Status lastError() const`
 - `uint8_t consecutiveFailures() const`
 - `uint32_t totalFailures() const`
 - `uint32_t totalSuccess() const`
 
 Validation and precondition errors are returned before protocol I/O and do not update health counters. `probe()` is diagnostic-only: it performs raw discovery and restores the previous state without changing health counters.
+`Config::offlineThreshold = 0` is normalized to one failed operation. Failed
+`begin()` calls reset stale runtime state, `end()` clears cached configuration,
+and normal operations while `OFFLINE` return `INVALID_STATE`; `probe()` and
+`recover()` remain the explicit paths for diagnostics and recovery. AT21CS
+operations are synchronous, so `Status::inProgress()` always returns `false`.
 
 ## Write-Ready Behavior (Current and Future)
 
@@ -214,6 +224,9 @@ Notes:
 ## Examples
 
 1. `examples/01_basic_bringup_cli` (single canonical bringup CLI with probe/recover/driver health/read/config/stress/stress_mix/selftest command surface)
+   - `cfg` / `settings` prints the cached `SettingsSnapshot`, including
+     initialization state, selected pins, address bits, detected part, speed,
+     verbose mode, and offline threshold.
 
 ## Static Reference
 
@@ -225,6 +238,12 @@ The chip reference remains in:
 
 - `CHANGELOG.md` - full release history
 - `docs/UNIFICATION_STANDARD.md` - shared API/CLI/test conventions
+
+## Development Build Notes
+
+The repository `platformio.ini` pins ESP32 example builds to the pioarduino
+`platform-espressif32` 54.03.20 package and explicitly builds with C++17. This
+keeps CI and local example builds on the same Arduino-ESP32 3.2.0 toolchain.
 - `docs/IDF_PORT.md` - ESP-IDF portability guidance
 - `release_notes.md` - latest release summary
 - `docs/DOXYGEN.md` - how to build and browse API docs
