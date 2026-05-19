@@ -32,10 +32,10 @@ presence pins.
 
 - Root `CMakeLists.txt` registers `src/AT21CS.cpp` and exports `include/`.
 - `idf_component.yml` targets ESP32-S2/S3 with ESP-IDF `>=6.0.1`.
-- `examples/espidf_basic` reuses the same bring-up CLI source as the Arduino
-  example through example-only compatibility glue in `examples/common/`.
+- `examples/espidf_basic` is a native IDF CLI with fixed command buffers and no
+  Arduino CLI source inclusion.
 - `tools/check_idf_example_contract.py` validates that the ESP-IDF entry point
-  stays tied to the shared CLI source and required native IDF components.
+  stays native and keeps the required command contract and IDF components.
 
 Build from the example directory with a configured ESP-IDF shell:
 

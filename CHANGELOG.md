@@ -5,9 +5,8 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Added
-- ESP-IDF component metadata and `examples/espidf_basic` for the shared bring-up CLI.
-- Example-only `IdfArduinoCompat.h` shim so the Arduino CLI can build under ESP-IDF without moving framework glue into the driver core.
-- Dedicated ESP-IDF example contract checker for the shared CLI wrapper.
+- ESP-IDF component metadata and a native `examples/espidf_basic` bring-up CLI.
+- Dedicated ESP-IDF example contract checker for native IDF API use and command coverage.
 - `SettingsSnapshot`, `getSettings()`, `isInitialized()`, `getConfig()`, and `driverState()` for cache-only runtime/health inspection.
 - Bring-up CLI `cfg` / `settings` output now reports the cached settings snapshot, including initialization state and `offlineThreshold`.
 
