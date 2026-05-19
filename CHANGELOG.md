@@ -7,6 +7,7 @@ All notable changes to this project are documented here.
 ### Added
 - ESP-IDF component metadata and `examples/espidf_basic` for the shared bring-up CLI.
 - Example-only `IdfArduinoCompat.h` shim so the Arduino CLI can build under ESP-IDF without moving framework glue into the driver core.
+- Dedicated ESP-IDF example contract checker for the shared CLI wrapper.
 - `SettingsSnapshot`, `getSettings()`, `isInitialized()`, `getConfig()`, and `driverState()` for cache-only runtime/health inspection.
 - Bring-up CLI `cfg` / `settings` output now reports the cached settings snapshot, including initialization state and `offlineThreshold`.
 
@@ -20,6 +21,8 @@ All notable changes to this project are documented here.
 - Multi-page write helpers now report `NOT_INITIALIZED` before argument validation when called before a successful `begin()`.
 - README write-ready documentation now matches the enforced `1..250 ms` timeout range and stalled-clock guard behavior.
 - Core GPIO and timing fallbacks now use explicit Arduino vs ESP-IDF platform paths instead of unconditional Arduino APIs.
+- `library.json` now advertises both Arduino and ESP-IDF framework support.
+- README documentation links and validation commands now match the files currently present in the repository.
 
 ### Fixed
 - Normal operations while `OFFLINE` now return `INVALID_STATE` without protocol traffic while `probe()` and `recover()` remain available.

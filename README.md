@@ -1,4 +1,4 @@
-# AT21CS01 / AT21CS11 Driver (ESP32, Arduino, PlatformIO)
+# AT21CS01 / AT21CS11 Driver (ESP32, Arduino, ESP-IDF)
 
 Production-grade single-wire EEPROM driver for Microchip **AT21CS01** and **AT21CS11**.
 
@@ -34,6 +34,8 @@ presence pins.
 - `idf_component.yml` targets ESP32-S2/S3 with ESP-IDF `>=6.0.1`.
 - `examples/espidf_basic` reuses the same bring-up CLI source as the Arduino
   example through example-only compatibility glue in `examples/common/`.
+- `tools/check_idf_example_contract.py` validates that the ESP-IDF entry point
+  stays tied to the shared CLI source and required native IDF components.
 
 Build from the example directory with a configured ESP-IDF shell:
 
@@ -242,10 +244,11 @@ Notes:
 
 ## Examples
 
-1. `examples/01_basic_bringup_cli` (single canonical bringup CLI with probe/recover/driver health/read/config/stress/stress_mix/selftest command surface)
+1. `examples/01_basic_bringup_cli` (single canonical Arduino bringup CLI with probe/recover/driver health/read/config/stress/stress_mix/selftest command surface)
    - `cfg` / `settings` prints the cached `SettingsSnapshot`, including
      initialization state, selected pins, address bits, detected part, speed,
      verbose mode, and offline threshold.
+2. `examples/espidf_basic` (native ESP-IDF wrapper around the same user-facing CLI source)
 
 ## Static Reference
 
@@ -256,17 +259,27 @@ The chip reference remains in:
 ## Documentation
 
 - `CHANGELOG.md` - full release history
-- `docs/UNIFICATION_STANDARD.md` - shared API/CLI/test conventions
+- `docs/IDF_PORT.md` - ESP-IDF portability guidance
+- `docs/IDF_PORT_IMPLEMENTATION.md` - implemented ESP-IDF port notes
 
 ## Development Build Notes
 
 The repository `platformio.ini` pins ESP32 example builds to the pioarduino
 `platform-espressif32` 54.03.20 package and explicitly builds with C++17. This
 keeps CI and local example builds on the same Arduino-ESP32 3.2.0 toolchain.
-- `docs/IDF_PORT.md` - ESP-IDF portability guidance
-- `docs/IDF_PORT_IMPLEMENTATION.md` - implemented ESP-IDF port notes
-- `release_notes.md` - latest release summary
-- `docs/DOXYGEN.md` - how to build and browse API docs
+
+Recommended validation:
+
+```bash
+python tools/check_cli_contract.py
+python tools/check_idf_example_contract.py
+python tools/check_core_timing_guard.py
+python -m platformio test -e native
+python -m platformio run -e esp32s3dev
+python -m platformio run -e esp32s2dev
+idf.py -C examples/espidf_basic set-target esp32s3
+idf.py -C examples/espidf_basic build
+```
 
 ## License
 

@@ -56,6 +56,7 @@ Completed during the implementation pass:
 - Arduino PlatformIO example builds.
 - Native/unit tests where present.
 - Static shared-CLI contract checks.
+- `tools/check_idf_example_contract.py` for the ESP-IDF wrapper contract.
 
 Still required before production hardware release:
 
