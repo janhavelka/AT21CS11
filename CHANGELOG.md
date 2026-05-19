@@ -5,6 +5,8 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Added
+- ESP-IDF component metadata and `examples/espidf_basic` for the shared bring-up CLI.
+- Example-only `IdfArduinoCompat.h` shim so the Arduino CLI can build under ESP-IDF without moving framework glue into the driver core.
 - `SettingsSnapshot`, `getSettings()`, `isInitialized()`, `getConfig()`, and `driverState()` for cache-only runtime/health inspection.
 - Bring-up CLI `cfg` / `settings` output now reports the cached settings snapshot, including initialization state and `offlineThreshold`.
 
@@ -17,6 +19,7 @@ All notable changes to this project are documented here.
 - ESP32 PlatformIO builds now pin pioarduino `platform-espressif32` 54.03.20 and explicitly use C++17.
 - Multi-page write helpers now report `NOT_INITIALIZED` before argument validation when called before a successful `begin()`.
 - README write-ready documentation now matches the enforced `1..250 ms` timeout range and stalled-clock guard behavior.
+- Core GPIO and timing fallbacks now use explicit Arduino vs ESP-IDF platform paths instead of unconditional Arduino APIs.
 
 ### Fixed
 - Normal operations while `OFFLINE` now return `INVALID_STATE` without protocol traffic while `probe()` and `recover()` remain available.

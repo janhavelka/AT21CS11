@@ -5,7 +5,17 @@
 #include <cstddef>
 #include <cstdint>
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_ESP32) || defined(AT21CS_PLATFORM_IDF)
+#ifndef AT21CS_PLATFORM_ESP32
+#define AT21CS_PLATFORM_ESP32 1
+#endif
+#else
+#ifndef AT21CS_PLATFORM_ESP32
+#define AT21CS_PLATFORM_ESP32 0
+#endif
+#endif
+
+#if AT21CS_PLATFORM_ESP32
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
 #include <soc/gpio_reg.h>
@@ -409,7 +419,7 @@ class Driver {
 
   uint32_t _lastTickMs = 0;
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   mutable portMUX_TYPE _timingMux = portMUX_INITIALIZER_UNLOCKED;
   // Direct-register GPIO for sub-microsecond bit-bang timing.
   volatile uint32_t* _gpioSetReg = nullptr;

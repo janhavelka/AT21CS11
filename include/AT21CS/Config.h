@@ -61,11 +61,13 @@ struct Config {
   SpeedMode startupSpeed = SpeedMode::HIGH_SPEED;
 
   /// Optional monotonic millisecond source.
-  /// If null, driver falls back to Arduino millis().
+  /// If null, Arduino builds fall back to millis() and ESP-IDF builds fall back
+  /// to esp_timer_get_time() / 1000.
   NowMsFn nowMs = nullptr;
 
   /// Optional microsecond delay hook used by bit-banging timing.
-  /// If null, driver falls back to Arduino delayMicroseconds().
+  /// If null, Arduino builds use their platform delay and ESP-IDF builds use
+  /// esp_rom_delay_us().
   SleepUsFn sleepUs = nullptr;
 
   /// User context for timing callbacks.

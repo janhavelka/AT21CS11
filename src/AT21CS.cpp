@@ -3,13 +3,28 @@
 
 #include "AT21CS/AT21CS.h"
 
-#include <Arduino.h>
-
 #include <climits>
 #include <cstring>
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO) || defined(ARDUINO_ARCH_ESP32)
+#define AT21CS_HAS_ARDUINO_PLATFORM 1
+#elif !defined(ESP_PLATFORM) && defined(__has_include)
+#if __has_include(<Arduino.h>)
+#define AT21CS_HAS_ARDUINO_PLATFORM 1
+#endif
+#endif
+
+#ifndef AT21CS_HAS_ARDUINO_PLATFORM
+#define AT21CS_HAS_ARDUINO_PLATFORM 0
+#endif
+
+#if AT21CS_HAS_ARDUINO_PLATFORM
+#include <Arduino.h>
+#endif
+
+#if AT21CS_PLATFORM_ESP32
 #include <driver/gpio.h>
+#include <esp_rom_sys.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
@@ -106,7 +121,7 @@ Status Driver::begin(const Config& config) {
   } else if (_config.sioPin >= 0) {
     // Clean up GPIO from a previously failed begin() that configured the pin
     // but didn't complete initialization.
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
     if (_gpioSetReg != nullptr) {
       _releaseLine();
     }
@@ -276,7 +291,7 @@ void Driver::tick(uint32_t nowMs) {
 
 void Driver::end() {
   if (_config.sioPin >= 0) {
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
     if (_gpioSetReg != nullptr) {
       _releaseLine();
     }
@@ -291,7 +306,7 @@ void Driver::end() {
   _detectedPart = PartType::UNKNOWN;
   _setSpeedMode(SpeedMode::HIGH_SPEED);
   _resetHealth();
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   _gpioSetReg = nullptr;
   _gpioClrReg = nullptr;
   _gpioInReg = nullptr;
@@ -1092,7 +1107,7 @@ Status Driver::_checkInitialized(bool allowOffline) const {
 }
 
 Status Driver::_configurePins() {
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   gpio_config_t sioCfg{};
   sioCfg.pin_bit_mask = (1ULL << static_cast<uint8_t>(_config.sioPin));
   sioCfg.mode = GPIO_MODE_INPUT_OUTPUT_OD;
@@ -1121,8 +1136,10 @@ Status Driver::_configurePins() {
     _gpioMask   = (1U << (pin - 32));
   }
 
-  // Cache CPU frequency for cycle-accurate timing.
+#if AT21CS_HAS_ARDUINO_PLATFORM
+  // Cache CPU frequency for Arduino-ESP32 cycle-accurate timing.
   _cyclesPerUs = static_cast<uint32_t>(getCpuFrequencyMhz());
+#endif
 
   if (_config.presencePin >= 0) {
     gpio_config_t presenceCfg{};
@@ -1135,12 +1152,14 @@ Status Driver::_configurePins() {
       return Status::Error(Err::INVALID_CONFIG, "Failed to configure presencePin", _config.presencePin);
     }
   }
-#else
+#elif AT21CS_HAS_ARDUINO_PLATFORM
   pinMode(static_cast<uint8_t>(_config.sioPin), OUTPUT_OPEN_DRAIN);
   digitalWrite(static_cast<uint8_t>(_config.sioPin), HIGH);
   if (_config.presencePin >= 0) {
     pinMode(static_cast<uint8_t>(_config.presencePin), INPUT);
   }
+#else
+  return Status::Error(Err::INVALID_CONFIG, "No GPIO backend for this platform");
 #endif
 
   return Status::Ok();
@@ -1150,40 +1169,48 @@ bool Driver::_presencePinReportsPresent() const {
   if (_config.presencePin < 0) {
     return true;
   }
+#if AT21CS_PLATFORM_ESP32
+  const int level = gpio_get_level(static_cast<gpio_num_t>(_config.presencePin));
+#elif AT21CS_HAS_ARDUINO_PLATFORM
   const int level = digitalRead(static_cast<uint8_t>(_config.presencePin));
+#else
+  const int level = 0;
+#endif
   return _config.presenceActiveHigh ? (level != 0) : (level == 0);
 }
 
 AT21CS_IRAM void Driver::_releaseLine() {
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   if (_gpioSetReg == nullptr) {
     return;
   }
   *_gpioSetReg = _gpioMask;
-#else
+#elif AT21CS_HAS_ARDUINO_PLATFORM
   digitalWrite(static_cast<uint8_t>(_config.sioPin), HIGH);
 #endif
 }
 
 AT21CS_IRAM void Driver::_lineLow() {
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   if (_gpioClrReg == nullptr) {
     return;
   }
   *_gpioClrReg = _gpioMask;
-#else
+#elif AT21CS_HAS_ARDUINO_PLATFORM
   digitalWrite(static_cast<uint8_t>(_config.sioPin), LOW);
 #endif
 }
 
 AT21CS_IRAM bool Driver::_readLine() const {
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   if (_gpioInReg == nullptr) {
     return true;
   }
   return (*_gpioInReg & _gpioMask) != 0;
-#else
+#elif AT21CS_HAS_ARDUINO_PLATFORM
   return digitalRead(static_cast<uint8_t>(_config.sioPin)) != 0;
+#else
+  return true;
 #endif
 }
 
@@ -1239,7 +1266,7 @@ AT21CS_IRAM bool Driver::rxBit() {
 }
 
 AT21CS_IRAM bool Driver::txByte(uint8_t value) {
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   portENTER_CRITICAL(&_timingMux);
 #endif
 
@@ -1254,7 +1281,7 @@ AT21CS_IRAM bool Driver::txByte(uint8_t value) {
 
   const bool ack = !rxBit();
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   portEXIT_CRITICAL(&_timingMux);
 #endif
 
@@ -1262,7 +1289,7 @@ AT21CS_IRAM bool Driver::txByte(uint8_t value) {
 }
 
 AT21CS_IRAM uint8_t Driver::rxByte(bool ack) {
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   portENTER_CRITICAL(&_timingMux);
 #endif
 
@@ -1279,7 +1306,7 @@ AT21CS_IRAM uint8_t Driver::rxByte(bool ack) {
     txBit1();
   }
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   portEXIT_CRITICAL(&_timingMux);
 #endif
 
@@ -1339,7 +1366,7 @@ Status Driver::_resetAndDiscoverRaw() {
   releaseLine();
   _sleepUs(RESET_RECOVERY_US);
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   portENTER_CRITICAL(&_timingMux);
 #endif
 
@@ -1356,7 +1383,7 @@ Status Driver::_resetAndDiscoverRaw() {
   _sleepUs(DISCOVERY_SAMPLE_DELAY_US);
   const bool present = !_readLine();
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if AT21CS_PLATFORM_ESP32
   portEXIT_CRITICAL(&_timingMux);
 #endif
 
@@ -1477,7 +1504,13 @@ uint32_t Driver::_nowMs() const {
   if (_config.nowMs != nullptr) {
     return _config.nowMs(_config.timeUser);
   }
+#if AT21CS_HAS_ARDUINO_PLATFORM
   return millis();
+#elif defined(ESP_PLATFORM)
+  return static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
+#else
+  return 0U;
+#endif
 }
 
 AT21CS_IRAM void Driver::_sleepUs(uint32_t us) const {
@@ -1495,7 +1528,9 @@ AT21CS_IRAM void Driver::_sleepUs(uint32_t us) const {
   const uint32_t target = us * _cyclesPerUs;
   const uint32_t start = esp_cpu_get_cycle_count();
   while ((esp_cpu_get_cycle_count() - start) < target) {}
-#else
+#elif defined(ESP_PLATFORM)
+  esp_rom_delay_us(us);
+#elif AT21CS_HAS_ARDUINO_PLATFORM
   delayMicroseconds(us);
 #endif
 }

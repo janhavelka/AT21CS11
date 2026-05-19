@@ -23,6 +23,25 @@ lib_deps =
   https://github.com/janhavelka/AT21CS11.git
 ```
 
+## ESP-IDF Component
+
+The driver core can also build as an ESP-IDF component. The application still
+owns board wiring and the single-wire bus pins through `Config`; the library
+does not create global GPIO policy beyond the configured SI/O and optional
+presence pins.
+
+- Root `CMakeLists.txt` registers `src/AT21CS.cpp` and exports `include/`.
+- `idf_component.yml` targets ESP32-S2/S3 with ESP-IDF `>=6.0.1`.
+- `examples/espidf_basic` reuses the same bring-up CLI source as the Arduino
+  example through example-only compatibility glue in `examples/common/`.
+
+Build from the example directory with a configured ESP-IDF shell:
+
+```sh
+idf.py set-target esp32s3
+idf.py build
+```
+
 ## Quick Start
 
 ```cpp
@@ -245,6 +264,7 @@ The repository `platformio.ini` pins ESP32 example builds to the pioarduino
 `platform-espressif32` 54.03.20 package and explicitly builds with C++17. This
 keeps CI and local example builds on the same Arduino-ESP32 3.2.0 toolchain.
 - `docs/IDF_PORT.md` - ESP-IDF portability guidance
+- `docs/IDF_PORT_IMPLEMENTATION.md` - implemented ESP-IDF port notes
 - `release_notes.md` - latest release summary
 - `docs/DOXYGEN.md` - how to build and browse API docs
 

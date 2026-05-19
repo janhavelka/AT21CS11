@@ -1,0 +1,10 @@
+version: "1.3.0"
+description: "Production-grade AT21CS01/AT21CS11 single-wire EEPROM driver"
+license: "MIT"
+url: "https://github.com/janhavelka/AT21CS11"
+repository: "https://github.com/janhavelka/AT21CS11.git"
+targets:
+  - esp32s2
+  - esp32s3
+dependencies:
+  idf: ">=6.0.1"
