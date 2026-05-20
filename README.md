@@ -248,7 +248,7 @@ Notes:
    - `cfg` / `settings` prints the cached `SettingsSnapshot`, including
      initialization state, selected pins, address bits, detected part, speed,
      verbose mode, and offline threshold.
-2. `examples/espidf_basic` (native ESP-IDF wrapper around the same user-facing CLI source)
+2. `examples/espidf_basic` (native ESP-IDF CLI with the same user-facing command contract)
 
 ## Static Reference
 
@@ -275,8 +275,8 @@ python tools/check_cli_contract.py
 python tools/check_idf_example_contract.py
 python tools/check_core_timing_guard.py
 python -m platformio test -e native
-python -m platformio run -e esp32s3dev
-python -m platformio run -e esp32s2dev
+python -m platformio run -e ex_cli_s3
+python -m platformio run -e ex_cli_s2
 idf.py -C examples/espidf_basic set-target esp32s3
 idf.py -C examples/espidf_basic build
 ```

@@ -1,10 +1,6 @@
-#if defined(AT21CS_EXAMPLE_PLATFORM_IDF)
-#include "../common/IdfArduinoCompat.h"
-#else
 #include <Arduino.h>
-#endif
 
-#if defined(ARDUINO_ARCH_ESP32) || defined(AT21CS_EXAMPLE_PLATFORM_IDF)
+#if defined(ARDUINO_ARCH_ESP32)
 #include <driver/gpio.h>
 #include <esp_timer.h>
 #if __has_include(<esp_cpu.h>)

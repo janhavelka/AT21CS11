@@ -4,7 +4,7 @@ Date: 2026-05-19.
 
 ## Implemented
 
-- Replaced the ESP-IDF wrapper entry point with a native `app_main` CLI.
+- Replaced the previous ESP-IDF entry point with a native `app_main` CLI.
 - Updated the IDF contract check to reject Arduino headers, Arduino CLI source
   inclusion, Arduino serial/string types, and Arduino-style facades in the IDF
   example.

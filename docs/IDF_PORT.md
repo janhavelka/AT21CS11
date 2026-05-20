@@ -27,9 +27,9 @@ serial-number read, raw/chip workflow notes, selftest, stress, and verbose.
 ```bash
 python tools/check_core_timing_guard.py
 python tools/check_idf_example_contract.py
-python -m platformio test -e test_native
-python -m platformio run -e ex_bringup_s3
-python -m platformio run -e ex_bringup_s2
+python -m platformio test -e native
+python -m platformio run -e ex_cli_s3
+python -m platformio run -e ex_cli_s2
 idf.py -C examples/espidf_basic set-target esp32s3
 idf.py -C examples/espidf_basic build
 git diff --check

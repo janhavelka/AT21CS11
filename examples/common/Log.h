@@ -8,11 +8,7 @@
 
 #pragma once
 
-#if defined(AT21CS_EXAMPLE_PLATFORM_IDF)
-#include "IdfArduinoCompat.h"
-#else
 #include <Arduino.h>
-#endif
 
 #include "examples/common/BuildConfig.h"
 

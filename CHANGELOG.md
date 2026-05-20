@@ -22,6 +22,9 @@ All notable changes to this project are documented here.
 - Core GPIO and timing fallbacks now use explicit Arduino vs ESP-IDF platform paths instead of unconditional Arduino APIs.
 - `library.json` now advertises both Arduino and ESP-IDF framework support.
 - README documentation links and validation commands now match the files currently present in the repository.
+- Removed the obsolete example-local legacy IDF facade; the Arduino CLI is
+  Arduino-only and the ESP-IDF CLI is a separate native `app_main` program with
+  the same command contract.
 
 ### Fixed
 - Normal operations while `OFFLINE` now return `INVALID_STATE` without protocol traffic while `probe()` and `recover()` remain available.
