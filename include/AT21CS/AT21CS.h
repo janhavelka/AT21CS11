@@ -5,30 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 
-#if defined(ARDUINO_ARCH_ESP32) || defined(AT21CS_PLATFORM_IDF)
-#ifndef AT21CS_PLATFORM_ESP32
-#define AT21CS_PLATFORM_ESP32 1
-#endif
-#else
-#ifndef AT21CS_PLATFORM_ESP32
-#define AT21CS_PLATFORM_ESP32 0
-#endif
-#endif
-
-#if AT21CS_PLATFORM_ESP32
-#include <freertos/FreeRTOS.h>
-#include <freertos/portmacro.h>
-#include <soc/gpio_reg.h>
-#include <esp_cpu.h>
-#include <esp_attr.h>
-#define AT21CS_IRAM IRAM_ATTR
-#else
-#define AT21CS_IRAM
-#endif
-
 #include "AT21CS/CommandTable.h"
 #include "AT21CS/Config.h"
 #include "AT21CS/Status.h"
+#include "AT21CS/Transport.h"
 #include "AT21CS/Version.h"
 
 namespace AT21CS {
@@ -322,14 +302,7 @@ class Driver {
   static uint8_t crc8_31(const uint8_t* data, size_t len);
 
  private:
-  struct TimingProfile {
-    uint16_t bitUs;
-    uint16_t low0Us;
-    uint16_t low1Us;
-    uint16_t readLowUs;
-    uint16_t readSampleUs;
-    uint16_t htssUs;
-  };
+  using TimingProfile = SingleWireTimingProfile;
 
   static constexpr TimingProfile HIGH_SPEED_TIMING = {
       12,  // bitUs
@@ -362,7 +335,9 @@ class Driver {
   Status _trackIo(const Status& st);
   Status _checkInitialized(bool allowOffline = false) const;
 
-  // GPIO + PHY helpers
+  // Single-wire backend + PHY helpers
+  bool _hasTransport() const;
+  bool _hasPresenceIndicator() const;
   Status _configurePins();
   bool _presencePinReportsPresent() const;
   void _releaseLine();
@@ -419,14 +394,13 @@ class Driver {
 
   uint32_t _lastTickMs = 0;
 
-#if AT21CS_PLATFORM_ESP32
-  mutable portMUX_TYPE _timingMux = portMUX_INITIALIZER_UNLOCKED;
-  // Direct-register GPIO for sub-microsecond bit-bang timing.
-  volatile uint32_t* _gpioSetReg = nullptr;
-  volatile uint32_t* _gpioClrReg = nullptr;
-  volatile uint32_t* _gpioInReg = nullptr;
-  uint32_t _gpioMask = 0;
-  uint32_t _cyclesPerUs = 240;  // CPU cycles per microsecond (cached at begin)
-#endif
+  struct BuiltInBackendState {
+    uintptr_t lineSetReg = 0;
+    uintptr_t lineClrReg = 0;
+    uintptr_t lineInReg = 0;
+    uint32_t lineMask = 0;
+    uint32_t cyclesPerUs = 240;
+  };
+  BuiltInBackendState _backend{};
 };
 }  // namespace AT21CS

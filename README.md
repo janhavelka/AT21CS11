@@ -30,7 +30,16 @@ owns board wiring and the single-wire bus pins through `Config`; the library
 does not create global GPIO policy beyond the configured SI/O and optional
 presence pins.
 
-- Root `CMakeLists.txt` registers `src/AT21CS.cpp` and exports `include/`.
+- Root `CMakeLists.txt` registers the framework-neutral protocol source plus
+  the private built-in ESP32 compatibility backend source and exports `include/`.
+- ESP-IDF-only compile definitions are private to the component target; public
+  headers do not require ESP-IDF, FreeRTOS, or SoC GPIO headers.
+- Release-candidate backend policy: the ESP32 compatibility backend remains
+  enabled by default for this major version so existing `Config::sioPin`
+  examples keep building. Transport-only ESP-IDF consumers can set
+  `AT21CS_ENABLE_ESP32_COMPAT_BACKEND=OFF` at CMake configure time to avoid
+  the ESP32 GPIO/timer/FreeRTOS component dependencies; in that mode
+  `Config::transport` is required.
 - `idf_component.yml` targets ESP32-S2/S3 with ESP-IDF `>=6.0.1`.
 - `examples/espidf_basic` is a native IDF CLI with fixed command buffers and no
   Arduino CLI source inclusion.
@@ -82,6 +91,29 @@ void loop() {
 - `Status begin(const Config& config)`
 - `void tick(uint32_t nowMs)`
 - `void end()`
+
+### Backend Boundary
+- `AT21CS/Transport.h` defines the framework-neutral `SingleWireTransport`
+  contract for explicit single-wire backends.
+- Existing sketches can keep using `Config::sioPin` and `presencePin`; setting
+  `Config::transport` opts into an injected backend with byte-level timing
+  primitives.
+- `Config::sioPin`, `presencePin`, and `presenceActiveHigh` are retained for
+  this major version as compatibility backend config only. Leave them unset
+  when `Config::transport` is provided; mixed transport-plus-pin config is
+  rejected by `begin()` with `INVALID_CONFIG`. Injected backends expose
+  presence through `SingleWireTransport::presencePresent`.
+- The compatibility pin-based backend is implemented in a private platform
+  source. Public headers and the core protocol source do not include Arduino,
+  ESP-IDF, FreeRTOS, or ESP32 GPIO/timing headers.
+- For this release candidate the compatibility backend is still the default
+  ESP-IDF component path. It can be disabled with the CMake cache option
+  `AT21CS_ENABLE_ESP32_COMPAT_BACKEND=OFF` only for applications that provide
+  a complete `SingleWireTransport`.
+- Injected transports must provide `writeByteReadAck`, `readByteSendAck`,
+  `resetAndDiscover`, `releaseLine`, and a microsecond wait source. The backend
+  owns any critical sections, interrupt masking, fast GPIO access, and timing
+  calibration needed to meet AT21CS timing at the SI/O pin.
 
 ### Presence / Recovery
 - `Status probe()`
@@ -261,6 +293,8 @@ The chip reference remains in:
 - `CHANGELOG.md` - full release history
 - `docs/IDF_PORT.md` - ESP-IDF portability guidance
 - `docs/IDF_PORT_IMPLEMENTATION.md` - implemented ESP-IDF port notes
+- `docs/MIGRATION.md` - compatibility and staged backend split notes
+- `docs/ARCHITECTURE_SPLIT_PLAN.md` - planned core/backend split and remaining work
 
 ## Development Build Notes
 

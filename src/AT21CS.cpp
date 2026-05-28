@@ -6,33 +6,6 @@
 #include <climits>
 #include <cstring>
 
-#if defined(ARDUINO) || defined(ARDUINO_ARCH_ESP32)
-#define AT21CS_HAS_ARDUINO_PLATFORM 1
-#elif !defined(ESP_PLATFORM) && defined(__has_include)
-#if __has_include(<Arduino.h>)
-#define AT21CS_HAS_ARDUINO_PLATFORM 1
-#endif
-#endif
-
-#ifndef AT21CS_HAS_ARDUINO_PLATFORM
-#define AT21CS_HAS_ARDUINO_PLATFORM 0
-#endif
-
-#if AT21CS_HAS_ARDUINO_PLATFORM
-#include <Arduino.h>
-#endif
-
-#if AT21CS_PLATFORM_ESP32
-#include <driver/gpio.h>
-#include <esp_rom_sys.h>
-#include <esp_timer.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/portmacro.h>
-#if __has_include(<esp_cpu.h>)
-#include <esp_cpu.h>
-#endif
-#endif
-
 namespace {
 
 inline void incrementWrap(uint8_t& value) {
@@ -108,6 +81,15 @@ inline uint32_t waitReadyStallGuardIterations(uint32_t timeoutMs) {
 
 static constexpr uint32_t MAX_READY_TIMEOUT_MS = 250;
 
+inline bool hasRequiredTransportPrimitives(const AT21CS::SingleWireTransport& transport,
+                                           bool configHasSleepUs) {
+  return transport.releaseLine != nullptr &&
+         transport.writeByteReadAck != nullptr &&
+         transport.readByteSendAck != nullptr &&
+         transport.resetAndDiscover != nullptr &&
+         (configHasSleepUs || transport.sleepUs != nullptr);
+}
+
 }  // namespace
 
 namespace AT21CS {
@@ -118,16 +100,15 @@ constexpr Driver::TimingProfile Driver::STANDARD_SPEED_TIMING;
 Status Driver::begin(const Config& config) {
   if (_initialized) {
     end();
-  } else if (_config.sioPin >= 0) {
-    // Clean up GPIO from a previously failed begin() that configured the pin
-    // but didn't complete initialization.
-#if AT21CS_PLATFORM_ESP32
-    if (_gpioSetReg != nullptr) {
-      _releaseLine();
-    }
-#else
+  } else if (_hasTransport()) {
     _releaseLine();
-#endif
+    if (_config.transport->end != nullptr) {
+      _config.transport->end(_config.transport->user);
+    }
+  } else if (_config.sioPin >= 0) {
+    // Clean up the line from a previously failed begin() that configured it
+    // but didn't complete initialization.
+    _releaseLine();
   }
 
   _config = Config{};
@@ -147,24 +128,42 @@ Status Driver::begin(const Config& config) {
     return failure;
   };
 
-  if (config.sioPin < 0) {
+  const bool usesTransport = (config.transport != nullptr);
+  if (usesTransport &&
+      !hasRequiredTransportPrimitives(*config.transport, config.sleepUs != nullptr)) {
+    return failBegin(
+        Status::Error(Err::INVALID_CONFIG, "transport missing required single-wire primitives"),
+        DriverState::FAULT);
+  }
+  if (usesTransport && config.sioPin >= 0) {
+    return failBegin(
+        Status::Error(Err::INVALID_CONFIG, "sioPin is only valid with built-in backend"),
+        DriverState::FAULT);
+  }
+  if (usesTransport && config.presencePin != -1) {
+    return failBegin(
+        Status::Error(Err::INVALID_CONFIG,
+                      "presencePin is only valid with built-in backend"),
+        DriverState::FAULT);
+  }
+  if (!usesTransport && config.sioPin < 0) {
     return failBegin(Status::Error(Err::INVALID_CONFIG, "sioPin must be >= 0"),
                      DriverState::FAULT);
   }
-  if (config.sioPin > 63) {
+  if (!usesTransport && config.sioPin > 63) {
     return failBegin(Status::Error(Err::INVALID_CONFIG, "sioPin must be <= 63"),
                      DriverState::FAULT);
   }
-  if (config.presencePin > 63) {
+  if (!usesTransport && config.presencePin > 63) {
     return failBegin(Status::Error(Err::INVALID_CONFIG, "presencePin must be <= 63"),
                      DriverState::FAULT);
   }
-  if (config.presencePin < -1) {
+  if (!usesTransport && config.presencePin < -1) {
     return failBegin(
         Status::Error(Err::INVALID_CONFIG, "presencePin must be -1 or in range 0..63"),
         DriverState::FAULT);
   }
-  if (config.presencePin >= 0 && config.presencePin == config.sioPin) {
+  if (!usesTransport && config.presencePin >= 0 && config.presencePin == config.sioPin) {
     return failBegin(
         Status::Error(Err::INVALID_CONFIG, "presencePin must be different from sioPin"),
         DriverState::FAULT);
@@ -205,7 +204,7 @@ Status Driver::begin(const Config& config) {
     return failBegin(st, DriverState::FAULT);
   }
 
-  if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+  if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
     return failBegin(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"),
                      DriverState::OFFLINE);
   }
@@ -290,14 +289,13 @@ void Driver::tick(uint32_t nowMs) {
 }
 
 void Driver::end() {
-  if (_config.sioPin >= 0) {
-#if AT21CS_PLATFORM_ESP32
-    if (_gpioSetReg != nullptr) {
-      _releaseLine();
-    }
-#else
+  if (_hasTransport()) {
     _releaseLine();
-#endif
+    if (_config.transport->end != nullptr) {
+      _config.transport->end(_config.transport->user);
+    }
+  } else if (_config.sioPin >= 0) {
+    _releaseLine();
   }
 
   _config = Config{};
@@ -306,12 +304,7 @@ void Driver::end() {
   _detectedPart = PartType::UNKNOWN;
   _setSpeedMode(SpeedMode::HIGH_SPEED);
   _resetHealth();
-#if AT21CS_PLATFORM_ESP32
-  _gpioSetReg = nullptr;
-  _gpioClrReg = nullptr;
-  _gpioInReg = nullptr;
-  _gpioMask = 0;
-#endif
+  _backend = BuiltInBackendState{};
 }
 
 SettingsSnapshot Driver::getSettings() const {
@@ -341,7 +334,7 @@ Status Driver::probe() {
     return st;
   }
 
-  if (_config.presencePin >= 0) {
+  if (_hasPresenceIndicator()) {
     if (!_presencePinReportsPresent()) {
       return Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent");
     }
@@ -361,7 +354,7 @@ Status Driver::recover() {
     return st;
   }
 
-  if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+  if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
     _driverState = DriverState::OFFLINE;
     return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
   }
@@ -423,7 +416,7 @@ Status Driver::resetAndDiscover() {
     return st;
   }
 
-  if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+  if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
     _driverState = DriverState::OFFLINE;
     return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
   }
@@ -448,7 +441,7 @@ Status Driver::isPresent(bool& present) {
     return st;
   }
 
-  if (_config.presencePin >= 0) {
+  if (_hasPresenceIndicator()) {
     present = _presencePinReportsPresent();
     return Status::Ok();
   }
@@ -480,7 +473,7 @@ Status Driver::waitReady(uint32_t timeoutMs) {
     return Status::Error(Err::INVALID_PARAM, "timeoutMs must be <= 250");
   }
 
-  if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+  if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
     _driverState = DriverState::OFFLINE;
     return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
   }
@@ -491,7 +484,7 @@ Status Driver::waitReady(uint32_t timeoutMs) {
   uint32_t stalledPolls = 0;
   const uint32_t maxStalledPolls = waitReadyStallGuardIterations(timeoutMs);
   while (true) {
-    if (_config.presencePin >= 0 && !_presencePinReportsPresent()) {
+    if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
       _driverState = DriverState::OFFLINE;
       return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
     }
@@ -1106,221 +1099,15 @@ Status Driver::_checkInitialized(bool allowOffline) const {
   return Status::Ok();
 }
 
-Status Driver::_configurePins() {
-#if AT21CS_PLATFORM_ESP32
-  gpio_config_t sioCfg{};
-  sioCfg.pin_bit_mask = (1ULL << static_cast<uint8_t>(_config.sioPin));
-  sioCfg.mode = GPIO_MODE_INPUT_OUTPUT_OD;
-  sioCfg.pull_up_en = GPIO_PULLUP_DISABLE;
-  sioCfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
-  sioCfg.intr_type = GPIO_INTR_DISABLE;
-
-  if (gpio_config(&sioCfg) != ESP_OK) {
-    return Status::Error(Err::INVALID_CONFIG, "Failed to configure sioPin", _config.sioPin);
-  }
-  if (gpio_set_level(static_cast<gpio_num_t>(_config.sioPin), 1) != ESP_OK) {
-    return Status::Error(Err::INVALID_CONFIG, "Failed to release sioPin", _config.sioPin);
-  }
-
-  // Cache direct-register pointers for sub-microsecond GPIO access.
-  const uint8_t pin = static_cast<uint8_t>(_config.sioPin);
-  if (pin < 32) {
-    _gpioSetReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT_W1TS_REG);
-    _gpioClrReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT_W1TC_REG);
-    _gpioInReg  = reinterpret_cast<volatile uint32_t*>(GPIO_IN_REG);
-    _gpioMask   = (1U << pin);
-  } else {
-    _gpioSetReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT1_W1TS_REG);
-    _gpioClrReg = reinterpret_cast<volatile uint32_t*>(GPIO_OUT1_W1TC_REG);
-    _gpioInReg  = reinterpret_cast<volatile uint32_t*>(GPIO_IN1_REG);
-    _gpioMask   = (1U << (pin - 32));
-  }
-
-#if AT21CS_HAS_ARDUINO_PLATFORM
-  // Cache CPU frequency for Arduino-ESP32 cycle-accurate timing.
-  _cyclesPerUs = static_cast<uint32_t>(getCpuFrequencyMhz());
-#endif
-
-  if (_config.presencePin >= 0) {
-    gpio_config_t presenceCfg{};
-    presenceCfg.pin_bit_mask = (1ULL << static_cast<uint8_t>(_config.presencePin));
-    presenceCfg.mode = GPIO_MODE_INPUT;
-    presenceCfg.pull_up_en = GPIO_PULLUP_DISABLE;
-    presenceCfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    presenceCfg.intr_type = GPIO_INTR_DISABLE;
-    if (gpio_config(&presenceCfg) != ESP_OK) {
-      return Status::Error(Err::INVALID_CONFIG, "Failed to configure presencePin", _config.presencePin);
-    }
-  }
-#elif AT21CS_HAS_ARDUINO_PLATFORM
-  pinMode(static_cast<uint8_t>(_config.sioPin), OUTPUT_OPEN_DRAIN);
-  digitalWrite(static_cast<uint8_t>(_config.sioPin), HIGH);
-  if (_config.presencePin >= 0) {
-    pinMode(static_cast<uint8_t>(_config.presencePin), INPUT);
-  }
-#else
-  return Status::Error(Err::INVALID_CONFIG, "No GPIO backend for this platform");
-#endif
-
-  return Status::Ok();
+bool Driver::_hasTransport() const {
+  return _config.transport != nullptr;
 }
 
-bool Driver::_presencePinReportsPresent() const {
-  if (_config.presencePin < 0) {
+bool Driver::_hasPresenceIndicator() const {
+  if (_hasTransport() && _config.transport->presencePresent != nullptr) {
     return true;
   }
-#if AT21CS_PLATFORM_ESP32
-  const int level = gpio_get_level(static_cast<gpio_num_t>(_config.presencePin));
-#elif AT21CS_HAS_ARDUINO_PLATFORM
-  const int level = digitalRead(static_cast<uint8_t>(_config.presencePin));
-#else
-  const int level = 0;
-#endif
-  return _config.presenceActiveHigh ? (level != 0) : (level == 0);
-}
-
-AT21CS_IRAM void Driver::_releaseLine() {
-#if AT21CS_PLATFORM_ESP32
-  if (_gpioSetReg == nullptr) {
-    return;
-  }
-  *_gpioSetReg = _gpioMask;
-#elif AT21CS_HAS_ARDUINO_PLATFORM
-  digitalWrite(static_cast<uint8_t>(_config.sioPin), HIGH);
-#endif
-}
-
-AT21CS_IRAM void Driver::_lineLow() {
-#if AT21CS_PLATFORM_ESP32
-  if (_gpioClrReg == nullptr) {
-    return;
-  }
-  *_gpioClrReg = _gpioMask;
-#elif AT21CS_HAS_ARDUINO_PLATFORM
-  digitalWrite(static_cast<uint8_t>(_config.sioPin), LOW);
-#endif
-}
-
-AT21CS_IRAM bool Driver::_readLine() const {
-#if AT21CS_PLATFORM_ESP32
-  if (_gpioInReg == nullptr) {
-    return true;
-  }
-  return (*_gpioInReg & _gpioMask) != 0;
-#elif AT21CS_HAS_ARDUINO_PLATFORM
-  return digitalRead(static_cast<uint8_t>(_config.sioPin)) != 0;
-#else
-  return true;
-#endif
-}
-
-AT21CS_IRAM void Driver::driveLow(uint32_t lowUs) {
-  _lineLow();
-  _sleepUs(lowUs);
-}
-
-AT21CS_IRAM void Driver::releaseLine() {
-  _releaseLine();
-}
-
-AT21CS_IRAM bool Driver::readLine() {
-  return _readLine();
-}
-
-AT21CS_IRAM void Driver::txBit0() {
-  _lineLow();
-  _sleepUs(_timing.low0Us);
-  _releaseLine();
-
-  if (_timing.bitUs > _timing.low0Us) {
-    _sleepUs(static_cast<uint32_t>(_timing.bitUs - _timing.low0Us));
-  }
-}
-
-AT21CS_IRAM void Driver::txBit1() {
-  _lineLow();
-  _sleepUs(_timing.low1Us);
-  _releaseLine();
-
-  if (_timing.bitUs > _timing.low1Us) {
-    _sleepUs(static_cast<uint32_t>(_timing.bitUs - _timing.low1Us));
-  }
-}
-
-AT21CS_IRAM bool Driver::rxBit() {
-  _lineLow();
-  _sleepUs(_timing.readLowUs);
-  _releaseLine();
-
-  if (_timing.readSampleUs > 0) {
-    _sleepUs(_timing.readSampleUs);
-  }
-
-  const bool bit = _readLine();
-  const uint16_t elapsed = static_cast<uint16_t>(_timing.readLowUs + _timing.readSampleUs);
-  if (_timing.bitUs > elapsed) {
-    _sleepUs(static_cast<uint32_t>(_timing.bitUs - elapsed));
-  }
-
-  return bit;
-}
-
-AT21CS_IRAM bool Driver::txByte(uint8_t value) {
-#if AT21CS_PLATFORM_ESP32
-  portENTER_CRITICAL(&_timingMux);
-#endif
-
-  for (int8_t bit = 7; bit >= 0; --bit) {
-    const bool one = ((value >> bit) & 0x01U) != 0U;
-    if (one) {
-      txBit1();
-    } else {
-      txBit0();
-    }
-  }
-
-  const bool ack = !rxBit();
-
-#if AT21CS_PLATFORM_ESP32
-  portEXIT_CRITICAL(&_timingMux);
-#endif
-
-  return ack;
-}
-
-AT21CS_IRAM uint8_t Driver::rxByte(bool ack) {
-#if AT21CS_PLATFORM_ESP32
-  portENTER_CRITICAL(&_timingMux);
-#endif
-
-  uint8_t value = 0;
-  for (int8_t bit = 7; bit >= 0; --bit) {
-    if (rxBit()) {
-      value = static_cast<uint8_t>(value | static_cast<uint8_t>(1U << bit));
-    }
-  }
-
-  if (ack) {
-    txBit0();
-  } else {
-    txBit1();
-  }
-
-#if AT21CS_PLATFORM_ESP32
-  portEXIT_CRITICAL(&_timingMux);
-#endif
-
-  return value;
-}
-
-AT21CS_IRAM void Driver::_sendStart() {
-  _releaseLine();
-  _sleepUs(_timing.htssUs);
-}
-
-AT21CS_IRAM void Driver::_sendStop() {
-  _releaseLine();
-  _sleepUs(_timing.htssUs);
+  return _config.presencePin >= 0;
 }
 
 uint8_t Driver::_deviceAddress(uint8_t opcode, bool read) const {
@@ -1358,42 +1145,6 @@ Status Driver::_activateDevice() {
     _setSpeedMode(SpeedMode::STANDARD_SPEED);
   }
 
-  return Status::Ok();
-}
-
-Status Driver::_resetAndDiscoverRaw() {
-  driveLow(DISCHARGE_LOW_US);
-  releaseLine();
-  _sleepUs(RESET_RECOVERY_US);
-
-#if AT21CS_PLATFORM_ESP32
-  portENTER_CRITICAL(&_timingMux);
-#endif
-
-  _lineLow();
-  _sleepUs(DISCOVERY_REQUEST_US);
-  _releaseLine();
-
-  _sleepUs(DISCOVERY_STROBE_DELAY_US);
-
-  _lineLow();
-  _sleepUs(DISCOVERY_STROBE_US);
-  _releaseLine();
-
-  _sleepUs(DISCOVERY_SAMPLE_DELAY_US);
-  const bool present = !_readLine();
-
-#if AT21CS_PLATFORM_ESP32
-  portEXIT_CRITICAL(&_timingMux);
-#endif
-
-  _sleepUs(HIGH_SPEED_TIMING.htssUs);
-
-  if (!present) {
-    return Status::Error(Err::DISCOVERY_FAILED, "Discovery response not detected");
-  }
-
-  _setSpeedMode(SpeedMode::HIGH_SPEED);
   return Status::Ok();
 }
 
@@ -1498,41 +1249,6 @@ bool Driver::_isSecurityUserAddressValid(uint8_t address) {
 void Driver::_setSpeedMode(SpeedMode mode) {
   _speedMode = mode;
   _timing = (mode == SpeedMode::STANDARD_SPEED) ? STANDARD_SPEED_TIMING : HIGH_SPEED_TIMING;
-}
-
-uint32_t Driver::_nowMs() const {
-  if (_config.nowMs != nullptr) {
-    return _config.nowMs(_config.timeUser);
-  }
-#if AT21CS_HAS_ARDUINO_PLATFORM
-  return millis();
-#elif defined(ESP_PLATFORM)
-  return static_cast<uint32_t>(esp_timer_get_time() / 1000LL);
-#else
-  return 0U;
-#endif
-}
-
-AT21CS_IRAM void Driver::_sleepUs(uint32_t us) const {
-  if (us == 0U) {
-    return;
-  }
-  if (_config.sleepUs != nullptr) {
-    _config.sleepUs(us, _config.timeUser);
-    return;
-  }
-#if defined(ARDUINO_ARCH_ESP32)
-  // CPU cycle counter spin-wait for sub-microsecond accuracy.
-  // esp_cpu_get_cycle_count() reads the CCOUNT register directly —
-  // zero overhead, wraps safely via unsigned subtraction.
-  const uint32_t target = us * _cyclesPerUs;
-  const uint32_t start = esp_cpu_get_cycle_count();
-  while ((esp_cpu_get_cycle_count() - start) < target) {}
-#elif defined(ESP_PLATFORM)
-  esp_rom_delay_us(us);
-#elif AT21CS_HAS_ARDUINO_PLATFORM
-  delayMicroseconds(us);
-#endif
 }
 
 void Driver::_resetHealth() {
