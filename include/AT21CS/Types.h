@@ -26,6 +26,7 @@ enum class DriverState : uint8_t {
   DEGRADED,
   OFFLINE,
   RECOVERING,
+  // Reserved by the public state model; v2 has no transition into this state.
   SLEEPING,
   FAULT
 };

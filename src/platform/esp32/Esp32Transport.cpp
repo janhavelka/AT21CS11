@@ -2,6 +2,8 @@
 
 #include <cstddef>
 
+#include "../../TransferValidation.h"
+
 #if defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
 #include <driver/gpio.h>
 #include <esp_rom_sys.h>
@@ -20,39 +22,8 @@ constexpr int32_t GPIO_DETAIL = -4;
 constexpr uint32_t MAX_WAIT_US = 10000;
 
 bool validBackendRequest(const SingleWireTransfer& transfer) {
-  if ((transfer.speed != SpeedMode::HIGH_SPEED &&
-       transfer.speed != SpeedMode::STANDARD_SPEED) ||
-      transfer.txLength > 8 || transfer.rxLength > 8 ||
-      (transfer.txLength != 0 && transfer.rxLength != 0) ||
-      ((transfer.txLength == 0) != (transfer.txData == nullptr)) ||
-      ((transfer.rxLength == 0) != (transfer.rxData == nullptr))) {
-    return false;
-  }
-  const uint32_t minimumHighUs =
-      transfer.speed == SpeedMode::HIGH_SPEED ? 160u : 650u;
-  if (transfer.minimumPostTransferHighUs < minimumHighUs ||
-      (!transfer.hasMemoryAddress && transfer.memoryAddress != 0) ||
-      (!transfer.hasRepeatedStart && transfer.repeatedDeviceAddress != 0)) {
-    return false;
-  }
-  if (transfer.hasRepeatedStart &&
-      (!transfer.hasMemoryAddress || transfer.rxLength == 0 ||
-       transfer.txLength != 0 || (transfer.deviceAddress & 0x01u) != 0u ||
-       (transfer.repeatedDeviceAddress & 0x01u) == 0u)) {
-    return false;
-  }
-  if (transfer.rxLength != 0 && transfer.hasMemoryAddress &&
-      !transfer.hasRepeatedStart) {
-    return false;
-  }
-  if (transfer.rxLength != 0 && !transfer.hasMemoryAddress &&
-      (transfer.deviceAddress & 0x01u) == 0u) {
-    return false;
-  }
-  if (transfer.txLength != 0 && (transfer.deviceAddress & 0x01u) != 0u) {
-    return false;
-  }
-  return true;
+  return detail::validTransferRequest(transfer, size_t{8}, uint32_t{160},
+                                      uint32_t{650});
 }
 
 TransferResult failure(TransportCode code,
@@ -190,7 +161,6 @@ SingleWireTransport Esp32Transport::_descriptorUnchecked() {
 TransferResult Esp32Transport::_transfer(const SingleWireTransfer& transfer,
                                          uint64_t deadlineUs) {
   if (!validBackendRequest(transfer)) {
-    (void)_setLine(true);
     return failure(TransportCode::IO_ERROR, TransferPhase::NONE,
                    INVALID_FRAME_DETAIL);
   }
@@ -244,8 +214,7 @@ TransferResult Esp32Transport::_transfer(const SingleWireTransfer& transfer,
   if (!_setLine(true)) {
     result = finishFailure(TransportCode::IO_ERROR, TransferPhase::START,
                            GPIO_DETAIL, false);
-  } else if (!_delayWithinDeadline(transfer.minimumPostTransferHighUs,
-                                   deadlineUs)) {
+  } else if (!_delayWithinDeadline(timing.startHighUs, deadlineUs)) {
     result = failure(TransportCode::TIMEOUT, TransferPhase::START,
                      DEADLINE_DETAIL);
   } else {
@@ -271,8 +240,7 @@ TransferResult Esp32Transport::_transfer(const SingleWireTransfer& transfer,
       if (!_setLine(true)) {
         result = finishFailure(TransportCode::IO_ERROR,
                                TransferPhase::RESTART, GPIO_DETAIL, false);
-      } else if (!_delayWithinDeadline(transfer.minimumPostTransferHighUs,
-                                       deadlineUs)) {
+      } else if (!_delayWithinDeadline(timing.startHighUs, deadlineUs)) {
         result = finishFailure(TransportCode::TIMEOUT,
                                TransferPhase::RESTART, DEADLINE_DETAIL, false);
       } else {
@@ -635,7 +603,7 @@ TransferResult Esp32Transport::_staleResult() {
 
 Esp32Transport::Timing Esp32Transport::_timingFor(SpeedMode speed) {
   if (speed == SpeedMode::STANDARD_SPEED) {
-    return Timing{60, 32, 6, 6, 14};
+    return Timing{60, 32, 6, 6, 14, 650};
   }
   return Timing{};
 }

@@ -2,12 +2,10 @@
 
 #include <limits>
 
+#include "TransferValidation.h"
+
 namespace AT21CS {
 namespace {
-
-constexpr bool isKnownSpeed(SpeedMode speed) {
-  return speed == SpeedMode::HIGH_SPEED || speed == SpeedMode::STANDARD_SPEED;
-}
 
 constexpr bool checkedAdd(uint64_t base, uint64_t increment, uint64_t& sum) {
   if (base > (std::numeric_limits<uint64_t>::max() - increment)) {
@@ -29,52 +27,6 @@ constexpr bool isKnownTransportCode(TransportCode code) {
   return code == TransportCode::OK || code == TransportCode::NACK ||
          code == TransportCode::TIMEOUT ||
          code == TransportCode::LINE_STUCK || code == TransportCode::IO_ERROR;
-}
-
-bool validTransferRequest(const SingleWireTransfer& transfer,
-                          size_t maxFrameDataBytes,
-                          uint32_t highSpeedHtssUs,
-                          uint32_t standardSpeedHtssUs) {
-  if (!isKnownSpeed(transfer.speed) ||
-      transfer.txLength > maxFrameDataBytes ||
-      transfer.rxLength > maxFrameDataBytes ||
-      (transfer.txLength != 0 && transfer.rxLength != 0) ||
-      ((transfer.txLength == 0) != (transfer.txData == nullptr)) ||
-      ((transfer.rxLength == 0) != (transfer.rxData == nullptr))) {
-    return false;
-  }
-
-  const uint32_t requiredHighUs =
-      transfer.speed == SpeedMode::HIGH_SPEED ? highSpeedHtssUs
-                                               : standardSpeedHtssUs;
-  if (transfer.minimumPostTransferHighUs < requiredHighUs) {
-    return false;
-  }
-
-  if (!transfer.hasMemoryAddress && transfer.memoryAddress != 0) {
-    return false;
-  }
-  if (!transfer.hasRepeatedStart && transfer.repeatedDeviceAddress != 0) {
-    return false;
-  }
-  if (transfer.hasRepeatedStart &&
-      (!transfer.hasMemoryAddress || transfer.rxLength == 0 ||
-       transfer.txLength != 0 || (transfer.deviceAddress & 0x01u) != 0u ||
-       (transfer.repeatedDeviceAddress & 0x01u) == 0u)) {
-    return false;
-  }
-  if (transfer.rxLength != 0 && transfer.hasMemoryAddress &&
-      !transfer.hasRepeatedStart) {
-    return false;
-  }
-  if (transfer.rxLength != 0 && !transfer.hasMemoryAddress &&
-      (transfer.deviceAddress & 0x01u) == 0u) {
-    return false;
-  }
-  if (transfer.txLength != 0 && (transfer.deviceAddress & 0x01u) != 0u) {
-    return false;
-  }
-  return true;
 }
 
 bool requiredAddressEvidencePresent(const SingleWireTransfer& transfer,
@@ -273,17 +225,17 @@ Status Bus::bind(const BusConfig& config) {
       config.transport.waitUntilUs == nullptr) {
     return Status::Error(Err::INVALID_CONFIG);
   }
+  if (_bound && _writeHighUntilUs != 0) {
+    return Status::Error(Err::BUSY);
+  }
   if (!_bindingEpochValid ||
       _bindingEpoch == std::numeric_limits<uint64_t>::max()) {
     return Status::Error(Err::INVALID_STATE);
   }
-  if (_bound && _writeHighUntilUs != 0) {
-    return Status::Error(Err::BUSY);
-  }
 
+  ++_bindingEpoch;
   _transport = config.transport;
   _bound = true;
-  ++_bindingEpoch;
   _resetEstablishedHighSpeed = false;
   return Status::Ok();
 }
@@ -348,8 +300,9 @@ BusSnapshot Bus::snapshot() const {
 
 Status Bus::_execute(const SingleWireTransfer& transfer, TransferResult& result) {
   result = {};
-  if (!validTransferRequest(transfer, MAX_FRAME_DATA_BYTES,
-                            HIGH_SPEED_HTSS_US, STANDARD_SPEED_HTSS_US) ||
+  if (!detail::validTransferRequest(transfer, MAX_FRAME_DATA_BYTES,
+                                    HIGH_SPEED_HTSS_US,
+                                    STANDARD_SPEED_HTSS_US) ||
       transfer.txLength != 0) {
     return Status::Error(Err::INVALID_PARAM);
   }
@@ -382,8 +335,9 @@ Status Bus::_execute(const SingleWireTransfer& transfer, TransferResult& result)
 Status Bus::_executeWrite(const SingleWireTransfer& transfer,
                           WriteCycleResult& result) {
   result = {};
-  if (!validTransferRequest(transfer, MAX_FRAME_DATA_BYTES,
-                            HIGH_SPEED_HTSS_US, STANDARD_SPEED_HTSS_US) ||
+  if (!detail::validTransferRequest(transfer, MAX_FRAME_DATA_BYTES,
+                                    HIGH_SPEED_HTSS_US,
+                                    STANDARD_SPEED_HTSS_US) ||
       transfer.txLength == 0 ||
       transfer.rxLength != 0) {
     return Status::Error(Err::INVALID_PARAM);

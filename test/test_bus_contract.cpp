@@ -135,6 +135,31 @@ void assertTransferEqual(const TransferResult& expected,
   TEST_ASSERT_EQUAL(expected.stopCompleted, actual.stopCompleted);
 }
 
+void assertWriteCycleEqual(const WriteCycleResult& expected,
+                           const WriteCycleResult& actual) {
+  assertTransferEqual(expected.frame, actual.frame);
+  assertTransferEqual(expected.hold, actual.hold);
+  TEST_ASSERT_EQUAL(expected.holdRequired, actual.holdRequired);
+  TEST_ASSERT_EQUAL(expected.holdCompleted, actual.holdCompleted);
+}
+
+void assertBusSnapshotEqual(const BusSnapshot& expected,
+                            const BusSnapshot& actual) {
+  TEST_ASSERT_EQUAL(expected.bound, actual.bound);
+  TEST_ASSERT_EQUAL(expected.bindingEpochValid, actual.bindingEpochValid);
+  TEST_ASSERT_EQUAL_UINT64(expected.bindingEpoch, actual.bindingEpoch);
+  TEST_ASSERT_EQUAL_UINT64(expected.generation, actual.generation);
+  TEST_ASSERT_EQUAL_UINT8(expected.claimedAddressMask,
+                          actual.claimedAddressMask);
+  TEST_ASSERT_EQUAL(expected.resetEstablishedHighSpeed,
+                    actual.resetEstablishedHighSpeed);
+  TEST_ASSERT_EQUAL_UINT64(expected.writeHighUntilUs,
+                           actual.writeHighUntilUs);
+  assertTransferEqual(expected.previousTransfer, actual.previousTransfer);
+  assertTransferEqual(expected.lastTransfer, actual.lastTransfer);
+  assertWriteCycleEqual(expected.lastWriteCycle, actual.lastWriteCycle);
+}
+
 template <typename T, typename = void>
 struct HasTick : std::false_type {};
 template <typename T>
@@ -307,23 +332,26 @@ void test_hardware_objects_are_noncopyable_nonmovable() {
 
 void test_invalid_bus_rebind_is_transactional_and_silent() {
   ScriptedTransport fake;
+  ScriptedTransport replacementFake;
   Bus bus;
   bindBus(bus, fake);
   const BusSnapshot before = bus.snapshot();
   for (uint8_t missing = 0; missing < 4; ++missing) {
     BusConfig invalid{};
-    invalid.transport = fake.descriptor();
+    invalid.transport = replacementFake.descriptor();
     if (missing == 0) invalid.transport.nowUs = nullptr;
     if (missing == 1) invalid.transport.transfer = nullptr;
     if (missing == 2) invalid.transport.resetAndDiscover = nullptr;
     if (missing == 3) invalid.transport.waitUntilUs = nullptr;
     assertErr(Err::INVALID_CONFIG, bus.bind(invalid));
-    const BusSnapshot after = bus.snapshot();
-    TEST_ASSERT_EQUAL_UINT64(before.bindingEpoch, after.bindingEpoch);
-    TEST_ASSERT_EQUAL_UINT8(before.claimedAddressMask,
-                            after.claimedAddressMask);
+    assertBusSnapshotEqual(before, bus.snapshot());
   }
   TEST_ASSERT_EQUAL_UINT32(0, fake.eventCount);
+  TEST_ASSERT_EQUAL_UINT32(0, replacementFake.eventCount);
+  queueFrame(fake, okFrame(addressOnly()));
+  TransferResult result{};
+  TEST_ASSERT_TRUE(TestAccess::execute(bus, addressOnly(), result).ok());
+  TEST_ASSERT_EQUAL_UINT32(1, fake.transferCalls);
 }
 
 void test_binding_epoch_lifecycle_and_stale_driver_cache() {
@@ -382,6 +410,7 @@ void test_rebind_and_end_preserve_retained_hold() {
             TestAccess::executeWrite(bus, transfer, write));
   const uint64_t retained = bus.snapshot().writeHighUntilUs;
   TEST_ASSERT_NOT_EQUAL(0, retained);
+  TestAccess::seedBindingEpoch(bus, std::numeric_limits<uint64_t>::max());
 
   BusConfig replacement{};
   replacement.transport = replacementFake.descriptor();
@@ -414,6 +443,7 @@ void test_one_callback_owns_complete_frame() {
   TransferResult result{};
   TEST_ASSERT_TRUE(TestAccess::execute(bus, transfer, result).ok());
   TEST_ASSERT_EQUAL_UINT32(1, fake.transferCalls);
+  TEST_ASSERT_EQUAL_UINT64(10000, fake.captured[0].deadlineUs);
   TEST_ASSERT_EQUAL_UINT32(1, fake.eventCountFor(FakeEventKind::TRANSFER_BEGIN));
   TEST_ASSERT_EQUAL_UINT32(1, fake.eventCountFor(FakeEventKind::TRANSFER_END));
   TEST_ASSERT_EQUAL_UINT8(0x12, output[0]);
@@ -462,6 +492,26 @@ void test_every_nack_phase_maps_exactly() {
       static_cast<uint8_t>(ProtocolPhase::DEVICE_ADDRESS_READ),
       static_cast<uint8_t>(protocolDetailPhase(status.detail)));
 
+  SingleWireTransfer directRead{};
+  directRead.deviceAddress = 0xC1;
+  directRead.rxData = &output;
+  directRead.rxLength = 1;
+  directRead.minimumPostTransferHighUs = 160;
+  TransferResult directNack{};
+  directNack.code = TransportCode::NACK;
+  directNack.phase = TransferPhase::DEVICE_ADDRESS_READ;
+  directNack.stopCompleted = true;
+  queueFrame(fake, directNack);
+  status = TestAccess::execute(bus, directRead, result);
+  assertErr(Err::NACK_DEVICE_ADDRESS, status);
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(ProtocolPhase::DEVICE_ADDRESS_READ),
+      static_cast<uint8_t>(protocolDetailPhase(status.detail)));
+
+  directNack.firstDeviceAddressAcked = true;
+  queueFrame(fake, directNack);
+  assertErr(Err::IO_ERROR, TestAccess::execute(bus, directRead, result));
+
   const uint8_t data[2] = {1, 2};
   const SingleWireTransfer write = writeFrame(data, 2);
   raw.phase = TransferPhase::DATA_WRITE;
@@ -498,6 +548,12 @@ void test_malformed_success_and_evidence_are_rejected() {
   invalid = writeFrame(data, 9);
   assertErr(Err::INVALID_PARAM,
             TestAccess::executeWrite(bus, invalid, invalidWriteResult));
+  invalid = writeFrame(data, std::numeric_limits<size_t>::max());
+  assertErr(Err::INVALID_PARAM,
+            TestAccess::executeWrite(bus, invalid, invalidWriteResult));
+  invalid = randomRead(&output, std::numeric_limits<size_t>::max());
+  assertErr(Err::INVALID_PARAM,
+            TestAccess::execute(bus, invalid, invalidResult));
   invalid = randomRead(&output);
   invalid.hasMemoryAddress = false;
   invalid.memoryAddress = 0;
@@ -505,6 +561,16 @@ void test_malformed_success_and_evidence_are_rejected() {
             TestAccess::execute(bus, invalid, invalidResult));
   invalid = randomRead(&output);
   invalid.deviceAddress = 0xA1;
+  assertErr(Err::INVALID_PARAM,
+            TestAccess::execute(bus, invalid, invalidResult));
+  invalid = addressOnly();
+  invalid.deviceAddress = 0x21;
+  invalid.hasMemoryAddress = true;
+  invalid.memoryAddress = 0x60;
+  assertErr(Err::INVALID_PARAM,
+            TestAccess::execute(bus, invalid, invalidResult));
+  invalid = randomRead(&output);
+  invalid.repeatedDeviceAddress = 0xB1;
   assertErr(Err::INVALID_PARAM,
             TestAccess::execute(bus, invalid, invalidResult));
   invalid = addressOnly();
@@ -517,6 +583,10 @@ void test_malformed_success_and_evidence_are_rejected() {
             TestAccess::execute(bus, invalid, invalidResult));
   invalid = addressOnly();
   invalid.minimumPostTransferHighUs = 159;
+  assertErr(Err::INVALID_PARAM,
+            TestAccess::execute(bus, invalid, invalidResult));
+  invalid = addressOnly();
+  invalid.deviceAddress = 0xA1;
   assertErr(Err::INVALID_PARAM,
             TestAccess::execute(bus, invalid, invalidResult));
   TEST_ASSERT_EQUAL_UINT32(callbacksBeforeValidation, fake.transferCalls);
@@ -580,6 +650,30 @@ void test_malformed_success_and_evidence_are_rejected() {
   assertErr(Err::IO_ERROR,
             TestAccess::execute(overflowBus, addressOnly(), result));
   TEST_ASSERT_TRUE(overflowFake.overflow);
+
+  Esp32Transport backend;
+  TestAccess::activateWithoutHardware(backend);
+  TestAccess::resetPlatformAccessCount(backend);
+  const SingleWireTransport backendDescriptor = backend.descriptor();
+  invalid = addressOnly();
+  invalid.deviceAddress = 0x21;
+  invalid.hasMemoryAddress = true;
+  invalid.memoryAddress = 0x60;
+  TransferResult backendResult = backendDescriptor.transfer(
+      invalid, std::numeric_limits<uint64_t>::max(), backendDescriptor.user);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(backendResult.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferPhase::NONE),
+                          static_cast<uint8_t>(backendResult.phase));
+  invalid = randomRead(&output);
+  invalid.repeatedDeviceAddress = 0xB1;
+  backendResult = backendDescriptor.transfer(
+      invalid, std::numeric_limits<uint64_t>::max(), backendDescriptor.user);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(backendResult.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferPhase::NONE),
+                          static_cast<uint8_t>(backendResult.phase));
+  TEST_ASSERT_EQUAL_UINT32(0, TestAccess::platformAccessCount(backend));
 }
 
 void test_unknown_data_ack_arms_hold_without_replay() {
@@ -602,18 +696,46 @@ void test_unknown_data_ack_arms_hold_without_replay() {
             TestAccess::executeWrite(bus, transfer, result));
   TEST_ASSERT_TRUE(result.holdRequired);
   TEST_ASSERT_TRUE(result.holdCompleted);
+  TEST_ASSERT_EQUAL_UINT64(11000, fake.lastWaitDeadlineUs);
   TEST_ASSERT_EQUAL_UINT32(1, fake.transferCalls);
   TEST_ASSERT_EQUAL_UINT32(0, result.frame.dataBytesTransferred);
   TEST_ASSERT_EQUAL_UINT32(1,
                            fake.eventCountFor(FakeEventKind::TX_DATA));
+
+  ScriptedTransport failedHoldFake;
+  Bus failedHoldBus;
+  bindBus(failedHoldBus, failedHoldFake);
+  queueFrame(failedHoldFake, raw);
+  queueWait(failedHoldFake,
+            rawFailure(TransportCode::LINE_STUCK,
+                       TransferPhase::WAIT_HIGH, 88));
+  const Status failedHoldStatus =
+      TestAccess::executeWrite(failedHoldBus, transfer, result);
+  assertErr(Err::TRANSPORT_TIMEOUT, failedHoldStatus);
+  TEST_ASSERT_EQUAL_INT32(77, failedHoldStatus.detail);
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(TransportCode::LINE_STUCK),
+      static_cast<uint8_t>(result.hold.code));
+  TEST_ASSERT_EQUAL_INT32(88, result.hold.detail);
+  TEST_ASSERT_NOT_EQUAL(0, failedHoldBus.snapshot().writeHighUntilUs);
+  queueWait(failedHoldFake, okAux(TransferPhase::WAIT_HIGH), true);
+  TEST_ASSERT_TRUE(failedHoldBus.end().ok());
+
+  TransferResult contradictoryNack = raw;
+  contradictoryNack.code = TransportCode::NACK;
+  queueFrame(fake, contradictoryNack);
+  queueWait(fake, okAux(TransferPhase::WAIT_HIGH), true);
+  assertErr(Err::IO_ERROR, TestAccess::executeWrite(bus, transfer, result));
+  TEST_ASSERT_TRUE(result.holdRequired);
+  TEST_ASSERT_TRUE(result.holdCompleted);
 
   raw.repeatedDeviceAddressAcked = true;
   queueFrame(fake, raw);
   queueWait(fake, okAux(TransferPhase::WAIT_HIGH), true);
   assertErr(Err::IO_ERROR, TestAccess::executeWrite(bus, transfer, result));
   TEST_ASSERT_TRUE(result.holdRequired);
-  TEST_ASSERT_EQUAL_UINT32(2, fake.transferCalls);
-  TEST_ASSERT_EQUAL_UINT32(2,
+  TEST_ASSERT_EQUAL_UINT32(3, fake.transferCalls);
+  TEST_ASSERT_EQUAL_UINT32(3,
                            fake.eventCountFor(FakeEventKind::TX_DATA));
 
   const uint8_t twoBytes[2] = {0xA5, 0x5A};
@@ -626,8 +748,8 @@ void test_unknown_data_ack_arms_hold_without_replay() {
             TestAccess::executeWrite(bus, twoByteTransfer, result));
   TEST_ASSERT_EQUAL_UINT32(1, result.frame.dataBytesTransferred);
   TEST_ASSERT_TRUE(result.frame.currentWriteByteMayBeAccepted);
-  TEST_ASSERT_EQUAL_UINT32(3, fake.transferCalls);
-  TEST_ASSERT_EQUAL_UINT32(4,
+  TEST_ASSERT_EQUAL_UINT32(4, fake.transferCalls);
+  TEST_ASSERT_EQUAL_UINT32(5,
                            fake.eventCountFor(FakeEventKind::TX_DATA));
 }
 
@@ -732,6 +854,20 @@ void test_checked_deadlines_and_post_acceptance_overflow_fail_closed() {
   TEST_ASSERT_EQUAL_UINT64(500, advancedClock.nowUs(advancedClock.user));
   TEST_ASSERT_TRUE(advancedClockFake.overflow);
 
+  ScriptedTransport backwardWaitFake;
+  TEST_ASSERT_TRUE(backwardWaitFake.queueNow(200));
+  const SingleWireTransport backwardWait = backwardWaitFake.descriptor();
+  TEST_ASSERT_EQUAL_UINT64(200, backwardWait.nowUs(backwardWait.user));
+  queueWait(backwardWaitFake, okAux(TransferPhase::WAIT_HIGH), true);
+  const TransferResult backwardResult =
+      backwardWait.waitUntilUs(199, backwardWait.user);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::OK),
+                          static_cast<uint8_t>(backwardResult.code));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferPhase::WAIT_HIGH),
+                          static_cast<uint8_t>(backwardResult.phase));
+  TEST_ASSERT_EQUAL_UINT64(200, backwardWait.nowUs(backwardWait.user));
+  TEST_ASSERT_FALSE(backwardWaitFake.overflow);
+
   ScriptedTransport deadlineFake;
   Bus deadlineBus;
   bindBus(deadlineBus, deadlineFake);
@@ -761,6 +897,7 @@ void test_presence_false_is_not_transport_failure() {
   bool present = true;
   TEST_ASSERT_TRUE(bus.readPresenceIndicator(present).ok());
   TEST_ASSERT_FALSE(present);
+  TEST_ASSERT_EQUAL_UINT64(10000, fake.lastPresenceDeadlineUs);
 
   BooleanScript failed{};
   failed.result = rawFailure(TransportCode::LINE_STUCK,
@@ -779,6 +916,10 @@ void test_presence_false_is_not_transport_failure() {
   BooleanScript malformed{};
   malformed.result = okAux(TransferPhase::PRESENCE);
   malformed.result.stopCompleted = true;
+  TEST_ASSERT_TRUE(fake.queuePresence(malformed));
+  assertErr(Err::IO_ERROR, bus.readPresenceIndicator(present));
+
+  malformed.result = okAux(TransferPhase::DISCOVERY_RELEASE);
   TEST_ASSERT_TRUE(fake.queuePresence(malformed));
   assertErr(Err::IO_ERROR, bus.readPresenceIndicator(present));
   TEST_ASSERT_EQUAL_UINT32(0, fake.transferCalls);
@@ -825,6 +966,35 @@ void test_write_cycle_keeps_frame_and_hold_results_and_blocks_bus() {
                           static_cast<uint8_t>(bus.snapshot().lastWriteCycle.hold.code));
   first.end();
   second.end();
+
+  ScriptedTransport wrongPhaseFake;
+  Bus wrongPhaseBus;
+  bindBus(wrongPhaseBus, wrongPhaseFake);
+  queueFrame(wrongPhaseFake, okFrame(writeTransfer));
+  queueWait(wrongPhaseFake, okAux(TransferPhase::STOP));
+  assertErr(Err::IO_ERROR,
+            TestAccess::executeWrite(wrongPhaseBus, writeTransfer, write));
+  TEST_ASSERT_NOT_EQUAL(0, wrongPhaseBus.snapshot().writeHighUntilUs);
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(TransferPhase::STOP),
+      static_cast<uint8_t>(wrongPhaseBus.snapshot().lastWriteCycle.hold.phase));
+  queueWait(wrongPhaseFake, okAux(TransferPhase::WAIT_HIGH), true);
+  TEST_ASSERT_TRUE(wrongPhaseBus.end().ok());
+
+  ScriptedTransport evidenceFake;
+  Bus evidenceBus;
+  bindBus(evidenceBus, evidenceFake);
+  queueFrame(evidenceFake, okFrame(writeTransfer));
+  TransferResult malformedWait = okAux(TransferPhase::WAIT_HIGH);
+  malformedWait.firstDeviceAddressAcked = true;
+  queueWait(evidenceFake, malformedWait);
+  assertErr(Err::IO_ERROR,
+            TestAccess::executeWrite(evidenceBus, writeTransfer, write));
+  TEST_ASSERT_NOT_EQUAL(0, evidenceBus.snapshot().writeHighUntilUs);
+  TEST_ASSERT_TRUE(
+      evidenceBus.snapshot().lastWriteCycle.hold.firstDeviceAddressAcked);
+  queueWait(evidenceFake, okAux(TransferPhase::WAIT_HIGH), true);
+  TEST_ASSERT_TRUE(evidenceBus.end().ok());
 }
 
 void test_reset_generation_is_shared() {
@@ -847,6 +1017,7 @@ void test_reset_generation_is_shared() {
   bool present = false;
   TransferResult result{};
   TEST_ASSERT_TRUE(TestAccess::resetAndDiscover(bus, present, result).ok());
+  TEST_ASSERT_EQUAL_UINT64(6000, fake.lastResetDeadlineUs);
   TEST_ASSERT_EQUAL_UINT64(seenFirst + 1, bus.generation());
   TEST_ASSERT_EQUAL_UINT64(seenFirst, first.snapshot().seenBusGeneration);
   TEST_ASSERT_EQUAL_UINT64(seenSecond, second.snapshot().seenBusGeneration);
@@ -912,6 +1083,28 @@ void test_discovery_sample_and_release_are_distinct() {
   assertErr(Err::IO_ERROR,
             TestAccess::resetAndDiscover(bus, present, result));
   TEST_ASSERT_FALSE(present);
+
+  const uint64_t generationBeforeMalformed = bus.generation();
+  BooleanScript wrongPhase{};
+  wrongPhase.result = okAux(TransferPhase::RESET_RECOVERY);
+  wrongPhase.value = true;
+  TEST_ASSERT_TRUE(fake.queueReset(wrongPhase));
+  assertErr(Err::IO_ERROR,
+            TestAccess::resetAndDiscover(bus, present, result));
+  TEST_ASSERT_FALSE(present);
+  TEST_ASSERT_EQUAL_UINT64(generationBeforeMalformed + 1, bus.generation());
+  assertTransferEqual(wrongPhase.result, bus.snapshot().lastTransfer);
+
+  BooleanScript impossibleEvidence{};
+  impossibleEvidence.result = okAux(TransferPhase::DISCOVERY_RELEASE);
+  impossibleEvidence.result.stopCompleted = true;
+  impossibleEvidence.value = true;
+  TEST_ASSERT_TRUE(fake.queueReset(impossibleEvidence));
+  assertErr(Err::IO_ERROR,
+            TestAccess::resetAndDiscover(bus, present, result));
+  TEST_ASSERT_FALSE(present);
+  TEST_ASSERT_EQUAL_UINT64(generationBeforeMalformed + 2, bus.generation());
+  assertTransferEqual(impossibleEvidence.result, bus.snapshot().lastTransfer);
 }
 
 void test_core_headers_are_framework_neutral() {
@@ -923,6 +1116,56 @@ void test_v1_surface_is_absent() {
   static_assert(!HasTick<Driver>::value);
   static_assert(!HasGetConfig<Driver>::value);
   TEST_PASS();
+}
+
+void test_scripted_transport_capacity_failures_are_explicit() {
+  TransferScript transferScript{};
+  ScriptedTransport transferFake;
+  for (size_t index = 0; index < ScriptedTransport::TRANSFER_CAPACITY;
+       ++index) {
+    TEST_ASSERT_TRUE(transferFake.queueTransfer(transferScript));
+  }
+  TEST_ASSERT_FALSE(transferFake.queueTransfer(transferScript));
+  TEST_ASSERT_TRUE(transferFake.overflow);
+
+  BooleanScript booleanScript{};
+  ScriptedTransport resetFake;
+  ScriptedTransport presenceFake;
+  for (size_t index = 0; index < ScriptedTransport::AUX_CAPACITY; ++index) {
+    TEST_ASSERT_TRUE(resetFake.queueReset(booleanScript));
+    TEST_ASSERT_TRUE(presenceFake.queuePresence(booleanScript));
+  }
+  TEST_ASSERT_FALSE(resetFake.queueReset(booleanScript));
+  TEST_ASSERT_FALSE(presenceFake.queuePresence(booleanScript));
+  TEST_ASSERT_TRUE(resetFake.overflow);
+  TEST_ASSERT_TRUE(presenceFake.overflow);
+
+  WaitScript waitScript{};
+  ScriptedTransport waitFake;
+  for (size_t index = 0; index < ScriptedTransport::AUX_CAPACITY; ++index) {
+    TEST_ASSERT_TRUE(waitFake.queueWait(waitScript));
+  }
+  TEST_ASSERT_FALSE(waitFake.queueWait(waitScript));
+  TEST_ASSERT_TRUE(waitFake.overflow);
+
+  ScriptedTransport nowFake;
+  for (size_t index = 0; index < ScriptedTransport::NOW_CAPACITY; ++index) {
+    TEST_ASSERT_TRUE(nowFake.queueNow(static_cast<uint64_t>(index)));
+  }
+  TEST_ASSERT_FALSE(nowFake.queueNow(ScriptedTransport::NOW_CAPACITY));
+  TEST_ASSERT_TRUE(nowFake.overflow);
+
+  ScriptedTransport captureFake;
+  captureFake.capturedCount = ScriptedTransport::TRANSFER_CAPACITY;
+  TEST_ASSERT_TRUE(captureFake.queueTransfer(transferScript));
+  const SingleWireTransport captureDescriptor = captureFake.descriptor();
+  const TransferResult captureResult = captureDescriptor.transfer(
+      addressOnly(), 10000, captureDescriptor.user);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
+                          static_cast<uint8_t>(captureResult.code));
+  TEST_ASSERT_EQUAL_INT32(ScriptedTransport::SCRIPT_ERROR_DETAIL,
+                          captureResult.detail);
+  TEST_ASSERT_TRUE(captureFake.overflow);
 }
 
 void test_independent_buses_are_fully_isolated() {
@@ -957,6 +1200,16 @@ void test_independent_buses_are_fully_isolated() {
   WriteCycleResult writeResult{};
   assertErr(Err::TRANSPORT_TIMEOUT,
             TestAccess::executeWrite(busA, write, writeResult));
+
+  queueFrame(fakeB, okFrame(addressOnly()));
+  TransferResult independentResult{};
+  TEST_ASSERT_TRUE(
+      TestAccess::execute(busB, addressOnly(), independentResult).ok());
+  TEST_ASSERT_EQUAL_UINT32(1, fakeB.transferCalls);
+  driverB.end();
+  TEST_ASSERT_TRUE(busB.end().ok());
+  const BusSnapshot stableB = busB.snapshot();
+
   BooleanScript presenceFailure{};
   presenceFailure.result = rawFailure(TransportCode::IO_ERROR,
                                       TransferPhase::PRESENCE, 71);
@@ -972,38 +1225,23 @@ void test_independent_buses_are_fully_isolated() {
   queueWait(fakeA, okAux(TransferPhase::WAIT_HIGH), true);
   TEST_ASSERT_TRUE(busA.end().ok());
 
-  const BusSnapshot afterB = busB.snapshot();
-  TEST_ASSERT_EQUAL(beforeB.bound, afterB.bound);
-  TEST_ASSERT_EQUAL(beforeB.bindingEpochValid, afterB.bindingEpochValid);
-  TEST_ASSERT_EQUAL_UINT64(beforeB.generation, afterB.generation);
-  TEST_ASSERT_EQUAL_UINT64(beforeB.bindingEpoch, afterB.bindingEpoch);
-  TEST_ASSERT_EQUAL_UINT8(beforeB.claimedAddressMask,
-                          afterB.claimedAddressMask);
-  TEST_ASSERT_EQUAL_UINT64(beforeB.writeHighUntilUs,
-                           afterB.writeHighUntilUs);
-  TEST_ASSERT_EQUAL(beforeB.resetEstablishedHighSpeed,
-                    afterB.resetEstablishedHighSpeed);
-  assertTransferEqual(beforeB.previousTransfer, afterB.previousTransfer);
-  assertTransferEqual(beforeB.lastTransfer, afterB.lastTransfer);
-  assertTransferEqual(beforeB.lastWriteCycle.frame,
-                      afterB.lastWriteCycle.frame);
-  assertTransferEqual(beforeB.lastWriteCycle.hold,
-                      afterB.lastWriteCycle.hold);
-  TEST_ASSERT_EQUAL(beforeB.lastWriteCycle.holdRequired,
-                    afterB.lastWriteCycle.holdRequired);
-  TEST_ASSERT_EQUAL(beforeB.lastWriteCycle.holdCompleted,
-                    afterB.lastWriteCycle.holdCompleted);
-  TEST_ASSERT_EQUAL_UINT32(0, fakeB.eventCount);
+  assertBusSnapshotEqual(stableB, busB.snapshot());
+  TEST_ASSERT_EQUAL_UINT32(0, fakeB.resetCalls);
+  TEST_ASSERT_EQUAL_UINT32(0, fakeB.waitCalls);
+  TEST_ASSERT_EQUAL_UINT32(0, fakeB.presenceCalls);
   TEST_ASSERT_EQUAL_PTR(&fakeA, fakeA.descriptor().user);
   TEST_ASSERT_EQUAL_PTR(&fakeB, fakeB.descriptor().user);
-  driverB.end();
 }
 
 void test_esp32_descriptor_lifecycle_and_stale_callbacks() {
   Esp32Transport transport;
   const SingleWireTransport empty = transport.descriptor();
   TEST_ASSERT_NULL(empty.user);
+  TEST_ASSERT_NULL(empty.nowUs);
   TEST_ASSERT_NULL(empty.transfer);
+  TEST_ASSERT_NULL(empty.resetAndDiscover);
+  TEST_ASSERT_NULL(empty.waitUntilUs);
+  TEST_ASSERT_NULL(empty.readPresence);
   TestAccess::activateWithoutHardware(transport);
   TestAccess::resetPlatformAccessCount(transport);
   TEST_ASSERT_FALSE(TestAccess::delayWithinDeadline(
@@ -1020,10 +1258,20 @@ void test_esp32_descriptor_lifecycle_and_stale_callbacks() {
       static_cast<uint8_t>(TransportCode::TIMEOUT),
       static_cast<uint8_t>(TestAccess::finishStop(transport, 160, 160)));
   TEST_ASSERT_EQUAL_UINT32(2, TestAccess::platformAccessCount(transport));
+  TEST_ASSERT_EQUAL_UINT16(160,
+                           TestAccess::startHighUs(SpeedMode::HIGH_SPEED));
+  TEST_ASSERT_EQUAL_UINT16(650,
+                           TestAccess::startHighUs(SpeedMode::STANDARD_SPEED));
   const SingleWireTransport stale = transport.descriptor();
   TEST_ASSERT_NOT_NULL(stale.transfer);
   transport.end();
-  TEST_ASSERT_NULL(transport.descriptor().user);
+  const SingleWireTransport ended = transport.descriptor();
+  TEST_ASSERT_NULL(ended.user);
+  TEST_ASSERT_NULL(ended.nowUs);
+  TEST_ASSERT_NULL(ended.transfer);
+  TEST_ASSERT_NULL(ended.resetAndDiscover);
+  TEST_ASSERT_NULL(ended.waitUntilUs);
+  TEST_ASSERT_NULL(ended.readPresence);
   const uint32_t before = TestAccess::platformAccessCount(transport);
 
   TransferResult result = stale.transfer(addressOnly(), 1, stale.user);
@@ -1069,7 +1317,10 @@ void test_address_claims_and_transactional_rebind() {
   TEST_ASSERT_EQUAL_UINT8(0x01, busA.snapshot().claimedAddressMask);
   TEST_ASSERT_EQUAL_UINT32(0, fakeA.eventCount + fakeB.eventCount);
   first.end();
+  TEST_ASSERT_EQUAL_UINT8(0, busA.snapshot().claimedAddressMask);
+  TEST_ASSERT_EQUAL_UINT8(0x01, busB.snapshot().claimedAddressMask);
   independent.end();
+  TEST_ASSERT_EQUAL_UINT8(0, busB.snapshot().claimedAddressMask);
 }
 
 void test_live_claims_block_bus_end_until_driver_end() {

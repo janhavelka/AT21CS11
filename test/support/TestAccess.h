@@ -68,6 +68,10 @@ class TestAccess {
                                   uint64_t deadlineUs) {
     return transport._finishStop(highUs, deadlineUs);
   }
+
+  static uint16_t startHighUs(SpeedMode speed) {
+    return Esp32Transport::_timingFor(speed).startHighUs;
+  }
 };
 
 }  // namespace AT21CS::test

@@ -162,6 +162,9 @@ class ScriptedTransport {
   size_t resetCalls = 0;
   size_t waitCalls = 0;
   size_t presenceCalls = 0;
+  uint64_t lastResetDeadlineUs = 0;
+  uint64_t lastWaitDeadlineUs = 0;
+  uint64_t lastPresenceDeadlineUs = 0;
   bool nowObserved = false;
   bool overflow = false;
 
@@ -292,10 +295,11 @@ class ScriptedTransport {
   }
 
   static TransferResult _resetAndDiscover(bool& present,
-                                          uint64_t,
+                                          uint64_t deadlineUs,
                                           void* user) {
     auto& self = *static_cast<ScriptedTransport*>(user);
     ++self.resetCalls;
+    self.lastResetDeadlineUs = deadlineUs;
     if (!self.record(FakeEventKind::RESET_DISCOVER)) {
       return scriptError();
     }
@@ -312,6 +316,7 @@ class ScriptedTransport {
   static TransferResult _waitUntilUs(uint64_t deadlineUs, void* user) {
     auto& self = *static_cast<ScriptedTransport*>(user);
     ++self.waitCalls;
+    self.lastWaitDeadlineUs = deadlineUs;
     if (!self.record(FakeEventKind::WAIT_UNTIL,
                      static_cast<uint32_t>(deadlineUs & UINT32_MAX))) {
       return scriptError();
@@ -321,17 +326,18 @@ class ScriptedTransport {
       return scriptError();
     }
     const WaitScript& script = self.waitScripts[self.waitRead++];
-    if (script.advanceToDeadline) {
+    if (script.advanceToDeadline && deadlineUs > self.currentUs) {
       self.currentUs = deadlineUs;
     }
     return script.result;
   }
 
   static TransferResult _readPresence(bool& present,
-                                      uint64_t,
+                                      uint64_t deadlineUs,
                                       void* user) {
     auto& self = *static_cast<ScriptedTransport*>(user);
     ++self.presenceCalls;
+    self.lastPresenceDeadlineUs = deadlineUs;
     if (!self.record(FakeEventKind::PRESENCE)) {
       return scriptError();
     }

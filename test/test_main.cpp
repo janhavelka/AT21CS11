@@ -19,6 +19,7 @@ void test_failed_reset_invalidates_speed_knowledge();
 void test_discovery_sample_and_release_are_distinct();
 void test_core_headers_are_framework_neutral();
 void test_v1_surface_is_absent();
+void test_scripted_transport_capacity_failures_are_explicit();
 void test_independent_buses_are_fully_isolated();
 void test_esp32_descriptor_lifecycle_and_stale_callbacks();
 void test_address_claims_and_transactional_rebind();
@@ -48,6 +49,7 @@ int main() {
   RUN_TEST(test_discovery_sample_and_release_are_distinct);
   RUN_TEST(test_core_headers_are_framework_neutral);
   RUN_TEST(test_v1_surface_is_absent);
+  RUN_TEST(test_scripted_transport_capacity_failures_are_explicit);
   RUN_TEST(test_independent_buses_are_fully_isolated);
   RUN_TEST(test_esp32_descriptor_lifecycle_and_stale_callbacks);
   RUN_TEST(test_address_claims_and_transactional_rebind);

@@ -46,12 +46,14 @@ class Esp32Transport {
   friend class test::TestAccess;
 #endif
 
+  // Structural defaults only; physical S2/S3 timing is not yet qualified.
   struct Timing {
     uint16_t bitUs = 12;
     uint16_t low0Us = 8;
     uint16_t low1Us = 1;
     uint16_t readLowUs = 1;
     uint16_t readSampleUs = 1;
+    uint16_t startHighUs = 160;  // Active-speed pre-Start high interval.
   };
 
   static uint64_t _nowUsThunk(void* user);
