@@ -31,7 +31,8 @@ single-device dispatcher into the multi-device example. Refactor and delete
 obsolete example infrastructure rather than wrapping it; keep the final
 examples smaller than the current set and add no compatibility band-aid. Do not
 perform actual irreversible operations during automated tests. Do not modify
-the protected report. Do not commit or publish.
+the protected report. Follow the packet README's saga checkpoint policy; do not
+tag, release, publish, or upload.
 
 ## Sole owned findings
 

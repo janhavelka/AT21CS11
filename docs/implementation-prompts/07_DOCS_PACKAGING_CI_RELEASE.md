@@ -25,8 +25,8 @@ Keep one integrator for metadata and workflow files. Do not modify the technical
 content of the protected complete-driver report. Reuse the Stage 4/6 consumer
 fixtures and one checker per contract; refactor or delete stale documentation
 and build paths rather than documenting aliases or adding packaging band-aids.
-Simplify the release surface before adding gates. Do not commit, tag, publish,
-or upload.
+Simplify the release surface before adding gates. Follow the packet README's
+saga checkpoint policy; do not tag, release, publish, or upload.
 
 ## Sole owned findings
 

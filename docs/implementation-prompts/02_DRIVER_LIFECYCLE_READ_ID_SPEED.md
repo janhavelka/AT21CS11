@@ -24,7 +24,8 @@ Keep one integrator for `AT21CS.h` and `AT21CS.cpp`. Reuse Prompt 01's raw frame
 helper; do not create feature-specific transport paths. Fix each finding by
 refactoring its root, delete superseded paths, and simplify shared lifecycle
 logic instead of stacking conditions or compatibility band-aids. Do not modify
-the protected report. Do not commit or publish.
+the protected report. Follow the packet README's saga checkpoint policy; do not
+tag, release, publish, or upload.
 
 ## Sole owned findings
 

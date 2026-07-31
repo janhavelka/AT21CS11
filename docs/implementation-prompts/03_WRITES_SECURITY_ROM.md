@@ -23,7 +23,8 @@ Keep one integrator for production write helpers. Do not enable irreversible HIL
 commands. Refactor to the single page-splitting/write-evidence path named below,
 reuse it for EEPROM and Security, delete superseded write paths, and do not
 band-aid ambiguous outcomes with retries or caches. Simplify before adding any
-helper. Do not modify the protected report. Do not commit or publish.
+helper. Do not modify the protected report. Follow the packet README's saga
+checkpoint policy; do not tag, release, publish, or upload.
 
 ## Sole owned findings
 

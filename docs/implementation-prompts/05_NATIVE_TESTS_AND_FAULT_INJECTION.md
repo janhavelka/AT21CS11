@@ -28,7 +28,8 @@ Keep one integrator for test-support code. Reuse one fixed-capacity scripted
 transport and shared assertion helpers; refactor duplicate tests instead of
 adding per-bug harnesses. If a test exposes a production defect, fix its owning
 root contract rather than band-aiding the test. Do not modify the protected
-report. Do not commit or publish.
+report. Follow the packet README's saga checkpoint policy; do not tag, release,
+publish, or upload.
 
 ## Sole owned findings
 

@@ -27,7 +27,8 @@ Refactor one backend at the root, reuse one frame/timing implementation for
 Arduino and native IDF, delete the old byte callbacks, and do not band-aid
 target differences with duplicate PHYs. Simplify every timing path that cannot
 be measured. Do not use irreversible chip commands. Do not modify the protected
-report. Do not commit or publish.
+report. Follow the packet README's saga checkpoint policy; do not tag, release,
+publish, or upload.
 
 ## Sole owned findings
 

@@ -5,6 +5,46 @@ ordered implementation prompts. It is intentionally not a collection of
 independent suggestions. The prompts form one migration and must be executed in
 order against the same branch.
 
+## Companion AI-coder wrappers
+
+Two reusable wrappers are provided; they are working-method instructions, not
+numbered implementation stages:
+
+1. Use `RUN_CURRENT_STAGE.md` with exactly one numbered prompt to implement
+   that stage.
+2. In a separate follow-up turn, use `AUDIT_CURRENT_STAGE.md` with the same
+   numbered prompt to audit and correct the completed stage.
+
+Never paste several numbered prompts together. The wrappers do not broaden a
+stage's finding ownership, authorize later-stage work, authorize HIL, or replace
+the shared contract.
+
+## Saga branch and stage checkpoints
+
+The maintainer authorizes all Prompts 01-08 to run on one branch:
+
+```text
+feature/at21cs-v2-production
+```
+
+Keep that branch for the entire ordered migration. A numbered stage is finished
+only after its implementation turn, separate audit/correction turn, required
+validation, finding-status updates, and final diff review are complete. Then:
+
+1. create one non-empty commit containing that stage's coherent changes;
+2. use a message beginning `stage NN:`;
+3. push the commit to `origin/feature/at21cs-v2-production` before starting the
+   next numbered prompt.
+
+Do not commit an incomplete or blocked stage merely to create a checkpoint. Do
+not combine two numbered stages in one commit. Never amend or force-push a stage
+checkpoint. Correct an already-pushed stage with a separate corrective commit
+on the same branch and rerun every affected gate.
+
+This authorization covers normal commits and pushes for the saga only. It does
+not authorize tags, releases, package publication/upload, stable `2.0.0`
+finalization, downstream-repository changes, or mutable/irreversible HIL.
+
 The target is a breaking `2.0.0` refactor. Stage 7 produces the
 `2.0.0-rc.1` release candidate; stable `2.0.0` metadata is authorized only
 after Stage 8 HIL passes and the maintainer approves finalization. The library
@@ -144,8 +184,8 @@ to make their intent explicit:
   fixed-size.
 - Add a regression test for every bug fixed in the stage.
 - Run the stage's exact verification commands and report exact results.
-- Do not commit, tag, publish, upload, or run irreversible hardware commands
-  unless the maintainer explicitly requests it.
+- Follow the saga branch/checkpoint policy above. It authorizes stage commits
+  and pushes, but not tags, publication/upload, or irreversible hardware work.
 
 ## Coherence invariants
 
@@ -185,7 +225,8 @@ The following invariants apply across every stage:
 17. The result is not called production-ready until Stage 8 HIL evidence passes.
 18. Stage 7 metadata remains `2.0.0-rc.1`. After Stage 8 passes, the maintainer
     may authorize the stable `2.0.0` metadata/changelog update and full gate
-    rerun; no prompt commits, tags, publishes, or uploads automatically.
+    rerun. Saga stage commits/pushes are authorized; tags, releases,
+    publication, and uploads are not automatic.
 19. Multiple independent SI/O wires are first-class: each wire owns a distinct
     Backend and Bus, and state/faults on one Bus never alter another.
 20. Connector, load-cell, calibration-record, scheduler, and product retry

@@ -51,8 +51,9 @@ RC commit/artifact set, and rerun the entire affected software/HIL matrix. Do
 not patch an immutable RC in place and do not add shims or band-aids. Reuse the
 established helpers, delete obsolete/parallel paths, and simplify before
 accepting the new RC. Do not modify the protected complete-driver report. Do
-not commit, tag, publish, upload, or execute irreversible HIL without explicit
-maintainer authorization.
+not tag, release, publish, upload, or execute irreversible HIL without separate
+maintainer authorization. Normal saga checkpoint/evidence commits and pushes
+follow the packet README policy.
 
 ## Software audit checklist
 
