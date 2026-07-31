@@ -1,7 +1,7 @@
 {
   "name": "AT21CS01_AT21CS11",
   "version": "1.3.0",
-  "description": "Production-grade Arduino/PlatformIO driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs on ESP32.",
+  "description": "Production-grade Arduino/PlatformIO and ESP-IDF driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs on ESP32.",
   "keywords": [
     "microchip",
     "at21cs01",
@@ -10,6 +10,8 @@
     "eeprom",
     "esp32",
     "arduino",
+    "espidf",
+    "esp-idf",
     "platformio"
   ],
   "authors": [
@@ -26,7 +28,8 @@
   },
   "license": "MIT",
   "frameworks": [
-    "arduino"
+    "arduino",
+    "espidf"
   ],
   "platforms": [
     "espressif32"

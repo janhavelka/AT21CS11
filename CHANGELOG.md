@@ -5,10 +5,38 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Added
+- Framework-neutral `AT21CS/Transport.h` and `AT21CS/Core.h` headers defining the single-wire backend contract and clean core include surface.
+- Core timing guard checks now reject Arduino, ESP-IDF, FreeRTOS, ESP32 platform macro, and direct GPIO framework tokens in clean public core headers.
+- ESP-IDF component metadata and a native `examples/espidf_basic` bring-up CLI.
+- Dedicated ESP-IDF example contract checker for native IDF API use and command coverage.
+- Host fake-transport tests for injected reset/discovery, byte read/write
+  sequencing, ACK/NACK phase errors, reset error propagation, and serial CRC
+  validation.
+- ESP-IDF CMake option `AT21CS_ENABLE_ESP32_COMPAT_BACKEND` for
+  transport-only applications that want to omit the built-in ESP32
+  GPIO/timer/FreeRTOS backend dependencies.
 - `SettingsSnapshot`, `getSettings()`, `isInitialized()`, `getConfig()`, and `driverState()` for cache-only runtime/health inspection.
 - Bring-up CLI `cfg` / `settings` output now reports the cached settings snapshot, including initialization state and `offlineThreshold`.
 
 ### Changed
+- Split the built-in ESP32/Arduino GPIO and timing implementation out of
+  `src/AT21CS.cpp` into private platform source
+  `src/platform/esp32/AT21CSEsp32Backend.cpp`; the protocol/core source no
+  longer includes framework or ESP32 timing/GPIO headers.
+- Core timing guard now allows framework timing/GPIO tokens only in private
+  platform/backend sources and examples, not public headers or core source.
+- Native tests now cover the no-hardware begin failure path through an injected
+  `SingleWireTransport` fake instead of Arduino/Wire stubs.
+- `Config::sioPin`, `presencePin`, and `presenceActiveHigh` are documented as
+  built-in backend compatibility config retained for this major version.
+  Injected transports must leave those fields unset and use
+  `SingleWireTransport::presencePresent` for presence policy.
+- Release-candidate backend policy keeps the built-in ESP32 compatibility
+  backend enabled by default for this major version, while allowing ESP-IDF
+  transport-only builds to disable it explicitly.
+- `AT21CS.h` no longer includes ESP32, FreeRTOS, SoC GPIO, CPU, or IRAM headers; ESP32 timing internals are kept in private platform source.
+- `Config` can optionally accept a `SingleWireTransport` backend while preserving the existing built-in pin-based backend path.
+- ESP-IDF component builds no longer publish `AT21CS_PLATFORM_IDF` as a public compile definition to consumers.
 - Doxyfile project metadata now matches `library.json` and references the
   maintained docs tree instead of removed template files.
 - Reference documentation now separates compact chip notes from full PDF extraction under `docs/extracted-md/` and `docs/pdf-extracted-md/`.
@@ -17,12 +45,22 @@ All notable changes to this project are documented here.
 - ESP32 PlatformIO builds now pin pioarduino `platform-espressif32` 54.03.20 and explicitly use C++17.
 - Multi-page write helpers now report `NOT_INITIALIZED` before argument validation when called before a successful `begin()`.
 - README write-ready documentation now matches the enforced `1..250 ms` timeout range and stalled-clock guard behavior.
+- Core GPIO and timing fallbacks now use explicit Arduino vs ESP-IDF platform paths instead of unconditional Arduino APIs.
+- `library.json` now advertises both Arduino and ESP-IDF framework support.
+- README documentation links and validation commands now match the files currently present in the repository.
+- Removed the obsolete example-local legacy IDF facade; the Arduino CLI is
+  Arduino-only and the ESP-IDF CLI is a separate native `app_main` program with
+  the same command contract.
 
 ### Fixed
 - Normal operations while `OFFLINE` now return `INVALID_STATE` without protocol traffic while `probe()` and `recover()` remain available.
 - `waitReady()` now has a finite stalled-clock poll guard when an injected millisecond source stops advancing.
 - ESP32 GPIO cleanup after failed initialization now avoids uncached direct-register pointer dereferences.
 - ESP32 cycle-counter usage now relies on the current `esp_cpu_get_cycle_count()` API instead of a removed `esp_cpu_get_ccount()` fallback.
+- `begin()` now rejects mixed injected-transport plus compatibility pin config
+  with `INVALID_CONFIG`, avoiding silently ignored pin or presence policy.
+- Injected transport tests now cover `presencePresent` preflight failure before
+  protocol I/O and bounded `waitReady()` timeout health updates.
 
 ## [1.3.0] - 2026-04-08
 

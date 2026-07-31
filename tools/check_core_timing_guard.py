@@ -7,8 +7,31 @@ import sys
 from typing import Dict
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SCAN_DIRS = ("src", "include")
+SCAN_DIRS = ("src", "include", "examples")
 VALID_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp"}
+CLEAN_CORE_HEADERS = (
+    "include/AT21CS/AT21CS.h",
+    "include/AT21CS/Core.h",
+    "include/AT21CS/Config.h",
+    "include/AT21CS/Transport.h",
+    "include/AT21CS/Status.h",
+    "include/AT21CS/CommandTable.h",
+)
+
+FORBIDDEN_CLEAN_HEADER_TOKENS = (
+    "Arduino.h",
+    "Wire.h",
+    "ARDUINO",
+    "ESP_PLATFORM",
+    "AT21CS_PLATFORM",
+    "FreeRTOS",
+    "freertos",
+    "portMUX",
+    "IRAM_ATTR",
+    "soc/gpio",
+    "driver/gpio",
+    "esp_",
+)
 
 FORBIDDEN_CALLS = {
     "millis": re.compile(r"\bmillis\s*\("),
@@ -22,8 +45,15 @@ BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 
-ALLOWED_CALL_COUNTS: Dict[str, Dict[str, int]] = {"src/AT21CS.cpp": {"millis": 1, "delayMicroseconds": 1}}
-ALLOWED_INCLUDE_COUNTS: Dict[str, int] = {"src/AT21CS.cpp": 1}
+FRAMEWORK_TOKENS = FORBIDDEN_CLEAN_HEADER_TOKENS
+
+
+def framework_tokens_allowed(rel: str) -> bool:
+    return (
+        rel.startswith("src/platform/")
+        or rel.startswith("src/backends/")
+        or rel.startswith("examples/")
+    )
 
 
 def strip_non_code(text: str) -> str:
@@ -47,6 +77,7 @@ def collect_sources() -> list[pathlib.Path]:
 def main() -> int:
     observed_calls: Dict[str, Dict[str, int]] = {}
     observed_includes: Dict[str, int] = {}
+    observed_framework_tokens: Dict[str, list[str]] = {}
 
     for path in collect_sources():
         rel = path.relative_to(ROOT).as_posix()
@@ -65,45 +96,33 @@ def main() -> int:
         if include_count > 0:
             observed_includes[rel] = include_count
 
+        if not framework_tokens_allowed(rel):
+            token_hits = [token for token in FRAMEWORK_TOKENS if token in code]
+            if token_hits:
+                observed_framework_tokens[rel] = token_hits
+
     errors: list[str] = []
 
     for rel, counts in observed_calls.items():
-        if rel not in ALLOWED_CALL_COUNTS:
-            errors.append(f"forbidden timing calls in unexpected file: {rel} -> {counts}")
-            continue
-        expected = ALLOWED_CALL_COUNTS[rel]
-        for call_name, count in counts.items():
-            exp = expected.get(call_name, 0)
-            if count != exp:
-                errors.append(
-                    f"timing call count mismatch in {rel}: {call_name} observed={count}, expected={exp}"
-                )
-
-    for rel, expected in ALLOWED_CALL_COUNTS.items():
-        observed = observed_calls.get(rel, {})
-        for call_name, exp in expected.items():
-            obs = observed.get(call_name, 0)
-            if obs != exp:
-                errors.append(
-                    f"timing call count mismatch in {rel}: {call_name} observed={obs}, expected={exp}"
-                )
-        unexpected_calls = set(observed.keys()) - set(expected.keys())
-        if unexpected_calls:
-            errors.append(f"unexpected timing call types in {rel}: {sorted(unexpected_calls)}")
+        if not framework_tokens_allowed(rel):
+            errors.append(f"forbidden timing calls in core/public file: {rel} -> {counts}")
 
     for rel, count in observed_includes.items():
-        exp = ALLOWED_INCLUDE_COUNTS.get(rel, 0)
-        if count != exp:
-            errors.append(
-                f"Arduino include count mismatch in {rel}: observed={count}, expected={exp}"
-            )
+        if not framework_tokens_allowed(rel):
+            errors.append(f"forbidden Arduino include in core/public file: {rel} -> {count}")
 
-    for rel, exp in ALLOWED_INCLUDE_COUNTS.items():
-        obs = observed_includes.get(rel, 0)
-        if obs != exp:
-            errors.append(
-                f"Arduino include count mismatch in {rel}: observed={obs}, expected={exp}"
-            )
+    for rel, tokens in observed_framework_tokens.items():
+        errors.append(f"forbidden framework tokens in core/public file: {rel} -> {tokens}")
+
+    for rel in CLEAN_CORE_HEADERS:
+        path = ROOT / rel
+        if not path.exists():
+            errors.append(f"missing clean core header: {rel}")
+            continue
+        raw = path.read_text(encoding="utf-8", errors="replace")
+        for token in FORBIDDEN_CLEAN_HEADER_TOKENS:
+            if token in raw:
+                errors.append(f"forbidden framework token in clean core header {rel}: {token}")
 
     if errors:
         print("Core timing guard FAILED:")

@@ -1,47 +1,42 @@
-# AT21CS11 ESP-IDF Portability Status
+# AT21CS11 ESP-IDF Port Notes
 
-Last audited: 2026-03-01
+Date: 2026-05-19.
 
-## Current Reality
-- Primary runtime remains PlatformIO + Arduino.
-- Bus access is implemented internally with GPIO bit-banging in the driver.
-- Timing now supports optional hooks in `AT21CS::Config`:
-  - `nowMs`, `sleepUs`, `timeUser`
-- Core protocol logic uses internal wrappers (`_nowMs`, `_sleepUs`).
-- Arduino APIs are only fallback paths:
-  - `_nowMs()` -> `millis()` when `Config.nowMs == nullptr`
-  - `_sleepUs()` -> `delayMicroseconds()` when `Config.sleepUs == nullptr`
+## Boundary Contract
 
-## ESP-IDF Adapter Requirements
-For pure ESP-IDF integration, provide timing hooks:
-1. `nowMs(user)` using `esp_timer_get_time()`.
-2. `sleepUs(us, user)` using `esp_rom_delay_us()`.
+- Public headers must not force Arduino include paths in consumers.
+- The single-wire AT21CS driver currently has a documented ESP32 timing/GPIO
+  implementation path because the protocol requires microsecond bit timing.
+  Keep that coupling explicit in `CMakeLists.txt` and do not add Arduino
+  runtime requirements to ESP-IDF builds.
+- Arduino examples may use Arduino APIs.
+- ESP-IDF examples must be native IDF programs using `app_main`,
+  `driver/gpio.h`, `esp_timer`, `esp_rom_delay_us`, `vTaskDelay`, and fixed C
+  buffers. They must not include Arduino CLI source or Arduino-style facades.
 
-No public I2C callback is required for AT21CS11 because the one-wire transport is implemented by the driver via GPIO.
+## Native ESP-IDF Example
 
-## Minimal Adapter Pattern
-```cpp
-static uint32_t idfNowMs(void*) {
-  return static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
-}
+`examples/espidf_basic` is a standalone native IDF CLI. It creates its own
+fixed command buffer, calls the AT21CS driver directly, and exposes the same
+bring-up workflows expected from the Arduino CLI: help, begin, scan, probe,
+recover, reset, driver status, config, EEPROM read/write, security read,
+serial-number read, raw/chip workflow notes, selftest, stress, and verbose.
 
-static void idfSleepUs(uint32_t us, void*) {
-  esp_rom_delay_us(us);
-}
+## Build And Checks
 
-AT21CS::Config cfg{};
-cfg.sioPin = 5;
-cfg.nowMs = idfNowMs;
-cfg.sleepUs = idfSleepUs;
+```bash
+python tools/check_core_timing_guard.py
+python tools/check_idf_example_contract.py
+python -m platformio test -e native
+python -m platformio run -e ex_cli_s3
+python -m platformio run -e ex_cli_s2
+idf.py -C examples/espidf_basic set-target esp32s3
+idf.py -C examples/espidf_basic build
+git diff --check
 ```
 
-## Porting Notes
-- Keep calling `tick(nowMs)` from the app loop/task.
-- Driver uses unsigned delta arithmetic for timeout checks and remains rollover-safe.
-- Preserve single-threaded access model (or guard externally with a mutex).
+## Hardware Validation
 
-## Verification Checklist
-- `python tools/check_core_timing_guard.py` passes.
-- Native tests pass where available.
-- Bring-up example builds and runs on target board.
-- No direct Arduino timing calls are introduced outside fallback wrappers.
+Hardware validation remains required for SI/O timing margins, open-drain line
+release, pull-up sizing, presence-pin polarity, standard/high-speed switching,
+write-cycle polling, and disconnected-device behavior.
