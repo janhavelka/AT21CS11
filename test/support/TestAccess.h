@@ -40,6 +40,21 @@ class TestAccess {
     return driver._hasCurrentBusBinding();
   }
 
+  static void seedDriverState(Driver& driver,
+                              DriverState state,
+                              bool initialized) {
+    driver._setState(state, initialized);
+  }
+
+  static void seedDriverHealth(Driver& driver,
+                               uint8_t consecutiveFailures,
+                               uint32_t totalSuccess,
+                               uint32_t totalFailures) {
+    driver._consecutiveFailures = consecutiveFailures;
+    driver._totalSuccess = totalSuccess;
+    driver._totalFailures = totalFailures;
+  }
+
   static void activateWithoutHardware(Esp32Transport& transport,
                                       int presencePin = 2) {
     transport._config.sioPin = 1;

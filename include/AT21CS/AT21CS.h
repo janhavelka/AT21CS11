@@ -134,9 +134,39 @@ class Driver {
   friend class test::TestAccess;
 #endif
 
+  enum class OperationKind : uint8_t {
+    INITIALIZE = 0,
+    RECOVER,
+    PROBE,
+    NORMAL_IO,
+    MUTATION
+  };
+
   uint8_t _deviceAddress(uint8_t opcode, bool read) const;
   bool _hasCurrentBusBinding() const;
+
+  bool _canUseNormalIo() const;
+  Status _requireBound() const;
+  Status _requireInitializedForIo() const;
+  void _setState(DriverState state, bool initialized);
+  void _enterOperation(DriverState transient);
+  void _finishOperation(const Status& status,
+                        OperationKind kind,
+                        DriverState entryState);
   void _resetLocalState();
+
+  Status _synchronizeBusState(bool restoreConfiguredSpeed);
+  Status _readRandomRaw(uint8_t opcode,
+                        uint8_t address,
+                        uint8_t* data,
+                        size_t length);
+  Status _readDirectRaw(uint8_t opcode, uint8_t* data, size_t length);
+  Status _readManufacturerIdRaw(uint32_t& manufacturerId);
+  Status _classifyManufacturerIdRaw(uint32_t manufacturerId,
+                                    PartType& part,
+                                    uint8_t& siliconRevision);
+  Status _setSpeedModeRaw(SpeedMode mode, TransferResult& transferResult);
+  Status _runInitializationSequence();
 
   Bus* _bus = nullptr;
   Config _config{};
