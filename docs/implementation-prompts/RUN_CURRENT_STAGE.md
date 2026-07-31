@@ -37,8 +37,11 @@ Prompt 06's specified static FreeRTOS fixture is allowed only under
 or packaged content.
 
 Use the contract's exact names, values, types, signatures, transitions,
-ownership, and errors. Retain no v1 shim unless required. Prefer root-cause
-refactoring and shared helpers; remove patches, parallel, and superseded code.
+ownership, and errors. Reuse correct implementation logic, including verified
+backend mechanics, while refactoring as far as needed for simplicity,
+robustness, and readability. Retain no obsolete v1 public contract,
+compatibility wrapper, migration architecture, patch, parallel path, or
+superseded code.
 
 Use fixed-size state, no exceptions, steady-state allocation, logging, hidden
 retry/recovery, or unbounded wait. Validate complete inputs before I/O.

@@ -49,8 +49,8 @@ reopening their transport/core contracts.
 Target:
 
 - ESP32-S2 and ESP32-S3;
-- Arduino-ESP32 3.2.0 through the exact repository pin
-  `https://github.com/pioarduino/platform-espressif32/releases/download/54.03.20/platform-espressif32.zip`;
+- Arduino-ESP32 3.3.11 through the maintainer-authorized PioArduino pin
+  `https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip`;
 - native ESP-IDF at the two exact release endpoints 5.4.1 and 6.0.1.
 
 If this matrix cannot be implemented and tested, narrow `library.json`,

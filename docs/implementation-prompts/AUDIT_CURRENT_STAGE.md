@@ -50,9 +50,11 @@ transport error, timeout, cleanup error, boundaries, partial mutation, rebind,
 recovery, and shutdown where applicable. Tests must call production logic and
 use independent expected values.
 
-Fix every current-stage defect and earlier-stage regression. Prefer coherent
-refactoring, shared helpers, and deletion over wrappers or local patches. Do
-not add later-stage functionality.
+Fix every current-stage defect and earlier-stage regression. Reuse correct
+implementation logic, including verified backend mechanics, while refactoring
+as far as needed for simplicity, robustness, and readability. Retain no
+obsolete public contract, compatibility wrapper, migration architecture,
+parallel path, or local patch. Do not add later-stage functionality.
 
 Reread the prompt, inspect the corrected diff/callers, verify every criterion
 and finding, simplify, and rerun current checks plus affected earlier gates,

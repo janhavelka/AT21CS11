@@ -11,8 +11,9 @@ SCAN_DIRS = ("src", "include", "examples")
 VALID_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp"}
 CLEAN_CORE_HEADERS = (
     "include/AT21CS/AT21CS.h",
-    "include/AT21CS/Core.h",
+    "include/AT21CS/Bus.h",
     "include/AT21CS/Config.h",
+    "include/AT21CS/Types.h",
     "include/AT21CS/Transport.h",
     "include/AT21CS/Status.h",
     "include/AT21CS/CommandTable.h",
@@ -47,11 +48,56 @@ STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
 
 FRAMEWORK_TOKENS = FORBIDDEN_CLEAN_HEADER_TOKENS
 
+FORBIDDEN_V1_PUBLIC_PATTERNS = {
+    "include/AT21CS/AT21CS.h": (
+        r"\btick\s*\(",
+        r"\bwaitReady\s*\(",
+        r"\breadCurrentAddress\s*\(",
+        r"\bwriteEepromByte\s*\(",
+        r"\bwriteSecurityUserByte\s*\(",
+        r"\blockSecurityRegister\s*\(",
+        r"\bisSecurityLocked\s*\(",
+        r"\breadRomZoneRegister\s*\(",
+        r"\bisZoneRom\s*\(",
+        r"\bsetZoneRom\s*\(",
+        r"\bfreezeRomZones\s*\(",
+        r"\bareRomZonesFrozen\s*\(",
+        r"\bdetectPart\s*\(",
+        r"\bresetAndDiscover\s*\(",
+        r"\bisPresent\s*\(",
+        r"\bdriverState\s*\(",
+        r"\bgetConfig\s*\(",
+        r"\bgetSettings\s*\(",
+        r"\bsetHighSpeed\s*\(",
+        r"\bisHighSpeed\s*\(",
+        r"\bsetStandardSpeed\s*\(",
+        r"\bisStandardSpeed\s*\(",
+        r"\bcrc8_31\s*\(",
+    ),
+    "include/AT21CS/Transport.h": (
+        r"\bSingleWireTimingProfile\b",
+        r"\bwriteByteReadAck\b",
+        r"\breadByteSendAck\b",
+    ),
+    "include/AT21CS/Config.h": (
+        r"\bsioPin\b",
+        r"\bpresencePin\b",
+        r"\bwriteTimeoutMs\b",
+        r"\bdiscoveryRetries\b",
+        r"\bnowMs\b",
+        r"\bsleepUs\b",
+        r"\btimeUser\b",
+        r"\btransport\b",
+    ),
+    "include/AT21CS/Status.h": (r"\binProgress\s*\(",),
+}
+
 
 def framework_tokens_allowed(rel: str) -> bool:
     return (
         rel.startswith("src/platform/")
         or rel.startswith("src/backends/")
+        or rel.startswith("include/AT21CS/platform/")
         or rel.startswith("examples/")
     )
 
@@ -123,6 +169,16 @@ def main() -> int:
         for token in FORBIDDEN_CLEAN_HEADER_TOKENS:
             if token in raw:
                 errors.append(f"forbidden framework token in clean core header {rel}: {token}")
+
+    for rel, patterns in FORBIDDEN_V1_PUBLIC_PATTERNS.items():
+        path = ROOT / rel
+        if not path.exists():
+            errors.append(f"missing public contract header: {rel}")
+            continue
+        code = strip_non_code(path.read_text(encoding="utf-8", errors="replace"))
+        for pattern in patterns:
+            if re.search(pattern, code):
+                errors.append(f"obsolete v1 public symbol in {rel}: {pattern}")
 
     if errors:
         print("Core timing guard FAILED:")

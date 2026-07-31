@@ -45,7 +45,8 @@ Rules:
 - Single-wire timed bit protocol, MSb-first.
 - Discovery handshake required after reset/power-up.
 - Preserve ACK/NACK phase granularity in errors.
-- During t_WR busy cycle, keep SI/O high and use bounded ready polling.
+- During t_WR busy cycle, keep SI/O released high continuously for the fixed
+  10 ms Bus write-high interval; do not ACK-poll before that deadline.
 - AT21CS11 is High-Speed only; Standard Speed requests must fail cleanly.
 
 ## Driver State Model

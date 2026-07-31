@@ -25,12 +25,14 @@ Spawn at least three subagents:
 3. platform-boundary/compile reviewer.
 
 Use them read-only until the integrator confirms the exact contract. Keep one
-integrator responsible for shared headers and source. Prefer deletion and
-root-cause refactoring over band-aids, aliases, or compatibility wrappers.
-Reuse one correct validation/address/status helper instead of copying logic,
-and simplify the resulting code before adding surface area. Do not modify the
-protected complete-driver report. Follow the packet README's saga checkpoint
-policy; do not tag, release, publish, or upload.
+integrator responsible for shared headers and source. Reuse correct backend
+and protocol mechanics while refactoring as far as needed for simplicity,
+robustness, and readability. Retain no obsolete public contract, compatibility
+wrapper, migration architecture, parallel path, or band-aid. Reuse one correct
+validation/address/status helper instead of copying logic, and simplify the
+resulting code before adding surface area. Do not modify the protected
+complete-driver report. Follow the packet README's saga checkpoint policy; do
+not tag, release, publish, or upload.
 
 ## Sole owned findings
 

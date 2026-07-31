@@ -1,27 +1,22 @@
-set(AT21CS_ENABLE_ESP32_COMPAT_BACKEND ON CACHE BOOL
-    "Build the built-in ESP32 GPIO/timing compatibility backend")
+set(AT21CS_ENABLE_ESP32_BACKEND ON CACHE BOOL
+    "Build the external ESP32 GPIO/timing transport")
 
-if(AT21CS_ENABLE_ESP32_COMPAT_BACKEND)
+set(AT21CS_SOURCES
+  "src/AT21CS.cpp"
+  "src/Bus.cpp"
+)
+
+if(AT21CS_ENABLE_ESP32_BACKEND)
+  list(APPEND AT21CS_SOURCES "src/platform/esp32/Esp32Transport.cpp")
   idf_component_register(
-    SRCS
-      "src/AT21CS.cpp"
-      "src/platform/esp32/AT21CSEsp32Backend.cpp"
+    SRCS ${AT21CS_SOURCES}
     INCLUDE_DIRS "include"
-    REQUIRES esp_driver_gpio esp_timer freertos esp_hw_support
-  )
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE
-    AT21CS_ENABLE_ESP32_COMPAT_BACKEND=1
-    AT21CS_PLATFORM_IDF=1
+    REQUIRES esp_driver_gpio esp_timer freertos
   )
 else()
   idf_component_register(
-    SRCS
-      "src/AT21CS.cpp"
-      "src/platform/esp32/AT21CSEsp32Backend.cpp"
+    SRCS ${AT21CS_SOURCES}
     INCLUDE_DIRS "include"
-  )
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE
-    AT21CS_ENABLE_ESP32_COMPAT_BACKEND=0
   )
 endif()
 

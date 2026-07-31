@@ -30,9 +30,11 @@ static constexpr uint8_t SECURITY_SERIAL_START = 0x00;
 static constexpr size_t SECURITY_SERIAL_SIZE = 8;
 static constexpr uint8_t SECURITY_PRODUCT_ID = 0xA0;
 
-// Manufacturer IDs (24-bit values).
-static constexpr uint32_t MANUFACTURER_ID_AT21CS01 = 0x00D200;
-static constexpr uint32_t MANUFACTURER_ID_AT21CS11 = 0x00D380;
+// Manufacturer ID part/revision fields (24-bit values).
+static constexpr uint32_t MANUFACTURER_ID_PART_MASK = 0x00FFFFF8u;
+static constexpr uint32_t MANUFACTURER_ID_AT21CS01_BASE = 0x00D200u;
+static constexpr uint32_t MANUFACTURER_ID_AT21CS11_BASE = 0x00D380u;
+static constexpr uint32_t MANUFACTURER_ID_REVISION_MASK = 0x00000007u;
 
 // ROM zone configuration.
 static constexpr uint8_t ROM_ZONE_REGISTER_COUNT = 4;

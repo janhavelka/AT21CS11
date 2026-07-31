@@ -72,8 +72,8 @@ Every implementation session must read, in this order:
 Before relying on the datasheet, verify the downloaded file exactly:
 
 ```text
-size:   2145807 bytes
-SHA-256: 59E1C04C9C36DAC48058275BDB95B240DF8445DD166487AA3670601926B2FBB5
+size:   2247216 bytes
+SHA-256: 704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5
 ```
 
 Do not substitute a search result, cached older revision, HTML error page, or
@@ -81,11 +81,12 @@ locally extracted text for this verified source. If the exact file cannot be
 obtained and verified, stop protocol-affecting work and report the stage
 `BLOCKED`.
 
-At this audit revision, the similarly named checked-in file
-`docs/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf` is
-2,247,216 bytes with SHA-256
-`704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5`; it is not
-the exact authoritative artifact above. Its filename is not verification.
+The maintainer explicitly authorized the checked-in 2,247,216-byte file
+`docs/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf`, with
+SHA-256
+`704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5`, as the
+authoritative DS20005857I artifact. Its content hash and size, rather than its
+filename, are the verification record.
 
 The repository's older extracted/reference documents are secondary aids. Where
 they conflict with DS20005857I, DS20005857I wins. In particular:
@@ -174,8 +175,10 @@ to make their intent explicit:
 - Spawn subagents for independent inspection, test design, and final review.
   Keep one integrator responsible for shared-file edits.
 - Use subagents read-only until the integrator freezes the stage design.
-- Prefer deletion and coherent refactoring over wrappers, aliases, compatibility
-  shims, or a second implementation.
+- Reuse correct implementation logic, including verified backend mechanics,
+  while refactoring as far as needed for simpler, safer, more readable code.
+- Do not retain obsolete public contracts, compatibility wrappers, migration
+  architecture, aliases, parallel paths, or a second implementation.
 - Reuse correct existing opcode, validation, CRC, page-splitting, status, and
   example helper code instead of copying it.
 - Do not introduce dynamic allocation, exceptions, logging, hidden retries,

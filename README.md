@@ -299,8 +299,8 @@ The chip reference remains in:
 ## Development Build Notes
 
 The repository `platformio.ini` pins ESP32 example builds to the pioarduino
-`platform-espressif32` 54.03.20 package and explicitly builds with C++17. This
-keeps CI and local example builds on the same Arduino-ESP32 3.2.0 toolchain.
+`platform-espressif32` 55.03.311 package and explicitly builds with C++17. This
+keeps CI and local example builds on the same Arduino-ESP32 3.3.11 toolchain.
 
 Recommended validation:
 
