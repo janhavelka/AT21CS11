@@ -33,6 +33,21 @@ constexpr bool isManufacturerAddressNack(const Status& status) {
              ProtocolPhase::DEVICE_ADDRESS_READ;
 }
 
+constexpr bool rangeFits(size_t start, size_t length, size_t capacity) {
+  return start <= capacity && length <= (capacity - start);
+}
+
+constexpr bool pageFits(uint8_t address, size_t length) {
+  const size_t pageOffset = static_cast<size_t>(address) % cmd::PAGE_SIZE;
+  return rangeFits(pageOffset, length, cmd::PAGE_SIZE);
+}
+
+constexpr MutationEffect failedMutationEffect(WriteEffect effect) {
+  return effect == WriteEffect::MAY_HAVE_COMMITTED
+             ? MutationEffect::MAY_HAVE_COMMITTED
+             : MutationEffect::NOT_ATTEMPTED;
+}
+
 template <typename T>
 void incrementSaturating(T& value) {
   if (value != std::numeric_limits<T>::max()) {
@@ -372,6 +387,366 @@ Status Driver::readSecurity(uint8_t address, uint8_t* data, size_t length) {
   }
 
   _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
+}
+
+Status Driver::writeEepromPage(uint8_t address,
+                               const uint8_t* data,
+                               size_t length,
+                               WriteResult& result) {
+  result = WriteResult{};
+  const size_t start = static_cast<size_t>(address);
+  if (data == nullptr || length == 0 || length > cmd::PAGE_SIZE ||
+      !rangeFits(start, length, cmd::EEPROM_SIZE) ||
+      !pageFits(address, length)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  _enterOperation(DriverState::BUSY);
+  status = _writePageRaw(cmd::OPCODE_EEPROM, address, data, length, result);
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::writeEeprom(uint8_t address,
+                           const uint8_t* data,
+                           size_t length,
+                           WriteResult& result) {
+  result = WriteResult{};
+  const size_t start = static_cast<size_t>(address);
+  if (data == nullptr || length == 0 ||
+      !rangeFits(start, length, cmd::EEPROM_SIZE)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  _enterOperation(DriverState::BUSY);
+  status = _writeRange(cmd::OPCODE_EEPROM, 0,
+                       static_cast<uint8_t>(cmd::EEPROM_SIZE - 1u), address,
+                       data, length, result);
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::writeSecurityUserPage(uint8_t address,
+                                     const uint8_t* data,
+                                     size_t length,
+                                     WriteResult& result) {
+  result = WriteResult{};
+  const size_t start = static_cast<size_t>(address);
+  const size_t first = static_cast<size_t>(cmd::SECURITY_USER_MIN);
+  const size_t capacity =
+      static_cast<size_t>(cmd::SECURITY_USER_MAX - cmd::SECURITY_USER_MIN) +
+      1u;
+  if (data == nullptr || length == 0 || length > cmd::PAGE_SIZE ||
+      start < first || !rangeFits(start - first, length, capacity) ||
+      !pageFits(address, length)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  _enterOperation(DriverState::BUSY);
+  status =
+      _writePageRaw(cmd::OPCODE_SECURITY, address, data, length, result);
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::writeSecurityUser(uint8_t address,
+                                 const uint8_t* data,
+                                 size_t length,
+                                 WriteResult& result) {
+  result = WriteResult{};
+  const size_t start = static_cast<size_t>(address);
+  const size_t first = static_cast<size_t>(cmd::SECURITY_USER_MIN);
+  const size_t capacity =
+      static_cast<size_t>(cmd::SECURITY_USER_MAX - cmd::SECURITY_USER_MIN) +
+      1u;
+  if (data == nullptr || length == 0 || start < first ||
+      !rangeFits(start - first, length, capacity)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  _enterOperation(DriverState::BUSY);
+  status = _writeRange(cmd::OPCODE_SECURITY, cmd::SECURITY_USER_MIN,
+                       cmd::SECURITY_USER_MAX, address, data, length, result);
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::readSecurityLockState(bool& locked) {
+  locked = false;
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+    }
+    return status;
+  }
+  status = _readSecurityLockStateRaw(locked);
+  _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
+}
+
+Status Driver::permanentlyLockSecurity(MutationResult& result) {
+  result = MutationResult{};
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  bool locked = false;
+  status = _readSecurityLockStateRaw(locked);
+  if (!status.ok()) {
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+  if (locked) {
+    result.effect = MutationEffect::VERIFIED;
+    result.alreadyApplied = true;
+    _finishOperation(Status::Ok(), OperationKind::MUTATION, entryState);
+    return Status::Ok();
+  }
+
+  const uint8_t lockData = 0;
+  WriteResult writeResult{};
+  _enterOperation(DriverState::BUSY);
+  status = _writePageRaw(cmd::OPCODE_LOCK_SECURITY,
+                         cmd::LOCK_SECURITY_ADDRESS, &lockData, 1,
+                         writeResult);
+  if (!status.ok()) {
+    result.effect = failedMutationEffect(writeResult.lastPageEffect);
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+
+  result.effect = MutationEffect::ACCEPTED;
+  _setState(entryState, _initialized);
+  locked = false;
+  status = _readSecurityLockStateRaw(locked);
+  if (status.ok() && !locked) {
+    status = Status::Error(Err::VERIFY_MISMATCH);
+  } else if (status.ok()) {
+    result.effect = MutationEffect::VERIFIED;
+  }
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::readRomZoneState(uint8_t zoneIndex, bool& enabled) {
+  enabled = false;
+  if (zoneIndex >= cmd::ROM_ZONE_REGISTER_COUNT) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+    }
+    return status;
+  }
+  status = _readRomZoneStateRaw(zoneIndex, enabled);
+  _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
+}
+
+Status Driver::permanentlyEnableRomZone(uint8_t zoneIndex,
+                                        MutationResult& result) {
+  result = MutationResult{};
+  if (zoneIndex >= cmd::ROM_ZONE_REGISTER_COUNT) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  bool enabled = false;
+  status = _readRomZoneStateRaw(zoneIndex, enabled);
+  if (!status.ok()) {
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+  if (enabled) {
+    result.effect = MutationEffect::VERIFIED;
+    result.alreadyApplied = true;
+    _finishOperation(Status::Ok(), OperationKind::MUTATION, entryState);
+    return Status::Ok();
+  }
+
+  const uint8_t romValue = cmd::ROM_ZONE_ROM_VALUE;
+  WriteResult writeResult{};
+  _enterOperation(DriverState::BUSY);
+  status = _writePageRaw(cmd::OPCODE_ROM_ZONE,
+                         cmd::ROM_ZONE_REGISTERS[zoneIndex], &romValue, 1,
+                         writeResult);
+  if (!status.ok()) {
+    result.effect = failedMutationEffect(writeResult.lastPageEffect);
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+
+  result.effect = MutationEffect::ACCEPTED;
+  _setState(entryState, _initialized);
+  enabled = false;
+  status = _readRomZoneStateRaw(zoneIndex, enabled);
+  if (status.ok() && !enabled) {
+    status = Status::Error(Err::VERIFY_MISMATCH);
+  } else if (status.ok()) {
+    result.effect = MutationEffect::VERIFIED;
+  }
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::permanentlyFreezeRomZones(MutationResult& result) {
+  result = MutationResult{};
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  bool frozen = false;
+  status = _observeFreezeStateRaw(frozen);
+  if (!status.ok()) {
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+  if (frozen) {
+    result.effect = MutationEffect::VERIFIED;
+    result.alreadyApplied = true;
+    _finishOperation(Status::Ok(), OperationKind::MUTATION, entryState);
+    return Status::Ok();
+  }
+
+  const uint8_t freezeData = cmd::FREEZE_ROM_DATA;
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(cmd::OPCODE_FREEZE_ROM, false);
+  transfer.hasMemoryAddress = true;
+  transfer.memoryAddress = cmd::FREEZE_ROM_ADDR;
+  transfer.txData = &freezeData;
+  transfer.txLength = 1;
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  WriteCycleResult writeCycle{};
+  _enterOperation(DriverState::BUSY);
+  status = _bus->_executeWrite(transfer, writeCycle);
+  if (!status.ok()) {
+    if (writeCycle.frame.dataBytesTransferred != 0 ||
+        writeCycle.frame.currentWriteByteMayBeAccepted) {
+      result.effect = MutationEffect::MAY_HAVE_COMMITTED;
+    }
+    if (status.code == Err::NACK_DEVICE_ADDRESS &&
+        protocolDetailPhase(status.detail) ==
+            ProtocolPhase::DEVICE_ADDRESS_WRITE) {
+      status = Status::Error(Err::INDETERMINATE, status.detail);
+    }
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+
+  result.effect = MutationEffect::ACCEPTED;
+  _setState(entryState, _initialized);
+  frozen = false;
+  status = _observeFreezeStateRaw(frozen);
+  if (status.ok() && !frozen) {
+    status = Status::Error(Err::VERIFY_MISMATCH);
+  } else if (status.ok()) {
+    result.effect = MutationEffect::VERIFIED;
+  }
+  _finishOperation(status, OperationKind::MUTATION, entryState);
   return status;
 }
 
@@ -748,6 +1123,167 @@ Status Driver::_readDirectRaw(uint8_t opcode,
     std::memcpy(data, scratch, length);
   }
   return status;
+}
+
+Status Driver::_writePageRaw(uint8_t opcode,
+                             uint8_t address,
+                             const uint8_t* data,
+                             size_t length,
+                             WriteResult& result) {
+  result = WriteResult{};
+  if (data == nullptr || length == 0 || length > cmd::PAGE_SIZE ||
+      length > Bus::MAX_FRAME_DATA_BYTES) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(opcode, false);
+  transfer.hasMemoryAddress = true;
+  transfer.memoryAddress = address;
+  transfer.txData = data;
+  transfer.txLength = length;
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  WriteCycleResult writeCycle{};
+  const Status status = _bus->_executeWrite(transfer, writeCycle);
+  result.lastPageBytesAccepted = writeCycle.frame.dataBytesTransferred;
+  if (status.ok()) {
+    result.bytesCommitted = length;
+    result.lastPageEffect = WriteEffect::COMMITTED;
+  } else if (writeCycle.frame.dataBytesTransferred != 0 ||
+             writeCycle.frame.currentWriteByteMayBeAccepted) {
+    result.lastPageEffect = WriteEffect::MAY_HAVE_COMMITTED;
+  }
+  return status;
+}
+
+Status Driver::_writeRange(uint8_t opcode,
+                           uint8_t firstWritableAddress,
+                           uint8_t lastWritableAddress,
+                           uint8_t address,
+                           const uint8_t* data,
+                           size_t length,
+                           WriteResult& result) {
+  result = WriteResult{};
+  if (data == nullptr || length == 0 ||
+      firstWritableAddress > lastWritableAddress ||
+      address < firstWritableAddress) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const size_t capacity =
+      static_cast<size_t>(lastWritableAddress - firstWritableAddress) + 1u;
+  const size_t start = static_cast<size_t>(address - firstWritableAddress);
+  if (!rangeFits(start, length, capacity)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  size_t offset = 0;
+  while (offset < length) {
+    const size_t absoluteAddress = static_cast<size_t>(address) + offset;
+    const size_t pageRemaining =
+        cmd::PAGE_SIZE - (absoluteAddress % cmd::PAGE_SIZE);
+    const size_t remaining = length - offset;
+    const size_t chunk = remaining < pageRemaining ? remaining : pageRemaining;
+
+    WriteResult pageResult{};
+    const Status status = _writePageRaw(
+        opcode, static_cast<uint8_t>(absoluteAddress), data + offset, chunk,
+        pageResult);
+    result.lastPageBytesAccepted = pageResult.lastPageBytesAccepted;
+    result.lastPageEffect = pageResult.lastPageEffect;
+    if (!status.ok()) {
+      return status;
+    }
+    result.bytesCommitted += pageResult.bytesCommitted;
+    offset += chunk;
+  }
+  return Status::Ok();
+}
+
+Status Driver::_readSecurityLockStateRaw(bool& locked) {
+  locked = false;
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(cmd::OPCODE_LOCK_SECURITY, false);
+  transfer.hasMemoryAddress = true;
+  transfer.memoryAddress = cmd::LOCK_SECURITY_ADDRESS;
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  TransferResult result{};
+  const Status status = _bus->_execute(transfer, result);
+  if (status.code == Err::NACK_MEMORY_ADDRESS &&
+      protocolDetailPhase(status.detail) == ProtocolPhase::MEMORY_ADDRESS) {
+    locked = true;
+    return Status::Ok();
+  }
+  return status;
+}
+
+Status Driver::_readRomZoneStateRaw(uint8_t zoneIndex, bool& enabled) {
+  enabled = false;
+  if (zoneIndex >= cmd::ROM_ZONE_REGISTER_COUNT) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  uint8_t value = 0;
+  const Status status =
+      _readRandomRaw(cmd::OPCODE_ROM_ZONE,
+                     cmd::ROM_ZONE_REGISTERS[zoneIndex], &value, 1);
+  if (!status.ok()) {
+    return status;
+  }
+  if (value == 0) {
+    return Status::Ok();
+  }
+  if (value == cmd::ROM_ZONE_ROM_VALUE) {
+    enabled = true;
+    return Status::Ok();
+  }
+  return Status::Error(Err::VERIFY_MISMATCH,
+                       static_cast<int32_t>(value));
+}
+
+Status Driver::_observeFreezeStateRaw(bool& frozen) {
+  frozen = false;
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(cmd::OPCODE_FREEZE_ROM, false);
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  TransferResult result{};
+  Status status = _bus->_execute(transfer, result);
+  if (status.ok()) {
+    return status;
+  }
+  if (status.code != Err::NACK_DEVICE_ADDRESS ||
+      protocolDetailPhase(status.detail) !=
+          ProtocolPhase::DEVICE_ADDRESS_WRITE) {
+    return status;
+  }
+
+  uint32_t manufacturerId = 0;
+  status = _readManufacturerIdRaw(manufacturerId);
+  if (!status.ok()) {
+    return Status::Error(Err::INDETERMINATE, status.detail);
+  }
+  PartType part = PartType::UNKNOWN;
+  uint8_t revision = 0;
+  status = _classifyManufacturerIdRaw(manufacturerId, part, revision);
+  (void)revision;
+  if (!status.ok() || part != _detectedPart ||
+      _detectedPart == PartType::UNKNOWN) {
+    return Status::Error(Err::INDETERMINATE,
+                         static_cast<int32_t>(manufacturerId));
+  }
+  frozen = true;
+  return Status::Ok();
 }
 
 Status Driver::_readManufacturerIdRaw(uint32_t& manufacturerId) {

@@ -61,7 +61,7 @@ struct CapturedTransfer {
 
 class ScriptedTransport {
  public:
-  static constexpr size_t EVENT_CAPACITY = 256;
+  static constexpr size_t EVENT_CAPACITY = 512;
   static constexpr size_t TRANSFER_CAPACITY = 64;
   static constexpr size_t AUX_CAPACITY = 32;
   static constexpr size_t NOW_CAPACITY = 128;

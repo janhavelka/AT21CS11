@@ -97,10 +97,13 @@ class Driver {
   SettingsSnapshot snapshot() const;
 
   Status readEeprom(uint8_t address, uint8_t* data, size_t length);
+  /// One bounded page frame followed by the Bus-owned 10 ms high-only hold.
   Status writeEepromPage(uint8_t address,
                          const uint8_t* data,
                          size_t length,
                          WriteResult& result);
+  /// Worst case: 16 pages * (one bounded frame + 10 ms high-only hold).
+  /// Latency-sensitive firmware should schedule writeEepromPage() instead.
   Status writeEeprom(uint8_t address,
                      const uint8_t* data,
                      size_t length,
@@ -161,6 +164,21 @@ class Driver {
                         uint8_t* data,
                         size_t length);
   Status _readDirectRaw(uint8_t opcode, uint8_t* data, size_t length);
+  Status _writePageRaw(uint8_t opcode,
+                       uint8_t address,
+                       const uint8_t* data,
+                       size_t length,
+                       WriteResult& result);
+  Status _writeRange(uint8_t opcode,
+                     uint8_t firstWritableAddress,
+                     uint8_t lastWritableAddress,
+                     uint8_t address,
+                     const uint8_t* data,
+                     size_t length,
+                     WriteResult& result);
+  Status _readSecurityLockStateRaw(bool& locked);
+  Status _readRomZoneStateRaw(uint8_t zoneIndex, bool& enabled);
+  Status _observeFreezeStateRaw(bool& frozen);
   Status _readManufacturerIdRaw(uint32_t& manufacturerId);
   Status _classifyManufacturerIdRaw(uint32_t manufacturerId,
                                     PartType& part,
