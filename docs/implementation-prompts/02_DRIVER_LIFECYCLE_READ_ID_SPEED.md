@@ -71,7 +71,12 @@ void end();
 - rejects Standard Speed unless `expectedPart==AT21CS01`; in particular,
   `UNKNOWN+STANDARD_SPEED` is invalid;
 - validates the complete replacement before changing the current binding;
-- performs zero Bus/transport calls;
+- transactionally claims the requested A2:A0 through Bus. If another Driver on
+  that Bus owns it, return `INVALID_CONFIG` with the address in detail and
+  preserve the old binding/claim;
+- permits the same Driver to rebind its already claimed Bus/address;
+- acquires any new claim before releasing its previous claim;
+- performs zero transport callback/physical I/O;
 - copies scalar Config and stores non-owning Bus pointer;
 - caches the Bus's current valid binding epoch and Reset generation;
 - resets device-local health/cache;
@@ -120,8 +125,8 @@ NACK code/detail but finishes uninitialized/OFFLINE immediately.
 
 `end()`:
 
-- clears the Driver binding/cache/state;
-- performs zero Bus/backend calls;
+- releases its Bus address claim, then clears Driver binding/cache/state;
+- performs no transport/backend callback or physical I/O;
 - is idempotent.
 
 ### 2. Central state helpers
@@ -296,6 +301,13 @@ to false; the shared contract is authoritative for their exact policy.
   immediately while preserving NACK code/detail;
 - never changes configured speed.
 
+`probe()` is a liveness/identity check only. It is not a reconnect operation:
+after known/possible removal, SI/O power loss, a new attachment, or a rising
+connector-presence indication, the device may have powered up in High-Speed and
+requires the mandatory Reset/Discovery handshake. Upper firmware calls explicit
+`recover()` in those cases, then reads the serial number and reconciles
+attachment identity. Do not make `probe()` silently fall back to Reset.
+
 `Bus::readPresenceIndicator()` is the only public presence API:
 
 - returns UNSUPPORTED_COMMAND with zero I/O if Bus transport has no callback;
@@ -303,6 +315,11 @@ to false; the shared contract is authoritative for their exact policy.
 - does not treat `present=false` as transport failure;
 - does not substitute for Driver protocol `probe()`;
 - never changes Driver health or state.
+
+Presence is only a physical connector/module hint and is not per-address proof.
+Outside lifecycle methods, observing `present=false` does not automatically
+change any Driver state; upper firmware decides whether and when to stop
+admitting work and schedule `recover()`.
 
 ### 6. Speed API
 
@@ -397,7 +414,12 @@ Add named tests for:
 22. scalar outputs initialize before every validation/state failure;
 23. one health update per composite operation;
 24. saturating counters and persistent lastError;
-25. `Driver::end()` is idempotent and bus-silent.
+25. `Driver::end()` is idempotent, releases exactly its claim, and performs no
+    physical I/O;
+26. duplicate same-Bus address bind fails transactionally, while equal
+    addresses on different Bus objects succeed;
+27. Bus replacement preserves claims and stale Drivers can recover without an
+    alias taking their address.
 
 ## Verification
 

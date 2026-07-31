@@ -48,6 +48,8 @@ Close the architectural root of:
 - A-18 binding epoch and hold-preserving teardown;
 - A-19 checked core deadline arithmetic;
 - A-20 ambiguous current write-byte acceptance evidence;
+- A-21 independent physical-Bus instance isolation;
+- A-22 unique per-Bus address ownership;
 - Q-16 contradictory ready-polling repository policy.
 
 Stages 2–4 add behavior and physical proof.
@@ -124,7 +126,8 @@ Specific non-negotiable details:
 - Store `SingleWireTransport` by value in `BusConfig`/`Bus`.
 - Only callback `user` targets are non-owning.
 - Delete copy and move for `Bus`, `Driver`, and `Esp32Transport`.
-- Destructors are bus-silent. `Driver::end()` remains local-only;
+- Destructors perform no callback. `Driver::end()` is physical-bus-silent but
+  releases its in-memory Bus address claim;
   fallible `Bus::end()` owns retained high-hold completion.
 - Snapshots contain no pointers or platform types.
 
@@ -138,6 +141,7 @@ bool _bound = false;
 bool _bindingEpochValid = true;
 uint64_t _bindingEpoch = 0;
 uint64_t _generation = 0;
+uint8_t _claimedAddressMask = 0;
 bool _resetEstablishedHighSpeed = false;
 uint64_t _writeHighUntilUs = 0;
 TransferResult _previousTransfer{};
@@ -174,6 +178,9 @@ Status _readPresence(
     bool& present,
     TransferResult& result);
 
+Status _claimAddress(uint8_t addressBits);
+void _releaseAddress(uint8_t addressBits);
+
 Status _mapTransferFailure(
     const TransferResult& result) const;
 ```
@@ -183,9 +190,20 @@ Rules:
 - Validate the required descriptor callbacks (`nowUs`, `transfer`,
   `resetAndDiscover`, and `waitUntilUs`) before replacing an existing binding.
   `readPresence` and `user` are explicitly optional.
+- All Bus state is per instance. Do not add a mutable global/current Bus,
+  transport, generation, deadline, diagnostic, or callback target.
+- One live transport descriptor/physical wire may be bound to exactly one Bus.
+  Bus cannot safely infer descriptor aliasing, so the upper owner/configuration
+  layer must reject sharing one descriptor between Bus objects.
 - `bind()` calls no callback. Quiescent `end()` calls no callback; with a
   retained high deadline it calls `_completeWriteHighHold()` once and clears
   nothing unless that bounded completion succeeds.
+- `_claimAddress()` rejects a bit already set in `_claimedAddressMask` with
+  `INVALID_CONFIG`, requested address in detail, and zero callback.
+  `_releaseAddress()` clears only that bit and performs no callback.
+- `Bus::end()` first requires `_claimedAddressMask==0`. Otherwise it returns
+  `BUSY`, places the mask in detail, and performs zero callback, including no
+  retained-hold wait. Replacement `bind()` preserves claims.
 - Advance/invalidate `bindingEpoch` exactly as specified by the shared
   contract. A valid replacement binding invalidates every previously bound
   Driver even though `bind()` itself performs zero I/O.
@@ -333,6 +351,17 @@ class Esp32Transport {
 The descriptor's context points to the backend. `Driver` and `Bus` never call
 backend `begin()`/`end()`.
 
+`descriptor()` returns a zero-initialized `SingleWireTransport{}` before a
+successful backend `begin()` and after backend `end()`. Define
+`BACKEND_NOT_INITIALIZED_DETAIL=-1` once in `Transport.h`. Every callback also
+checks backend initialization before touching GPIO. `transfer`,
+`resetAndDiscover`, `waitUntilUs`, and optional `readPresence` invoked through
+a stale copied descriptor after `end()` return `TransferResult` with
+`TransportCode::IO_ERROR`, `TransferPhase::NONE`, that exact detail, and every
+other field defaulted. Stale `nowUs` returns `0`. All five stale paths perform
+zero GPIO/timer activity. This guard does not authorize ending/restarting a
+backend while a Bus remains bound.
+
 The backend must outlive every bound Bus. Application shutdown is Driver
 local-end, successful fallible `Bus::end()`, then backend end. Never call
 backend end after a write failure while Bus still retains a high-only deadline.
@@ -346,6 +375,8 @@ for the timing constants to remain explicitly unqualified until Prompt 04, but:
 - do not expose per-byte callbacks;
 - do not claim the backend production-ready;
 - keep all platform code out of core headers/sources.
+- keep every mutable pin/timing/lifecycle/callback target in the backend
+  instance; no singleton callback context or file-static active backend.
 
 ### 6. Add a reusable event-tracing fake
 
@@ -426,6 +457,19 @@ Add named tests proving:
     held-low at `DISCOVERY_RELEASE` maps to `LINE_STUCK`.
 18. Core headers compile without Arduino/IDF/FreeRTOS/ESP32 includes.
 19. No v1 byte callback or platform field remains.
+20. Two independent transport/Bus pairs may both use Driver address zero.
+    Reset, binding epoch, retained hold, diagnostics, presence, failure, and end
+    on pair A do not change pair B. Distinct fake callback contexts prove no
+    global target or descriptor leakage.
+21. `descriptor()` is empty before begin/after end; stale result-returning
+    callbacks produce the exact backend-not-initialized result, stale `nowUs`
+    returns zero, and all stale paths have zero GPIO/timer activity.
+22. Two Drivers cannot claim the same address on one Bus; the same address on
+    independent Buses succeeds. Transactional Driver rebind preserves its old
+    claim on validation/new-claim failure.
+23. `Bus::end()` with live claims is callback-free `BUSY`; Driver end releases
+    claims without physical I/O, after which Bus teardown follows the retained
+    hold rules.
 
 ## Verification
 

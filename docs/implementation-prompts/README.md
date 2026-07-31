@@ -11,6 +11,13 @@ after Stage 8 HIL passes and the maintainer approves finalization. The library
 is not currently used by firmware, so preserving the unsafe `1.x` API is
 explicitly out of scope.
 
+Do not mistake this target contract for a capability claim about the checked-in
+`1.3.0` implementation. The current library has unresolved protocol, lifecycle,
+timing, multi-Bus isolation, test, and hardware-qualification findings and is
+not approved for the removable multi-load-cell deployment. That deployment is
+supported only after Prompts 01–08 are implemented, all registry findings are
+closed or explicitly accepted, and the applicable HIL profiles pass.
+
 ## Authoritative inputs
 
 Every implementation session must read, in this order:
@@ -33,6 +40,12 @@ Do not substitute a search result, cached older revision, HTML error page, or
 locally extracted text for this verified source. If the exact file cannot be
 obtained and verified, stop protocol-affecting work and report the stage
 `BLOCKED`.
+
+At this audit revision, the similarly named checked-in file
+`docs/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf` is
+2,247,216 bytes with SHA-256
+`704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5`; it is not
+the exact authoritative artifact above. Its filename is not verification.
 
 The repository's older extracted/reference documents are secondary aids. Where
 they conflict with DS20005857I, DS20005857I wins. In particular:
@@ -73,15 +86,18 @@ Carry forward the good firmware-facing patterns: externally supplied transport,
 validated bind/begin/recover lifecycle, deterministic `Status`, scalar cached
 diagnostics, fixed buffers, explicit owner scheduling, strict examples,
 consumer builds, and package/CI checks. `MB85RC` is the closest EEPROM/API
-comparison; `TunnelMonitor-node` is authoritative for ownership shape and
-blocking budgets.
+comparison. `TunnelMonitor-node` is one representative firmware consumer whose
+static ownership and latency constraints inform a versioned reference profile;
+it is never authoritative for the public API, core behavior, or support matrix.
 
 Do not copy I2C-only behavior into this single-wire protocol: no `TwoWire`,
 address scanner, ACK-ready polling during `tWR`, current-address convenience
 read, I2C buffer assumptions, or per-device storage of effects that belong to
 the physical wire. Do not copy a sibling's asynchronous job surface merely for
-API parity; v2 remains synchronous and single-owner because that is the smaller
-contract required here.
+API parity; v2 remains synchronous and creates no task, queue, or lock. Each
+physical Bus requires serialized access. Independent Bus/backend pairs have
+independent state, but simultaneous ESP32 PHY execution is allowed only if the
+selected backend has been explicitly qualified for it.
 
 ## Required execution order
 
@@ -92,7 +108,7 @@ contract required here.
 | 3 | `03_WRITES_SECURITY_ROM.md` | Page writes, write evidence, Security Lock, ROM zones, Freeze |
 | 4 | `04_ESP32_PHY_ARDUINO_IDF.md` | S2/S3 physical timing, GPIO, atomic frames, Arduino and native IDF |
 | 5 | `05_NATIVE_TESTS_AND_FAULT_INJECTION.md` | Exhaustive host oracle, fault injection, sanitizers |
-| 6 | `06_EXAMPLES_AND_TUNNELMONITOR_INTEGRATION.md` | Minimal safe examples and owner-style integration |
+| 6 | `06_EXAMPLES_AND_FIRMWARE_INTEGRATION.md` | Minimal safe examples and generic fixed-size firmware integration |
 | 7 | `07_DOCS_PACKAGING_CI_RELEASE.md` | Documentation, clean consumers, deterministic versioning, CI and package |
 | 8 | `08_FINAL_AUDIT_AND_HIL.md` | Independent final audit and hardware release gate |
 
@@ -141,8 +157,10 @@ The following invariants apply across every stage:
 3. `Bus` owns bus-global Reset generation, frame serialization contract, and
    the post-write high-only deadline. `Driver` owns one device's address,
    identity, desired speed, lifecycle, and health.
-4. The library is single-owner/non-thread-safe. Firmware serializes access.
-   The library does not create a mutex.
+4. Each Bus and its Drivers are non-thread-safe and require serialized access.
+   One firmware owner may serialize many Buses; separate owners are permitted
+   only when their physical backends document qualified cross-instance
+   concurrency. The library does not create a mutex.
 5. A physical Reset affects every device on the bus. A write high-only interval
    blocks every device on the bus.
 6. All ordinary reads are random reads. The public current-address API is
@@ -168,6 +186,36 @@ The following invariants apply across every stage:
 18. Stage 7 metadata remains `2.0.0-rc.1`. After Stage 8 passes, the maintainer
     may authorize the stable `2.0.0` metadata/changelog update and full gate
     rerun; no prompt commits, tags, publishes, or uploads automatically.
+19. Multiple independent SI/O wires are first-class: each wire owns a distinct
+    Backend and Bus, and state/faults on one Bus never alter another.
+20. Connector, load-cell, calibration-record, scheduler, and product retry
+    policy remain upper-firmware concerns. The library exposes raw memory,
+    chip identity, protocol state, and conservative write evidence only.
+
+## Intended removable-peripheral deployment
+
+For a machine with several independently wired load-cell bodies, instantiate
+one fixed channel context per physical connector:
+
+```text
+connector/channel 0 -> Backend 0 -> Bus 0 -> Driver 0
+connector/channel 1 -> Backend 1 -> Bus 1 -> Driver 0
+...
+```
+
+The Driver address may usually be zero because the wires are separate. A
+shared-wire installation instead uses one Backend/Bus and one Driver per A2:A0
+address. Never share one Bus across two SI/O pins, and never create one Bus per
+address when devices actually share a wire.
+
+The simplest robust upper firmware has one EEPROM/peripheral owner task or loop
+own a fixed array of channel contexts and execute one bounded synchronous
+library call at a time. Other firmware components exchange copied commands and
+scalar results with that owner; they never retain Driver/Bus/backend pointers.
+On attachment or reconnection, the owner calls explicit `recover()`, reads the
+unique serial number, compares it with the cached attachment identity, then
+loads and validates its application-owned calibration record. The AT21CS
+library does not define that record format.
 
 ## Stage completion record
 

@@ -46,6 +46,14 @@ one physical SI/O wire
             +-- ... up to address 7
 ```
 
+For independent physical wires, repeat the complete tuple:
+
+```text
+channel 0 / SI/O pin 0 -> Backend 0 -> Bus 0 -> Driver(s) 0
+channel 1 / SI/O pin 1 -> Backend 1 -> Bus 1 -> Driver(s) 1
+...
+```
+
 Rules:
 
 - `Esp32Transport` owns pins and physical timing.
@@ -54,15 +62,28 @@ Rules:
   last-two physical-result diagnostics.
 - `Driver` contains a non-owning `Bus*` and one device's A2:A0 address, part,
   desired speed, state, and health.
+- Each Bus owns an eight-bit address-claim mask. Exactly one live Driver may
+  claim each A2:A0 value on that Bus; the same address value may be claimed on
+  any number of other independent Bus objects. Duplicate aliases on one Bus
+  are rejected because their cached speed/lifecycle state could diverge while
+  controlling the same physical chip.
 - Backend, Bus, and Driver objects are fixed-size, externally allocated,
   non-copyable, and non-movable.
+- There is no mutable process-global transport, Bus, timing, generation,
+  binding, or write-hold state. A Reset, retained hold, rebind, error, or end
+  on one Bus cannot alter a Bus attached to another physical SI/O wire.
+- Never share one Bus across different SI/O pins. Never create one Bus per
+  address when several addressed devices actually share a wire.
 - Backend outlives Bus. Bus outlives every bound Driver.
 - Destructors perform no callbacks. The owner ends Drivers locally, then must
   obtain `Bus::end()==OK`, and only then calls `Esp32Transport::end()` or
   destroys the objects. Skipping this order after an ambiguous write can
   violate the chip's required high-only interval.
-- The library is not thread-safe. One firmware owner serializes all access to a
-  Bus. The library creates no mutex/task/queue.
+- Each Bus and its Drivers are not thread-safe. One firmware owner serializes
+  access to that Bus. The library creates no mutex/task/queue. The reference
+  ESP32 backend does not promise simultaneous timing-critical execution across
+  instances until Prompt 04 explicitly qualifies it; the default application
+  model is one owner serializing all AT21CS channels.
 - One Driver on one Bus must never call or reset another Driver. Coordination is
   through Bus generation/deadline state only.
 
@@ -235,6 +256,8 @@ enum class TransferPhase : uint8_t {
   WAIT_HIGH
 };
 
+inline constexpr int32_t BACKEND_NOT_INITIALIZED_DETAIL = -1;
+
 struct TransferResult {
   TransportCode code = TransportCode::IO_ERROR;
   TransferPhase phase = TransferPhase::NONE;
@@ -305,6 +328,11 @@ struct SingleWireTransport {
   ReadPresenceFn readPresence = nullptr;  // optional
 };
 ```
+
+`BACKEND_NOT_INITIALIZED_DETAIL` is declared exactly once in
+`include/AT21CS/Transport.h` with the value `-1`. A transport backend may use
+that stable detail only when its descriptor callback target still exists but
+the backend instance is not initialized.
 
 ### Transfer invariants
 
@@ -407,6 +435,7 @@ struct BusSnapshot {
   bool bindingEpochValid = true;
   uint64_t bindingEpoch = 0;
   uint64_t generation = 0;
+  uint8_t claimedAddressMask = 0;
   bool resetEstablishedHighSpeed = false;
   uint64_t writeHighUntilUs = 0;
   TransferResult previousTransfer{};
@@ -460,6 +489,13 @@ Bus rules:
 
 - Successful bind validates the complete descriptor before replacing any
   current binding.
+- Bus contains `uint8_t _claimedAddressMask`. Private transactional
+  `_claimAddress(uint8_t)`/`_releaseAddress(uint8_t)` helpers perform no
+  callback. A duplicate claim returns `INVALID_CONFIG` with the requested
+  address in `detail`.
+- Replacement `Bus::bind()` preserves address claims; existing Drivers become
+  stale through the binding epoch and may explicitly recover against the
+  replacement descriptor.
 - `bind()` always performs zero callbacks. Quiescent `end()` performs zero
   callbacks; if a write-high deadline is retained, `end()` first calls the same
   bounded `_completeWriteHighHold()` path used before traffic.
@@ -473,6 +509,10 @@ Bus rules:
   Bus object cannot be rebound and must be replaced after all Drivers end.
 - A replacement bind with a retained write-high deadline returns `BUSY` with
   zero callbacks and preserves the complete old binding.
+- `Bus::end()` with `claimedAddressMask != 0` returns `BUSY` with the mask in
+  `detail`, performs zero callbacks, and preserves all state. Drivers must end
+  and release their claims before Bus teardown. Only after the mask is zero may
+  Bus complete a retained high deadline and unbind.
 - `end()` never clears a retained deadline or descriptor early. If its bounded
   hold completion fails or the clock returns early, it returns that exact error
   and preserves the binding, epoch, and deadline. Only proven completion lets
@@ -723,7 +763,11 @@ unrelated methods.
 ### Lifecycle
 
 - Constructed/end: unbound, uninitialized, `UNINIT`.
-- Successful bind: bound, uninitialized, `UNINIT`, zero I/O.
+- Successful bind: transactionally claims its A2:A0 on Bus, then becomes bound,
+  uninitialized, `UNINIT`, with zero physical I/O. Complete config/new-Bus
+  validation and the new claim succeed before releasing any previous claim.
+  Rebinding the same Driver to its already claimed address is permitted;
+  another live Driver claiming that address on the same Bus is not.
 - `initialize()` is admitted only from bound, uninitialized `UNINIT`.
   Reinitialization and return from `DEGRADED`/`OFFLINE` use `recover()`.
 - Initialize: `PROBING` during one Reset+Discovery, then `INIT_CONFIG` during
@@ -748,6 +792,9 @@ unrelated methods.
   wait is represented by `BusSnapshot::writeHighUntilUs`, not by leaving one
   Driver in `BUSY`; no other Driver's state is changed.
 - `SLEEPING` has no entry in v2.
+- `Driver::end()` releases its Bus address claim and clears local state. This
+  is zero physical I/O but is intentionally a bounded in-memory Bus ownership
+  update; it remains idempotent.
 
 State ownership is exact. `OperationKind` is a private implementation enum, not
 public API. Production code changes `_state` and `_initialized` only through:
@@ -1085,7 +1132,9 @@ diagnostics; do not substitute strings or platform error codes.
 
 ## 13. ESP32 application construction
 
-The final construction shape is:
+### Topology A: addressed devices sharing one wire
+
+The shared-wire construction shape is:
 
 ```cpp
 AT21CS::Esp32Transport backend;
@@ -1113,21 +1162,77 @@ device1Config.expectedPart = AT21CS::PartType::AT21CS11;
 st = device1.begin(bus, device1Config);
 ```
 
-Shutdown order is Driver(s), `Bus::end()`, Backend. Driver end is local-only.
-Bus end is callback-free when quiescent but may finish one retained bounded
+Shutdown order is Driver(s), `Bus::end()`, Backend. Driver end performs no
+physical callback/I/O and releases only its in-memory Bus address claim. Bus
+end is callback-free when quiescent but may finish one retained bounded
 high-only deadline; the owner must not end the backend unless Bus end returned
 OK. `Esp32Transport::end()` then releases/configures its owned line safely.
 
-## 14. TunnelMonitor consumption contract
+### Topology B: devices on separate wires
 
-A firmware module statically owns Backend, Bus, and Driver. Only its owner task
-calls them. Other tasks receive copied fixed-size status/results.
+Each independent SI/O pin owns a complete non-shared tuple:
 
-One page write is the bounded scheduling unit. The library may keep
-`writeEeprom()` as a convenience, but TunnelMonitor-style firmware calls
-`writeEepromPage()` so one owner operation blocks for at most one frame plus the
-10 ms write hold: the fixed 9 ms frame deadline plus hold is a 19 ms library
-wait budget. After a retained-hold failure, the owner defers the next Driver
-call until its monotonic clock reaches `BusSnapshot::writeHighUntilUs`, so a
-later page call cannot combine an old wait with a new page. Application
-retry/backoff and reconciliation stay outside the library.
+```cpp
+struct At21csChannelStorage {
+  AT21CS::Esp32Transport backend;
+  AT21CS::Bus bus;
+  AT21CS::Driver devices[1];  // enlarge only for shared-wire addresses
+};
+
+At21csChannelStorage channel0;
+At21csChannelStorage channel1;
+```
+
+Configure each Backend with a distinct SI/O pin, bind each Bus only to its own
+Backend descriptor, and bind each Driver only to its channel's Bus. The upper
+firmware validates that enabled SI/O pins are unique and that no presence pin
+collides with any SI/O pin; the library deliberately keeps no global pin
+registry.
+
+Shutdown is performed independently per channel in Driver(s) -> Bus -> Backend
+order. Failure to finish a retained hold on channel 0 keeps channel 0 alive but
+does not prevent a correct operation or shutdown on channel 1.
+
+## 14. General firmware integration contract
+
+A generic firmware module statically owns one fixed-size channel context per
+physical wire. A channel owns one Backend, one Bus, and a fixed number of
+Drivers for addressed devices on that wire. Usually a removable load-cell
+connector enables one Driver at address zero. Only the designated owner calls
+the library objects; other tasks receive copied fixed-size commands,
+status/results, and application-owned identity data.
+
+The library retains `writeEeprom()` as a convenience with its documented
+worst-case multi-page blocking time. Latency-sensitive event-loop/task owners
+use `writeEepromPage()` so one fresh operation contains at most one frame plus
+the 10 ms write hold: the fixed 9 ms frame deadline plus hold is a 19 ms
+library wait budget.
+
+Bus itself enforces a retained write-high deadline, so reading
+`BusSnapshot::writeHighUntilUs` is not required for protocol correctness. An
+upper scheduler may defer the next call on that same channel until the deadline
+to prevent one owner command from first completing an old hold and then
+starting new traffic. A retained hold never propagates to a different Bus.
+
+Attachment lifecycle is upper-firmware policy:
+
+1. configure/start Backend and bind Bus/Driver once;
+2. if absent at boot, retain those bindings;
+3. on an explicit presence transition or bounded product retry event, call
+   `recover()`; do not reconstruct the objects or add a hidden library loop;
+4. after recovery, read and validate `SerialNumberInfo`, compare its eight
+   bytes with the application-cached attachment identity, and invalidate any
+   cached application record when the identity changes;
+5. read the required EEPROM bytes and validate the product's own
+   version/length/CRC/range semantics before using calibration or machine data.
+
+The optional presence callback reports a connector/module indicator only. It
+does not identify a chip and cannot replace the Manufacturer-ID and serial
+checks. Without a presence pin, upper firmware may schedule explicit bounded
+`recover()` attempts while the channel is absent/offline.
+
+Connector pin maps, attachment epochs, load-cell calibration schemas,
+provisioning rules, retry/backoff, cross-task queues, and reconciliation remain
+outside the library. Runtime firmware should normally treat calibration EEPROM
+as read-mostly; factory/service software owns any irreversible Lock/ROM/Freeze
+policy.

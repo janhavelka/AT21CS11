@@ -194,10 +194,12 @@ Zone index: 0, 1, 2, 3, 4, 0xFF
   returns `CLOCK_STALLED` before the corresponding wire callback;
 - part IDs `00D200`, `00D380`, unknown, expected mismatch;
 - no Standard opcode for AT21CS11;
-- Driver/backend end is idempotent and bus-silent when called in the permitted
-  owner order; quiescent `Bus::end()` is callback-free, while a retained
-  deadline causes one bounded high-only completion attempt. A failed/early
-  completion preserves the binding, epoch, descriptor, and deadline.
+- Driver end is idempotent, releases only its in-memory address claim, and
+  performs no physical callback/I/O. Backend end is idempotent and safely
+  releases only its own pin after successful Bus end. Quiescent `Bus::end()` is
+  callback-free, while a retained deadline causes one bounded high-only
+  completion attempt. A failed/early completion preserves the binding, epoch,
+  descriptor, and deadline.
 
 For every callback type, inject malformed nominal-success shapes and require
 `IO_ERROR` while preserving the raw result in Bus diagnostics. Include:
@@ -329,7 +331,8 @@ Required proofs:
 - success restores READY where allowed;
 - SLEEPING is unreachable via public API;
 - FAULT requires a successful explicit `Driver::bind()` followed by
-  `initialize()`; `Driver::end()` is optional/local and performs no Bus I/O.
+  `initialize()`; `Driver::end()` is optional, performs no physical
+  callback/I/O, and releases its in-memory Bus address claim.
 
 Test counter saturation at `UINT8_MAX`, `UINT32_MAX`, and generation refusal at
 `UINT64_MAX` through the single test-only `TestAccess` mechanism above.
@@ -343,9 +346,12 @@ Test Bus binding lifetime separately:
   preserves the old binding;
 - `Bus::end()` at `bindingEpoch==UINT64_MAX` sets
   `bindingEpochValid=false`, prevents rebinding that Bus object, and leaves
-  stale Drivers bus-silent;
+  stale Drivers free of physical callbacks/I/O;
 - failed/early `Bus::end()` during a retained hold preserves binding, epoch,
-  descriptor, and deadline.
+  descriptor, and deadline;
+- duplicate Driver claim on one Bus is rejected transactionally;
+- `Bus::end()` with live Driver claims returns callback-free `BUSY` with the
+  exact claim mask; releasing claims permits retained-hold completion and end.
 
 ## Multi-device oracle
 
@@ -369,7 +375,30 @@ Prove:
 - failed Reset makes physical mode unknown for both;
 - no Driver owns or ends Bus/backend.
 
-Also test two independent Bus/backend pairs to prove no global state leakage.
+Test independent physical wires separately with:
+
+```text
+ScriptedTransport A -> Bus A -> Driver address 0
+ScriptedTransport B -> Bus B -> Driver address 0
+```
+
+Prove all of the following, with interleaved event traces and distinct callback
+contexts:
+
+- the same address value on different Bus objects is valid;
+- an accepted write plus failed retained hold on A returns control, after which
+  B remains immediately operable and its snapshot/callback counts are
+  unchanged by A;
+- Reset/Discovery, generation, speed knowledge, binding epoch, last/previous
+  transfer, write-cycle diagnostics, presence result, health, and address claim
+  mask never leak between A and B;
+- rebind/end/backend-end failure paths on A leave B operational;
+- shutdown of A does not release, reconfigure, or call B's descriptor;
+- a fault/offline/recover sequence on A does not change B's Driver state;
+- no mutable singleton callback target or current-backend state exists.
+
+These tests prove independent state and interleaved use, not simultaneous ESP32
+bit-frame execution. Prompt 04 owns any stronger concurrency claim.
 
 ## Sanitizers and warnings
 

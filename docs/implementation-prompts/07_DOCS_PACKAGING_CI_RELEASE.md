@@ -38,7 +38,8 @@ Close:
 - Q-11;
 - Q-12;
 - Q-14;
-- Q-17.
+- Q-17;
+- Q-19.
 
 Prepare, but do not falsely close, Q-03.
 
@@ -112,10 +113,29 @@ Doxyfile
 Required content:
 
 - exact Backend -> Bus -> Driver ownership;
-- one Bus per wire and many addressed Drivers;
-- external single-owner serialization;
+- shared-wire topology: one Backend -> one Bus -> one to eight uniquely
+  addressed Drivers;
+- separate-wire topology: one complete Backend -> Bus -> Driver tuple per
+  load-cell/peripheral connector, with the same `addressBits` (normally zero)
+  valid on every independent Bus;
+- one live Driver claim per address per Bus and no mutable global device state;
+- per-Bus external serialization, with one firmware owner serializing all
+  AT21CS channels by default because simultaneous ESP32 frame execution is not
+  part of the qualified v2 contract;
 - no internal mutex/task/retry/recovery policy;
 - binding and absent-at-boot recovery;
+- `probe()` is liveness only; reconnect/power-up uses `recover()`, followed by
+  serial-number reconciliation before application calibration is reused;
+- a presence input is a connector hint, not chip identity or per-address
+  presence proof;
+- connector/pin maps, request queues/deadlines, calibration records and units,
+  expected-serial association, replacement policy, and retry/backoff remain
+  upper-firmware responsibilities;
+- each independent SI/O wire needs its own electrically qualified pull-up and
+  harness; product cable/connector/protection claims are limited to Prompt 08
+  profiles actually tested;
+- shutdown order is Driver(s) -> fallible `Bus::end()` -> Backend, independently
+  for every physical wire;
 - exact state semantics;
 - page write as bounded owner scheduling unit;
 - fixed 10 ms bus-global high-only software policy, clearly labeled as requiring
@@ -151,6 +171,12 @@ Correct the non-protected datasheet reference:
 - `tMRS` is absolute from falling edge;
 - Check Lock frame;
 - no opcode `1h/R` Freeze query.
+
+For the similarly named checked-in PDF fingerprint recorded in this prompt
+pack, either replace it with the exact verified DS20005857I artifact or remove
+the duplicate and keep the immutable official URL/hash instructions. Never
+retain it under an authoritative-current label merely because its filename
+matches.
 
 Never change the protected complete-driver report.
 
@@ -245,8 +271,9 @@ test/consumer/phy_smoke/
   arduino/
   idf/
 
-test/consumer/tunnelmonitor_shape/
+test/consumer/firmware_owner/
   platformio.ini
+  src/FirmwareOwnerPolicy.h
   src/main.cpp
 ```
 
@@ -260,11 +287,20 @@ Rules:
 - core-only build proves platform-neutral Bus/Driver without ESP32 backend;
 - reuse the Stage 4 `phy_smoke` consumers rather than creating replacement PHY
   code;
-- the TunnelMonitor-shaped fixture has one static Backend -> Bus -> Driver
-  owner, fixed buffers, explicit owner serialization, and stays under
-  `test/consumer/` so it is neither a shipped example nor package content;
-- the TunnelMonitor-shaped fixture builds for both S2 and S3 from the unpacked
-  archive and contains no address scan or hidden library recovery loop;
+- the generic firmware-owner fixture implements Prompt 06's exact
+  `BoardConfig`, `ChannelConfig`, `ChannelOperation`, `OwnerResultCode`,
+  `ChannelRequest`, `ChannelResult`, `CachedChannelStatus`, `OwnerState`,
+  `At21csChannel`, and `At21csOwner<MAX_CHANNELS>` contracts rather than
+  product-specific facades;
+- it statically owns two complete Backend -> Bus -> Driver tuples on distinct
+  SI/O pins, both with `addressBits=0`, plus fixed buffers/rings and one explicit
+  owner context;
+- it builds for both S2 and S3 from the unpacked archive, stays under
+  `test/consumer/` so it is neither a shipped example nor package content, and
+  contains no address scan, dynamic allocation, unsynchronized cross-task
+  snapshot read, or hidden library recovery loop;
+- its `platformio.ini` takes only `AT21CS_FIXTURE_LIB_SPEC`; reuse
+  `tools/run_firmware_owner_fixture.py` and never add a relative checkout path;
 - backend-enabled IDF explicitly compiles the ESP32 transport source and
   declares its GPIO/timer/FreeRTOS dependencies;
 - backend-disabled IDF explicitly excludes the ESP32 transport source and
@@ -286,13 +322,20 @@ Create `tools/check_package.py`:
 4. build platform-neutral, Arduino, and currently activated IDF consumers
    against that archive;
 5. build supported examples as consumers;
-6. build the Stage 4 PHY smoke and TunnelMonitor-shaped fixtures;
-7. reject repository-root includes;
-8. reject referenced-but-missing docs;
-9. leave repository clean.
+6. copy the generic firmware-owner fixture into the checker's temporary root,
+   invoke `run_firmware_owner_fixture.py` with the unpacked package as
+   `--library-root`, the copied fixture as `--fixture-root`, and the repository
+   checkout as `--forbid-root`; build S2 and S3 and reject any compiler/linker
+   input that reaches the checkout;
+7. build the Stage 4 PHY smoke fixtures;
+8. reject repository-root includes;
+9. reject referenced-but-missing docs;
+10. leave repository clean.
 
 Use safe temporary-directory APIs. Never delete a computed path without
-verifying it lies inside the created temporary root.
+verifying it lies inside the created temporary root. Resolve both paths and
+require the package/fixture temporary root to be outside the repository before
+using the repository as `--forbid-root`.
 
 The checker must not download, install, select, or mutate an ESP-IDF toolchain.
 Give it separate modes:
@@ -385,7 +428,8 @@ jobs:
    - normal tests;
    - ASan/UBSan.
 3. `arduino-builds`
-   - S2/S3 single-device and multi-device examples as clean consumers.
+   - S2/S3 single-device and multi-device examples plus the generic
+     firmware-owner fixture as clean consumers.
 4. `idf-builds`
    - exact IDF 5.4.1 and 6.0.1 matrix jobs;
    - S2/S3;
@@ -425,6 +469,7 @@ python -m platformio test -e native
 python -m platformio test -e native_sanitize
 python -m platformio run -e ex_cli_s2 -e ex_cli_s3
 python -m platformio run -e ex_multi_s2 -e ex_multi_s3
+python tools/run_firmware_owner_fixture.py --library-root . --environment firmware_owner_s2 --environment firmware_owner_s3
 python tools/check_package.py --inspect
 python tools/check_package.py --build-platform-neutral
 python tools/check_package.py --build-arduino
@@ -468,6 +513,8 @@ release creation is automatic.
 - All installed metadata reports `2.0.0-rc.1` consistently.
 - Version generation is reproducible.
 - Clean consumers build from the archive.
+- The generic firmware-owner fixture builds for S2/S3 with two independent
+  address-zero channels and no public-library product/scheduler types.
 - Package contents are intentional.
 - Documentation matches actual headers and behavior.
 - CI covers every software release gate.

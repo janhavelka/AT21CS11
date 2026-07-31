@@ -155,7 +155,9 @@ Document maximum convenience-call blocking time:
 16 pages * (one bounded frame + 10 ms high hold)
 ```
 
-TunnelMonitor-style owners use `writeEepromPage()`.
+Latency-sensitive firmware owners use `writeEepromPage()` as one bounded
+scheduling unit. Simpler bulk callers may use `writeEeprom()` after accepting
+its documented worst-case blocking time.
 
 ## Security writes
 

@@ -10,8 +10,8 @@ This is not a rubber-stamp review. Assume earlier stages contain mistakes.
 HIL runs only against an immutable, maintainer-approved `2.0.0-rc.1` source
 commit and exact firmware artifacts built from it.
 
-This stage owns closure of P-21, Q-03, and Q-15. It independently verifies
-every other finding without taking over its design ownership.
+This stage owns closure of P-21, P-22, Q-03, and Q-15. It independently
+verifies every other finding without taking over its design ownership.
 
 ## Required working method
 
@@ -35,7 +35,7 @@ exact-field stable-finalization exception defined in Prompt 07.
 Spawn independent subagents that did not own the corresponding implementation:
 
 1. protocol/datasheet and frame reviewer;
-2. Bus ownership/concurrency/TunnelMonitor reviewer;
+2. Bus ownership/concurrency/separate-wire topology reviewer;
 3. lifecycle/state/health reviewer;
 4. tests/fault-injection reviewer;
 5. ESP32 S2/S3 timing reviewer;
@@ -88,12 +88,17 @@ maintainer authorization.
 ### Bus-global effects
 
 - one Bus per SI/O wire;
+- exactly one live Driver claim per address on a Bus, while the same address is
+  valid on any number of independent Buses;
 - write high deadline blocks all Drivers;
 - no Reset/transfer during the deadline;
 - Reset generation affects all Drivers;
 - generation mismatch never causes a Reset loop;
 - unknown physical mode requires explicit recovery;
-- two independent buses share no global mutable state.
+- two independent buses share no mutable transport, descriptor, pin, timing,
+  write-hold, Reset-generation, result, diagnostic, or callback-target state;
+- the supported contract is correct interleaving through one owner, not
+  unqualified simultaneous timing-critical execution from separate tasks.
 
 ### Lifecycle/state/health
 
@@ -123,12 +128,24 @@ maintainer authorization.
 
 ### Integration/release
 
-- one static owner can wrap Backend/Bus/Driver;
+- one static owner can wrap a fixed array of complete Backend/Bus/Driver
+  channels;
 - page write fits documented owner callback budget;
 - examples are bounded and non-duplicative;
-- the TunnelMonitor-shaped consumer is under
-  `test/consumer/tunnelmonitor_shape/`, is not shipped as an example, and uses
-  one static Backend -> Bus -> Driver owner;
+- the generic fixture under `test/consumer/firmware_owner/` is not shipped as
+  an example and builds with two complete tuples on distinct SI/O pins, both
+  using `addressBits=0`;
+- only its owner context accesses live library objects/snapshots; its exact
+  static FreeRTOS mailbox reserves terminal-result capacity, distinguishes
+  owner errors from library errors, never drops an accepted result, and
+  synchronizes published status before other tasks read it;
+- reconnect uses bounded explicit `recover()` and serial reconciliation;
+  presence is only a connector hint; attachment/replacement generations prevent
+  stale queued EEPROM work and invalidate application calibration/association;
+- operation budgets, checked deadline/backoff arithmetic, channel-only stop,
+  and stop-all behavior match Prompt 06 exactly;
+- shared-wire and separate-wire ownership, per-channel shutdown, serialization
+  limits, and the application/harness responsibility boundary are documented;
 - clean package consumers build;
 - IDF support claim equals actual tested matrix;
 - generated metadata is deterministic;
@@ -176,6 +193,12 @@ Each run record contains:
 - measured bus capacitance or wiring description;
 - measured `tPUP`;
 - presence wiring/polarity;
+- exact cable part/type, conductor arrangement, length, and connector part(s);
+- pull-up placement and value on every independent SI/O wire;
+- protection/TVS/filter parts and their specified/measured capacitance,
+  leakage, and clamp/interface topology;
+- controller-end and far-device-end idle/rise measurements, including the
+  disconnected-connector case;
 - direct connection or level-shifter part/topology and both-side voltage limits;
 - logic analyzer/oscilloscope model, firmware, sample rate, bandwidth, threshold,
   probe setup, and ground arrangement;
@@ -216,6 +239,14 @@ Use these exact SI/O-powered electrical profiles:
 - `E-RISE-WORST-3V3`: 3.3 V direct profile with the exact qualified pull-up and
   capacitance corner selected before the run to produce the slowest supported
   rise while still measuring `tPUP <= 0.40 us`.
+- `E-REMOVABLE-2CH-3V3`: two independent 3.3 V SI/O lines from one controller
+  to two removable peripheral/load-cell connectors. Each line has its own
+  controller-side pull-up so an empty connector remains deterministically high.
+  Before the run, select and record the exact cable and length, connector,
+  pull-up, protection/filtering, grounding/shield arrangement, and the measured
+  capacitance/rise time at both controller and far-device ends. This profile
+  qualifies only that recorded harness assembly; a different cable, length,
+  connector, protection part, pull-up, or topology requires a new profile.
 
 | Row | Board/framework | SDK endpoint | Device/mode/count | Required runtime conditions | Electrical/temperature profile |
 |---|---|---|---|---|---|
@@ -227,12 +258,19 @@ Use these exact SI/O-powered electrical profiles:
 | HIL-06 | ESP32-S3 native IDF | ESP-IDF 6.0.1 | two differently addressed devices on one SI/O Bus, HS | 80/160/240 MHz; DFS off/on; contention; cross-device write hold/reset generation | separate `E-DIRECT-3V3` and `E-RISE-WORST-3V3` subruns, 25 C |
 | HIL-07 | ESP32-S3 native IDF | ESP-IDF 6.0.1 | AT21CS01 HS and Standard, mutable device | fixed worst timing CPU/DFS/load condition selected from HIL-02/03 | separate HS `E-AT01-HS-1V7-LS` and Standard `E-AT01-SS-2V7-LS` subruns at exact ordered-part rated minimum, 25 C, and rated maximum temperature; exactly 100 accepted EEPROM page writes per mode per temperature |
 | HIL-08 | ESP32-S3 native IDF | ESP-IDF 6.0.1 | AT21CS11 HS, mutable device | fixed worst timing CPU/DFS/load condition selected from HIL-01/04/05 | `E-AT11-HS-4V5-LS` at exact ordered-part rated minimum, 25 C, and rated maximum temperature; exactly 100 accepted EEPROM page writes per temperature |
+| HIL-09 | ESP32-S3 Arduino firmware-owner fixture | pinned Stage 7 Arduino stack | two AT21CS11 HS devices, both address zero, one per independent SI/O wire; channel A mutable | one firmware owner services both channels sequentially; observe B quiet while A's synchronous page write/hold runs, then read B immediately after return; disconnect/reconnect and held-low fault on A while B continues; independent Reset/generation/diagnostics/shutdown | `E-REMOVABLE-2CH-3V3`, 25 C |
 
 Before running, replace qualitative electrical profile names in each run record
 with measured SI/O pull-up supply voltage, pull-up resistance, capacitance, and
 predicted/measured rise time derived from DS20005857I and the exact board/module
 limits. The checker rejects
 `TBD`, ranges without selected values, or an absent subrun.
+
+For HIL-09, also replace the generic removable-profile description with one
+exact built assembly and immutable bill-of-material identifiers. Prove each
+line independently at both ends. With connector A unplugged, line A must remain
+stably high and channel B must remain operational; a pull-up located only in
+the removable load-cell body does not satisfy this profile.
 
 For every qualified profile:
 
@@ -253,9 +291,14 @@ For every qualified profile:
 Use a HIL-only compile-time instrumentation build from the immutable RC to
 toggle a spare marker GPIO with direct, bounded register writes at frame entry,
 SI/O release, scheduled sample strobe, Stop completion, and critical-section
-exit. Do not route marker generation through logging, callbacks, a task, or the
-SI/O pin. Capture the actual SI/O voltage and marker GPIO on a logic analyzer
-and an oscilloscope; for level-shifted profiles capture both SI/O sides.
+exit. Do not route marker generation through logging, callbacks, a separate
+task, or the SI/O pin. For an owner-phase marker, emit the direct register
+write inline in the owner task; never dispatch it to another task. Capture the
+actual SI/O voltage and marker GPIO on a logic analyzer and an oscilloscope;
+for level-shifted profiles capture both SI/O sides.
+For HIL-09, add distinct marker states immediately before the owner request's
+second deadline check and immediately after its terminal `ChannelResult` is
+constructed; keep result-queue publication outside that interval.
 
 Instrumentation floors are mandatory: oscilloscope bandwidth at least 100 MHz
 and sampling at least 1 GS/s; logic-analyzer sampling at least 100 MS/s. Include
@@ -293,6 +336,7 @@ repeated Start
 maximum inter-byte high gap
 speed-change post-ACK high
 write Stop to first allowed next low
+firmware-owner page phase from second deadline check to terminal-result construction
 ```
 
 Must prove:
@@ -302,6 +346,26 @@ Must prove:
 - no unintended Stop within a frame;
 - SI/O continuously high for at least 10 ms after every accepted write;
 - a second addressed Driver emits no traffic during that interval;
+- before HIL-09's A write, B's `SettingsSnapshot` is initialized/`READY` with
+  `consecutiveFailures==0`, `totalSuccess<UINT32_MAX`, and
+  `lastOkUs<UINT64_MAX`; capture both B `SettingsSnapshot` and `BusSnapshot`;
+- during a normal synchronous accepted write/hold on independent Bus A, the
+  single owner issues no B call and both wires have the expected waveform;
+  immediately after A returns and before any B call, both captured B snapshots
+  are field-for-field unchanged;
+- the subsequent B read succeeds: B `SettingsSnapshot.totalSuccess` increments
+  by one, `lastOkUs` advances, `lastStatusCode==OK`, `totalFailures` is
+  unchanged, and `consecutiveFailures` remains zero; B
+  `BusSnapshot.lastTransfer` matches the commanded frame,
+  `previousTransfer` equals the pre-read `lastTransfer`, and
+  `lastWriteCycle` is unchanged; B binding epoch, Reset generation,
+  configured/active speed, and persistent lastError code/detail remain
+  unchanged;
+- Stage 5's injected failed-wait oracle, not production HIL or a second task,
+  proves that B remains callable after A returns with a retained high deadline;
+- HIL-09's firmware-owner page phase, measured from immediately before the
+  second deadline check through construction of the terminal result (excluding
+  later result-queue backpressure), is at most 24 ms;
 - marker/scope evidence agrees with direct SI/O edges and analyzer decode;
 - GPIO release is genuinely high impedance/open-drain release, never
   push-pull-high drive.
@@ -345,10 +409,20 @@ Run in this order:
 6. Security user writes/readback on an unlocked part;
 7. disconnect/reconnect, held-low, missing pull-up, complete SI/O pull-up-power
    removal/restoration, and recovery;
-8. two-device reset generation and write isolation;
-9. temperature-qualified `tWR` hold/readback;
-10. exact bounded stress under workload with health/counter review;
-11. restore authorized mutable ranges and verify the restored bytes.
+8. two-address shared-Bus reset generation and write isolation;
+9. HIL-09 two-independent-Bus sequence: initialize both address-zero devices;
+   require B initialized/READY with zero consecutive failures and capture both
+   B `SettingsSnapshot` and `BusSnapshot`; write an authorized scratch page on
+   A while observing that the one owner starts no B call; before any B call,
+   prove both B snapshots unchanged; read B immediately and prove the exact
+   Settings/Bus snapshot changes listed above; Reset/recover A and prove B is
+   still unchanged apart from those expected B-local read fields; unplug A and
+   repeatedly read B; reconnect A, call `recover()`, reread its serial, and
+   publish replacement status; inject held-low on A; then terminally stop only
+   channel A without ending or disturbing B;
+10. temperature-qualified `tWR` hold/readback;
+11. exact bounded stress under workload with health/counter review;
+12. restore authorized mutable ranges and verify the restored bytes.
 
 Do not proceed to the next class if waveform gates fail.
 
@@ -487,6 +561,9 @@ parsed exact-field stable-finalization allowlist.
 - All software gates pass from clean consumers.
 - Independent reviewers report no unresolved P0/P1 defect.
 - All explicit HIL rows pass with reviewed raw evidence and verified hashes.
+- HIL-09 proves independent address-zero load-cell channels, per-line
+  controller-side pull-ups, disconnected-idle behavior, and fault/recovery
+  isolation through one owner; claims remain limited to its exact harness.
 - No irreversible operation ran on a non-sacrificial part.
 - Mutable testing stayed within authorized ranges and the recorded 2,000-write
   per-device budget.

@@ -77,9 +77,16 @@ class Esp32Transport {
 };
 ```
 
-`begin()` validates pins before configuring hardware. It leaves SI/O released
-open-drain high. `end()` releases SI/O and clears fixed state. No heap
-allocation, logging, task, queue, or mutex.
+`begin()` requires `GPIO_IS_VALID_OUTPUT_GPIO(sioPin)`, requires
+`presencePin==-1` or an IDF-valid input GPIO, and rejects
+`presencePin==sioPin` before configuring hardware. It leaves SI/O released
+open-drain high. `end()` releases only this instance's SI/O and clears fixed
+state. No heap allocation, logging, task, queue, or mutex.
+
+`descriptor()` and stale-callback behavior must match Prompt 01 exactly:
+empty before begin/after end; result-returning callbacks use
+`IO_ERROR/NONE/BACKEND_NOT_INITIALIZED_DETAIL`, `nowUs` returns zero, and every
+stale path performs zero GPIO/timer access.
 
 Use supported/explicit GPIO or LL interfaces. Do not rely on a transitive header
 for `GPIO_OUT_W1TS_REG`, `GPIO_OUT_W1TC_REG`, `GPIO_IN_REG`, or bank-1
@@ -154,6 +161,16 @@ capacitance in `tPUP`, `tRD`, `tMRS`, `tRCV`, and HIL qualification. Testing an
 out-of-profile voltage without the documented interface is a hardware-safety
 failure, not a skipped test.
 
+For a chip embedded in a removable load-cell or other remote peripheral, apply
+the same electrical contract to the complete harness rather than only the
+development-board trace. Every independent SI/O wire needs its own
+controller-side external pull-up so the empty connector has a deterministic
+high idle. Cable length/type, connector, protection/TVS/filtering, level
+shifter, leakage, and accumulated capacitance are application hardware, not
+library configuration; include all of them in measured `CBUS`/`tPUP` and
+Prompt 08 qualification. Do not claim arbitrary cable length or reuse one
+line's measurement for another line.
+
 Write and speed:
 
 ```text
@@ -193,28 +210,31 @@ typed transport failure.
 One `transfer()` callback owns Start through Stop. There are no public
 per-byte callbacks.
 
-Before selecting the implementation, inspect the current TunnelMonitor owner
-loop and record these release budgets in the Stage 4 validation record:
+Record these versioned v2 reference-adapter bounds in the Stage 4 validation
+record:
 
 ```text
-MAX_CONTIGUOUS_IRQ_MASK_US      = 2000
-MAX_SUCCESS_FRESH_PAGE_CALL_US  = 20000
-MAX_FAULT_FRESH_PAGE_CALL_US    = 22000
-MAX_RETAINED_HOLD_PAGE_CALL_US  = 32000
+ESP32_MAX_CONTIGUOUS_IRQ_MASK_US      = 2000
+ESP32_MAX_SUCCESS_FRESH_PAGE_CALL_US  = 20000
+ESP32_MAX_FAULT_FRESH_PAGE_CALL_US    = 22000
+ESP32_MAX_RETAINED_HOLD_PAGE_CALL_US  = 32000
 ```
 
 The page-call limits follow the fixed 9 ms transfer timeout, 10 ms write-high
 hold, and the independent final-wait guard below. The 32 ms case permits
 completing one retained prior hold before the new page transfer and hold. The
-20 ms normal-success limit is the explicit AT21CS integration objective and is
-comparable to, but not derived from, TunnelMonitor-node's current
-`kI2cDefaultOperationTimeoutMs=20U`; AT21CS is not routed through that I2C
-backend. Prompt 06 prevents a retained old hold from being combined with a new
-page operation in one owner call. A stricter current-firmware budget wins; a
-placeholder, unmeasured budget, or unexplained relaxation fails this stage.
+20 ms normal-success limit is the explicit reference-adapter responsiveness
+objective. It is not derived from an I2C transport or any one consuming
+firmware. Prompt 06 shows how an upper scheduler can avoid combining an old
+retained hold with new traffic in one owner command; Bus correctness does not
+depend on that optimization. A product may impose a stricter admission budget,
+but that does not silently change these library measurements. A placeholder,
+unmeasured budget, or unexplained relaxation fails this stage.
 
 The simplest candidate is a whole-frame critical section, but it is acceptable
 only when its measured worst-case continuous interrupt masking is within 2 ms.
+The 2 ms ceiling is a deliberate v2 ESP32 coexistence policy, not a datasheet
+timing value and not a consumer-firmware-specific rule.
 Keep deliberate pre-Start, repeated-Start, Stop, and post-frame released-high
 waits outside the interrupt-masked region where possible while retaining
 exclusive frame ownership. Measure both maximum 8-byte read and write shapes:
@@ -260,6 +280,29 @@ Choose and document one tested policy:
 
 No cached boot-time MHz assumption is allowed. Test 80/160/240 MHz where the
 target supports them and DFS enabled/disabled.
+
+## Multiple backend instances
+
+The reference backend must contain no mutable file-static/global device owner,
+pin, timing, result, callback target, or protocol/Bus evidence. Two instances
+on distinct SI/O pins must coexist and support correctly interleaved calls with
+completely independent descriptors and diagnostics. If the platform requires a
+process-wide arbitration primitive for an explicitly qualified parallel mode,
+it contains no pin/Bus/device pointer or protocol evidence, and its
+serialization and latency are documented and measured.
+
+This v2 support claim does not promise simultaneous timing-critical frame
+execution from separate tasks. The default upper-firmware contract serializes
+all AT21CS backend calls through one owner even when physical wires differ. If
+the implementation chooses to claim cross-instance parallel execution, it must
+define the ESP32 critical-section/power-management arbitration, add contention
+tests, and qualify simultaneous S2/S3 HIL without violating either wire's
+timing. Otherwise document parallel calls as unsupported.
+
+`Esp32Transport::begin()` validates its own SI/O/presence pins only. A
+multi-channel upper owner must reject duplicate SI/O pins and any presence pin
+that collides with any enabled channel's SI/O pin before starting hardware; do
+not add a mutable global pin registry to the library.
 
 ## Frame behavior
 
@@ -330,9 +373,15 @@ Where hardware cannot be simulated, add compile/static tests for:
 - both GPIO banks and S2/S3 guards;
 - pin validation;
 - descriptor callback completeness;
+- descriptor empty before begin/after end; every stale result callback returns
+  exact `IO_ERROR/NONE/-1`, stale `nowUs` returns zero, and GPIO/timer fakes
+  record zero access;
 - line release on all return paths;
 - no user delay callback;
-- no legacy GPIO fields in Driver.
+- no legacy GPIO fields in Driver;
+- two backend instances retain distinct descriptors/pins and no mutable global
+  state; interleaved begin/transfer/end on one instance cannot change the
+  other's descriptor or line state.
 
 ## Stage-local v2 smoke consumers
 
