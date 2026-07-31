@@ -1189,8 +1189,7 @@ void test_independent_buses_are_fully_isolated() {
   bool present = false;
   TransferResult result{};
   TEST_ASSERT_TRUE(TestAccess::resetAndDiscover(busA, present, result).ok());
-  TEST_ASSERT_EQUAL_UINT64(beforeB.generation, busB.snapshot().generation);
-  TEST_ASSERT_EQUAL_UINT64(beforeB.bindingEpoch, busB.snapshot().bindingEpoch);
+  assertBusSnapshotEqual(beforeB, busB.snapshot());
 
   const uint8_t data = 0xC3;
   const SingleWireTransfer write = writeFrame(&data);
@@ -1223,6 +1222,8 @@ void test_independent_buses_are_fully_isolated() {
   assertErr(Err::BUSY, busA.end());
   driverA.end();
   queueWait(fakeA, okAux(TransferPhase::WAIT_HIGH), true);
+  TEST_ASSERT_TRUE(busA.end().ok());
+  TEST_ASSERT_TRUE(busA.bind(replacementConfig).ok());
   TEST_ASSERT_TRUE(busA.end().ok());
 
   assertBusSnapshotEqual(stableB, busB.snapshot());
