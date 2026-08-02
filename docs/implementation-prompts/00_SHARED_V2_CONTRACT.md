@@ -32,6 +32,21 @@ explicit platform header may include guarded ESP32 platform types; no other
 public header may include or name Arduino, ESP-IDF, FreeRTOS, ESP32, GPIO
 registers, or IRAM attributes.
 
+All supported ESP32-S2/S3 consumers use `framework = arduino` with this exact
+PioArduino pin:
+
+```text
+https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip
+```
+
+The core contract remains framework-neutral so a future external Backend can
+target a different framework without changing Bus or Driver, but native
+ESP-IDF is not part of the current implementation or support matrix. The
+repository, prompts, scripts, and CI must not install/select a standalone
+ESP-IDF SDK, download a PlatformIO `framework-espidf` package, invoke `idf.py`, add
+`framework = espidf` environments, or retain a parallel native-IDF validation,
+example, component, package, or release path.
+
 ## 2. Ownership model
 
 ```text

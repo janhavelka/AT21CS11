@@ -88,6 +88,32 @@ SHA-256
 authoritative DS20005857I artifact. Its content hash and size, rather than its
 filename, are the verification record.
 
+## Maintainer-authorized ESP32 toolchain and framework
+
+Every prompt uses this one exact PioArduino platform pin for ESP32-S2/S3:
+
+```text
+https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip
+```
+
+It supplies Arduino-ESP32 3.3.11. Every supported ESP32 build uses PlatformIO
+with that exact pin and `framework = arduino`. The core remains
+framework-independent, but no other firmware framework is implemented or
+supported in this packet. No prompt may install/select a standalone ESP-IDF
+SDK, download PlatformIO's `framework-espidf` package, invoke `idf.py`, add a
+`framework = espidf` environment, or create a native-IDF example, component,
+fixture, package, CI, or release path. Use isolated PlatformIO build/cache
+directories when the shared package cache could be mutated concurrently.
+
+## Hardware-validation placement
+
+Prompt 08 is the only physical-HIL stage. Prompts 01–07 may define software
+oracles, `HIL_ONLY` mappings, evidence schemas, and structure-only checks, but
+must not energize hardware, require physical captures/measurements, or leave a
+software-complete stage blocked solely because HIL is pending. A physical-only
+acceptance item is deferred to Prompt 08 without preventing the earlier stage's
+audit checkpoint.
+
 The repository's older extracted/reference documents are secondary aids. Where
 they conflict with DS20005857I, DS20005857I wins. In particular:
 
@@ -104,9 +130,9 @@ Two current `AGENTS.md` policy lines are themselves audited findings:
 
 - Q-16: its `tWR` ready-polling wording conflicts with the required continuous
   released-high interval and is corrected exactly in Stage 1;
-- Q-17: its two-example repository rule conflicts with its native ESP-IDF
-  example/parity section and the existing tree; Stage 7 resolves that policy
-  deliberately after the example implementation is complete.
+- Q-17: stale native-IDF example/component instructions conflict with the
+  maintainer's Arduino-only support policy; Prompts 06–07 remove those artifacts
+  and retain exactly two Arduino examples.
 
 Those two named edits do not authorize any other weakening or rewriting of
 `AGENTS.md`.
@@ -120,6 +146,7 @@ The audit uses these sibling repositories as concrete integration references:
 ../PCA9555
 ../TCA9548A
 ../INA228
+../EE871-E2
 ../TunnelMonitor-node
 ```
 
@@ -130,6 +157,9 @@ consumer builds, and package/CI checks. `MB85RC` is the closest EEPROM/API
 comparison. `TunnelMonitor-node` is one representative firmware consumer whose
 static ownership and latency constraints inform a versioned reference profile;
 it is never authoritative for the public API, core behavior, or support matrix.
+`EE871-E2` is the concrete reference for the exact current PioArduino platform
+pin only; do not copy its board-specific memory settings or its historical
+compatibility environment.
 
 Do not copy I2C-only behavior into this single-wire protocol: no `TwoWire`,
 address scanner, ACK-ready polling during `tWR`, current-address convenience
@@ -147,8 +177,8 @@ selected backend has been explicitly qualified for it.
 | 1 | `01_BUS_TRANSPORT_FOUNDATION.md` | Public v2 types, shared physical bus, frame transport, bus-global reset/write effects |
 | 2 | `02_DRIVER_LIFECYCLE_READ_ID_SPEED.md` | Driver lifecycle, state machine, health, reads, identity, speed |
 | 3 | `03_WRITES_SECURITY_ROM.md` | Page writes, write evidence, Security Lock, ROM zones, Freeze |
-| 4 | `04_ESP32_PHY_ARDUINO_IDF.md` | S2/S3 physical timing, GPIO, atomic frames, Arduino and native IDF |
-| 5 | `05_NATIVE_TESTS_AND_FAULT_INJECTION.md` | Exhaustive host oracle, fault injection, sanitizers |
+| 4 | `04_ESP32_PHY_ARDUINO.md` | S2/S3 Arduino PHY software, GPIO, timing model, and atomic frames |
+| 5 | `05_HOST_TESTS_AND_FAULT_INJECTION.md` | Exhaustive host oracle, fault injection, sanitizers |
 | 6 | `06_EXAMPLES_AND_FIRMWARE_INTEGRATION.md` | Minimal safe examples and generic fixed-size firmware integration |
 | 7 | `07_DOCS_PACKAGING_CI_RELEASE.md` | Documentation, clean consumers, deterministic versioning, CI and package |
 | 8 | `08_FINAL_AUDIT_AND_HIL.md` | Independent final audit and hardware release gate |
@@ -160,11 +190,10 @@ and fix the owning stage rather than adding an adapter.
 
 Stage 4 must not build the still-unmigrated shipped examples after Stage 1
 removes the v1 API. It creates dedicated v2 physical-layer smoke consumers
-under `test/consumer/phy_smoke/arduino/` and
-`test/consumer/phy_smoke/idf/`, including backend-enabled and
-backend-disabled forms where applicable. Stage 6 alone migrates the shipped
-examples. Stage 7 reuses the smoke fixtures for clean package verification
-instead of creating another implementation.
+under `test/consumer/phy_smoke/arduino/` for S2 and S3. Stage 6 alone migrates
+the shipped examples. Stage 7 reuses the Arduino smoke fixture for clean
+package verification instead of creating another implementation. No native-IDF
+smoke fixture is created or required.
 
 ## Mandatory working method for every prompt
 

@@ -10,6 +10,13 @@ transport, and externally owned ESP32 backend declared in
 This stage owns names and ownership. Later stages correct feature semantics and
 qualify physical timing; they must not redesign this boundary.
 
+Keep the core and transport interface framework-independent. Arduino through
+the exact PioArduino pin frozen by the shared contract is the only current
+firmware framework; this stage does not install or build a platform framework.
+Do not install/select standalone ESP-IDF, add a native-IDF path, or perform
+physical HIL. Prompt 04 owns the Arduino PHY software build, and Prompt 08 alone
+owns physical qualification.
+
 ## Required working method
 
 Read `AGENTS.md`, `00_SHARED_V2_CONTRACT.md`, and
@@ -499,8 +506,9 @@ with strict C++17 warnings:
 -Wshadow -Wundef -Werror
 ```
 
-Arduino/IDF timing qualification is not this stage's exit gate, but source must
-remain syntactically integrated for Prompt 04.
+Physical timing qualification is not this stage's exit gate and is deferred to
+Prompt 08. The framework-neutral boundary must remain syntactically integrated
+for Prompt 04's Arduino transport.
 
 ## Exit criteria
 

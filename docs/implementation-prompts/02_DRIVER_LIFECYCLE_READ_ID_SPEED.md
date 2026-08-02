@@ -8,6 +8,13 @@ absent-at-boot recovery work, and implement exact state/health semantics.
 
 Do not redesign Bus, transport structs, write evidence, or platform timing.
 
+Keep all production changes in this stage framework-independent. The current
+supported firmware framework remains Arduino through the exact PioArduino pin
+frozen by the shared contract, but this stage does not install or build any
+platform framework. Do not install/select standalone ESP-IDF, add a native-IDF
+path, or perform physical HIL. Prompt 04 owns the Arduino PHY software build;
+Prompt 08 alone owns physical qualification.
+
 ## Required working method
 
 Read `AGENTS.md`, `00_SHARED_V2_CONTRACT.md`,

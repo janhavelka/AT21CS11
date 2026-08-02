@@ -1,4 +1,4 @@
-# AT21CS01 / AT21CS11 Driver (ESP32, Arduino, ESP-IDF)
+# AT21CS01 / AT21CS11 Driver (ESP32 Arduino)
 
 Production-grade single-wire EEPROM driver for Microchip **AT21CS01** and **AT21CS11**.
 
@@ -23,35 +23,14 @@ lib_deps =
   https://github.com/janhavelka/AT21CS11.git
 ```
 
-## ESP-IDF Component
+## Supported framework
 
-The driver core can also build as an ESP-IDF component. The application still
-owns board wiring and the single-wire bus pins through `Config`; the library
-does not create global GPIO policy beyond the configured SI/O and optional
-presence pins.
-
-- Root `CMakeLists.txt` registers the framework-neutral protocol source plus
-  the private built-in ESP32 compatibility backend source and exports `include/`.
-- ESP-IDF-only compile definitions are private to the component target; public
-  headers do not require ESP-IDF, FreeRTOS, or SoC GPIO headers.
-- Release-candidate backend policy: the ESP32 compatibility backend remains
-  enabled by default for this major version so existing `Config::sioPin`
-  examples keep building. Transport-only ESP-IDF consumers can set
-  `AT21CS_ENABLE_ESP32_COMPAT_BACKEND=OFF` at CMake configure time to avoid
-  the ESP32 GPIO/timer/FreeRTOS component dependencies; in that mode
-  `Config::transport` is required.
-- `idf_component.yml` targets ESP32-S2/S3 with ESP-IDF `>=6.0.1`.
-- `examples/espidf_basic` is a native IDF CLI with fixed command buffers and no
-  Arduino CLI source inclusion.
-- `tools/check_idf_example_contract.py` validates that the ESP-IDF entry point
-  stays native and keeps the required command contract and IDF components.
-
-Build from the example directory with a configured ESP-IDF shell:
-
-```sh
-idf.py set-target esp32s3
-idf.py build
-```
+ESP32-S2/S3 builds use Arduino-ESP32 3.3.11 through the exact PioArduino
+`platform-espressif32` 55.03.311 release pinned by `platformio.ini`. The core
+`Bus`/`Driver` contract remains framework-independent, while the supplied
+`Esp32Transport` is currently implemented and tested only for
+`framework = arduino`. Native ESP-IDF is not a supported build, component,
+example, package, or validation path.
 
 ## Quick Start
 
@@ -93,27 +72,20 @@ void loop() {
 - `void end()`
 
 ### Backend Boundary
-- `AT21CS/Transport.h` defines the framework-neutral `SingleWireTransport`
-  contract for explicit single-wire backends.
-- Existing sketches can keep using `Config::sioPin` and `presencePin`; setting
-  `Config::transport` opts into an injected backend with byte-level timing
-  primitives.
-- `Config::sioPin`, `presencePin`, and `presenceActiveHigh` are retained for
-  this major version as compatibility backend config only. Leave them unset
-  when `Config::transport` is provided; mixed transport-plus-pin config is
-  rejected by `begin()` with `INVALID_CONFIG`. Injected backends expose
-  presence through `SingleWireTransport::presencePresent`.
-- The compatibility pin-based backend is implemented in a private platform
-  source. Public headers and the core protocol source do not include Arduino,
-  ESP-IDF, FreeRTOS, or ESP32 GPIO/timing headers.
-- For this release candidate the compatibility backend is still the default
-  ESP-IDF component path. It can be disabled with the CMake cache option
-  `AT21CS_ENABLE_ESP32_COMPAT_BACKEND=OFF` only for applications that provide
-  a complete `SingleWireTransport`.
-- Injected transports must provide `writeByteReadAck`, `readByteSendAck`,
-  `resetAndDiscover`, `releaseLine`, and a microsecond wait source. The backend
-  owns any critical sections, interrupt masking, fast GPIO access, and timing
-  calibration needed to meet AT21CS timing at the SI/O pin.
+- `AT21CS/Transport.h` defines the framework-neutral, whole-frame
+  `SingleWireTransport` contract.
+- Firmware externally owns one `Esp32Transport` per SI/O wire, binds its
+  descriptor to one `Bus`, and binds each addressed `Driver` to that Bus.
+- `Esp32TransportConfig` owns only the SI/O pin, optional presence pin, and
+  presence polarity. Pins never enter `Driver::Config`.
+- The explicit `Esp32Transport` is implemented once in
+  `src/platform/esp32/Esp32Transport.cpp` for Arduino-ESP32 on ESP32-S2/S3.
+  Public core headers and sources contain no framework or ESP32 timing/GPIO
+  headers.
+- A backend supplies `nowUs`, one complete-frame `transfer`,
+  `resetAndDiscover`, `waitUntilUs`, and optional `readPresence` callbacks. It
+  owns critical sections, interrupt masking, fast GPIO access, and physical
+  timing at the SI/O pin.
 
 ### Presence / Recovery
 - `Status probe()`
@@ -280,7 +252,8 @@ Notes:
    - `cfg` / `settings` prints the cached `SettingsSnapshot`, including
      initialization state, selected pins, address bits, detected part, speed,
      verbose mode, and offline threshold.
-2. `examples/espidf_basic` (native ESP-IDF CLI with the same user-facing command contract)
+The legacy native-IDF example is unsupported and is scheduled for removal by
+Prompt 06 when the final two Arduino examples are installed.
 
 ## Static Reference
 
@@ -291,8 +264,8 @@ The chip reference remains in:
 ## Documentation
 
 - `CHANGELOG.md` - full release history
-- `docs/IDF_PORT.md` - ESP-IDF portability guidance
-- `docs/IDF_PORT_IMPLEMENTATION.md` - implemented ESP-IDF port notes
+- `docs/IDF_PORT.md` - legacy unsupported port note pending Prompt 07 removal
+- `docs/IDF_PORT_IMPLEMENTATION.md` - legacy implementation note pending Prompt 07 removal
 - `docs/MIGRATION.md` - compatibility and staged backend split notes
 - `docs/ARCHITECTURE_SPLIT_PLAN.md` - planned core/backend split and remaining work
 
@@ -300,19 +273,17 @@ The chip reference remains in:
 
 The repository `platformio.ini` pins ESP32 example builds to the pioarduino
 `platform-espressif32` 55.03.311 package and explicitly builds with C++17. This
-keeps CI and local example builds on the same Arduino-ESP32 3.3.11 toolchain.
+keeps CI and local example builds on the same Arduino-ESP32 3.3.11 toolchain
+without requiring a standalone ESP-IDF installation.
 
 Recommended validation:
 
 ```bash
 python tools/check_cli_contract.py
-python tools/check_idf_example_contract.py
 python tools/check_core_timing_guard.py
 python -m platformio test -e native
 python -m platformio run -e ex_cli_s3
 python -m platformio run -e ex_cli_s2
-idf.py -C examples/espidf_basic set-target esp32s3
-idf.py -C examples/espidf_basic build
 ```
 
 ## License

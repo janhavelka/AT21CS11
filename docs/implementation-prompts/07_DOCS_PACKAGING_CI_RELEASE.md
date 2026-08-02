@@ -2,12 +2,19 @@
 
 ## Outcome
 
-Make the completed v2 library reproducibly consumable from a clean Arduino or
-native ESP-IDF project, synchronize all documentation/version metadata as a
-release candidate, and turn CI into a release gate.
+Make the completed v2 library reproducibly consumable from clean Arduino
+projects while proving that its core boundary remains framework-independent,
+synchronize all documentation/version metadata as a release candidate, and
+turn CI into a release gate.
 
 Do not claim production-ready hardware status or set stable `2.0.0` metadata
 until Prompt 08 HIL passes and the maintainer authorizes finalization.
+
+Arduino through the exact PioArduino pin frozen by the shared contract is the
+only supported firmware framework in documentation, packaging, consumers, and
+CI. Keep core framework-independent, but do not install/select standalone ESP-IDF
+or retain a native-IDF build/support path. This stage may validate HIL
+evidence structure only; Prompt 08 alone runs physical HIL.
 
 ## Required working method
 
@@ -55,19 +62,23 @@ This stage prepares the breaking release candidate:
 `[Unreleased]` or an explicitly marked `2.0.0-rc.1` heading; do not date or
 close a stable `2.0.0` release in this stage.
 
+Set `library.json.frameworks` to Arduino only and keep the ESP32 platform claim
+limited to the tested S2/S3 PioArduino environments. Framework-neutral core
+design is an architectural property, not permission to advertise an unbuilt
+framework.
+
 Synchronize:
 
 ```text
 library.json
-idf_component.yml
 include/AT21CS/Version.h
 CHANGELOG.md release-candidate/unreleased heading
 Doxygen project version if present
 ```
 
-If any current IDF component tooling rejects SemVer prerelease syntax, stop and
-report the exact tool/version/error. Do not silently publish stable `2.0.0` as
-a workaround.
+Remove unsupported native-IDF metadata/build artifacts rather than assigning
+them release-candidate versions. Do not silently publish stable `2.0.0` as a
+workaround for any packaging-tool limitation.
 
 ## Deterministic Version.h
 
@@ -104,8 +115,8 @@ CONTRIBUTING.md
 SECURITY.md
 AGENTS.md repository tree and example-count rule
 docs/MIGRATION.md
-docs/IDF_PORT.md
-docs/IDF_PORT_IMPLEMENTATION.md
+remove or archive `docs/IDF_PORT.md` and `docs/IDF_PORT_IMPLEMENTATION.md` as
+unsupported historical material
 docs/ARCHITECTURE_SPLIT_PLAN.md or archive it as resolved
 Doxyfile
 ```
@@ -145,24 +156,23 @@ Required content:
 - no current-address API;
 - no Freeze-state query;
 - AT21CS11 High-Speed only;
-- exact Arduino and native IDF support matrix actually built;
+- exact Arduino S2/S3 support matrix actually built and an explicit statement
+  that the core interface is framework-independent while no other framework is
+  currently implemented or supported;
 - no board pin defaults in library;
 - HIL status and limitations;
 - no I2C-style address scan command; A2:A0 selection is explicit;
 - migration table from every removed v1 API to v2 equivalent.
 
-Deliberately update the `AGENTS.md` example rule to:
+Verify the maintainer-updated `AGENTS.md` example rule remains:
 
 ```text
-Keep the shipped example set minimal: one full Arduino single-device CLI,
-one concise Arduino multi-device CLI, and one native ESP-IDF bring-up example
-when ESP-IDF support is enabled.
+Keep the shipped example set minimal: one full Arduino single-device CLI and
+one concise Arduino multi-device CLI. Do not ship a native-IDF example.
 ```
 
-This is an intentional policy change, not an accidental third example. The
-native IDF example may share only framework-neutral command/risk contracts with
-Arduino examples; it must not include Arduino parser, handler, facade, or
-runtime implementation. This exact edit closes Q-17. Preserve the Stage
+Remove any native-IDF example, checker, component, fixture, CMake-only support
+path, or documentation claim. This closes Q-17 while preserving the Stage
 1-corrected no-ACK-poll `tWR` rule and every other governing constraint.
 
 Correct the non-protected datasheet reference:
@@ -220,8 +230,6 @@ material:
 include/AT21CS/**
 src/**
 library.json
-idf_component.yml
-CMakeLists.txt
 LICENSE
 README.md
 CHANGELOG.md
@@ -242,6 +250,8 @@ scripts/** except when intentionally shipped
 internal audit/prompt/planning docs
 Doxyfile
 platformio.ini
+idf_component.yml
+native-IDF-only CMake/component files
 temporary captures
 ```
 
@@ -257,19 +267,12 @@ test/consumer/arduino/
   platformio.ini
   src/main.cpp
 
-test/consumer/idf/
-  CMakeLists.txt
-  sdkconfig.defaults
-  main/CMakeLists.txt
-  main/main.cpp
-
 test/consumer/core_only/
   CMakeLists.txt
   main.cpp
 
 test/consumer/phy_smoke/
   arduino/
-  idf/
 
 test/consumer/firmware_owner/
   platformio.ini
@@ -283,7 +286,6 @@ Rules:
 - include only installed public headers;
 - use no repository-root include path;
 - Arduino builds S2/S3;
-- IDF builds S2/S3 at exactly ESP-IDF 5.4.1 and 6.0.1;
 - core-only build proves platform-neutral Bus/Driver without ESP32 backend;
 - reuse the Stage 4 `phy_smoke` consumers rather than creating replacement PHY
   code;
@@ -301,16 +303,12 @@ Rules:
   snapshot read, or hidden library recovery loop;
 - its `platformio.ini` takes only `AT21CS_FIXTURE_LIB_SPEC`; reuse
   `tools/run_firmware_owner_fixture.py` and never add a relative checkout path;
-- backend-enabled IDF explicitly compiles the ESP32 transport source and
-  declares its GPIO/timer/FreeRTOS dependencies;
-- backend-disabled IDF explicitly excludes the ESP32 transport source and
-  compiles/links core without GPIO, timer, FreeRTOS, Arduino, or other platform
-  dependencies;
-- exercise both modes with explicit `AT21CS_ENABLE_ESP32_BACKEND=ON` and
-  `AT21CS_ENABLE_ESP32_BACKEND=OFF` clean configure/build commands;
 - either add a documented standalone core CMake target, or make the core-only
   fixture compile exactly the unpacked `src/Bus.cpp` and `src/AT21CS.cpp`;
-  never reach back into the repository checkout.
+  never reach back into the repository checkout;
+- no clean consumer uses `framework = espidf`, provisions
+  `framework-espidf`, or treats framework independence as a native-IDF support
+  claim.
 
 ## Package checker
 
@@ -319,15 +317,14 @@ Create `tools/check_package.py`:
 1. run `pio pkg pack`;
 2. inspect explicit allowlist/denylist;
 3. unpack into a new temporary directory;
-4. build platform-neutral, Arduino, and currently activated IDF consumers
-   against that archive;
+4. build platform-neutral and Arduino consumers against that archive;
 5. build supported examples as consumers;
 6. copy the generic firmware-owner fixture into the checker's temporary root,
    invoke `run_firmware_owner_fixture.py` with the unpacked package as
    `--library-root`, the copied fixture as `--fixture-root`, and the repository
    checkout as `--forbid-root`; build S2 and S3 and reject any compiler/linker
    input that reaches the checkout;
-7. build the Stage 4 PHY smoke fixtures;
+7. build the Stage 4 Arduino PHY smoke fixtures;
 8. reject repository-root includes;
 9. reject referenced-but-missing docs;
 10. leave repository clean.
@@ -337,20 +334,21 @@ verifying it lies inside the created temporary root. Resolve both paths and
 require the package/fixture temporary root to be outside the repository before
 using the repository as `--forbid-root`.
 
-The checker must not download, install, select, or mutate an ESP-IDF toolchain.
-Give it separate modes:
+The checker must not clone, download, install, select, or mutate a standalone
+ESP-IDF SDK or a PlatformIO `framework-espidf` package. PlatformIO may provision
+only the Arduino packages declared by the exact PioArduino pin. Give the
+checker separate modes:
 
 ```text
 python tools/check_package.py --inspect
 python tools/check_package.py --build-platform-neutral
 python tools/check_package.py --build-arduino
-python tools/check_package.py --build-current-idf --idf-path <activated-IDF>
 ```
 
-`--build-current-idf` validates the exact active version and fails unless it is
-the CI-matrix version expected by that job. Separate CI jobs activate pinned
-ESP-IDF 5.4.1 and 6.0.1 environments before invoking it. There is no
-`--all-supported` mode that pretends one process can provision both SDKs.
+`--build-arduino` builds the S2/S3 examples, firmware-owner fixture, and Stage
+04 PHY smoke consumer through PioArduino 55.03.311 with
+`framework = arduino`. `--build-platform-neutral` proves the core boundary
+without claiming another supported firmware framework.
 
 ## PlatformIO cleanup
 
@@ -384,7 +382,7 @@ docs/validation/captures/README.md
 ```
 
 Stage 7 owns only the checker, schema, empty/template records, and an
-`HIL_MATRIX.md` containing the exact HIL-01 through HIL-08 rows specified by
+`HIL_MATRIX.md` containing the exact HIL-01 through HIL-09 rows specified by
 Prompt 08. Stage 8 fills reviewed measurements and capture references.
 
 The checker must:
@@ -399,19 +397,19 @@ The checker must:
   public headers, build files, manifests, packaged docs/examples, or package
   contents;
 - after maintainer-authorized stable finalization, accept only a parsed,
-  exact-field allowlist: the version scalar in `library.json` and
-  `idf_component.yml`, generated SemVer constants in `Version.h`, Doxygen
-  project version, changelog version/date heading, README qualification status,
-  and evidence references. Reject any other change even when hidden in one of
-  those files. Record both RC and final source/package digests.
+  exact-field allowlist: the version scalar in `library.json`, generated SemVer
+  constants in `Version.h`, Doxygen project version, changelog version/date
+  heading, README qualification status, and evidence references. Reject any
+  other change even when hidden in one of those files. Record both RC and final
+  source/package digests.
 
 CI runs only `--structure-only`. Hardware absence must never be rendered as a
 green HIL result.
 
 ## CI jobs
 
-Pin exact PlatformIO, Python, host compiler, clang-format, Doxygen, Arduino
-platform/framework, ESP-IDF, and action commit versions in the workflow or a
+Pin exact PlatformIO, Python, host compiler, clang-format, Doxygen, PioArduino
+platform/framework packages, and action commit versions in the workflow or a
 reviewed tool-version file. Do not use floating branches, moving `x` endpoints,
 unpinned container tags, or mutable major-only action tags. Create separate
 jobs:
@@ -430,25 +428,18 @@ jobs:
 3. `arduino-builds`
    - S2/S3 single-device and multi-device examples plus the generic
      firmware-owner fixture as clean consumers.
-4. `idf-builds`
-   - exact IDF 5.4.1 and 6.0.1 matrix jobs;
-   - S2/S3;
-   - backend enabled;
-   - backend disabled and core-only;
-   - Stage 4 `phy_smoke/idf` consumer.
-5. `package-consumers`
+4. `package-consumers`
    - pack, inspect, and unpack once;
-   - platform-neutral and Arduino builds;
-   - each IDF job activates its own pinned SDK and calls
-     `--build-current-idf`.
-6. `docs`
+   - platform-neutral and Arduino S2/S3 builds;
+   - fail if native-IDF artifacts or support claims enter the archive.
+5. `docs`
    - Doxygen warnings fatal.
-7. `release-metadata`
+6. `release-metadata`
    - deterministic version;
    - synchronized metadata;
    - clean generated tree;
    - archive license/README/allowlist.
-8. `hil-evidence-structure`
+7. `hil-evidence-structure`
    - `python tools/check_hil_evidence.py --structure-only`;
    - never runs hardware or claims a qualified matrix.
 
@@ -462,7 +453,6 @@ python scripts/generate_version.py --check
 python tools/check_version_consistency.py
 python tools/check_docs.py
 python tools/check_cli_contract.py
-python tools/check_idf_example_contract.py
 python tools/check_format.py
 python tools/check_hil_evidence.py --structure-only
 python -m platformio test -e native
@@ -473,17 +463,16 @@ python tools/run_firmware_owner_fixture.py --library-root . --environment firmwa
 python tools/check_package.py --inspect
 python tools/check_package.py --build-platform-neutral
 python tools/check_package.py --build-arduino
-# In each separately activated IDF 5.4.1/6.0.1 CI job:
-python tools/check_package.py --build-current-idf --idf-path <activated-IDF>
 python tools/check_no_production_placeholders.py
 doxygen Doxyfile
 git diff --check
 git status --short
 ```
 
-Run native IDF clean-consumer builds in separately activated exact 5.4.1 and
-6.0.1 environments. A missing endpoint is a release blocker, not an optional
-skip. The production-source scan must have no hit.
+All ESP32 clean-consumer builds use the exact PioArduino 55.03.311
+`framework = arduino` environments. A missing S2/S3 Arduino environment or any
+native-IDF package/build path is a release blocker. The production-source scan
+must have no hit.
 
 ## Stable finalization after Prompt 08
 
@@ -492,13 +481,13 @@ passes against an immutable `2.0.0-rc.1` candidate and the maintainer explicitly
 authorizes stable finalization:
 
 1. change `library.json` from `2.0.0-rc.1` to `2.0.0`;
-2. regenerate `Version.h` and synchronize `idf_component.yml`/Doxygen;
+2. regenerate `Version.h` and synchronize Doxygen;
 3. convert the release-candidate/unreleased changelog entry into the dated
    stable `2.0.0` entry;
 4. update README HIL status using the reviewed evidence row IDs;
-5. rerun every required command in this prompt, every exact IDF matrix job,
-   `check_hil_evidence.py --require-release-matrix`, clean package consumers,
-   documentation, and version consistency;
+5. rerun every required command in this prompt, the exact PioArduino Arduino
+   S2/S3 matrix, `check_hil_evidence.py --require-release-matrix`, clean package
+   consumers, documentation, and version consistency;
 6. record the final source/package digest and verify that only authorized
    finalization fields and evidence documentation changed from the tested RC.
 
@@ -520,7 +509,6 @@ release creation is automatic.
 - CI covers every software release gate.
 - HIL checker/schema/templates exist and `--structure-only` passes without
   fabricating hardware success.
-- `AGENTS.md` deliberately permits exactly the two Arduino CLIs plus the native
-  IDF bring-up example.
+- `AGENTS.md` permits exactly the two Arduino CLIs and no native-IDF example.
 - README still labels hardware qualification pending until Prompt 08 succeeds.
 - Stable `2.0.0` remains an authorized post-HIL action, not a Stage 7 outcome.

@@ -10,6 +10,12 @@ multi-channel owner for independently wired removable peripherals.
 
 This stage does not add application-specific features to the library.
 
+Arduino through the exact PioArduino pin frozen by the shared contract is the
+only current firmware framework. Keep core framework-independent, but do not
+install/select standalone ESP-IDF or add native-IDF examples, components,
+fixtures, or build gates. Do not run physical HIL in this stage; Prompt 08 alone
+owns physical qualification.
+
 ## Required working method
 
 Read all contracts and completed Stages 1–5. Inspect sibling example patterns
@@ -23,7 +29,7 @@ Spawn subagents for:
 
 1. bounded CLI/parser and destructive-command review;
 2. separate-wire and shared-wire ownership review;
-3. native ESP-IDF example/contract review;
+3. Arduino S2/S3 example/build-boundary review;
 4. generic firmware-owner, hot-plug, and cross-task DTO review.
 
 Keep one integrator for common example helpers. Reuse helpers; do not copy the
@@ -62,11 +68,6 @@ examples/
     CommandContract.h
     StatusText.h
     ExampleTransport.h
-  espidf_basic/
-    CMakeLists.txt
-    main/
-      CMakeLists.txt
-      main.cpp
 ```
 
 Remove obsolete/raw/duplicated helpers, including `LoadCellMap.h` unless the
@@ -138,8 +139,9 @@ struct CommandSpec {
 };
 ```
 
-One repo-local manifest is authoritative for Arduino and IDF command names/risk
-classes. Framework-specific handlers remain native as required by `AGENTS.md`.
+One repo-local manifest is authoritative for both Arduino CLI command names and
+risk classes. The two examples reuse the contract/helpers without copying the
+full dispatcher.
 
 Required risk/confirmation examples:
 
@@ -242,24 +244,18 @@ Show:
 Reuse common parser/command/status helpers. Keep this example concise; do not
 copy the full single-device command set.
 
-## Native ESP-IDF example
+## Framework support boundary
 
-Use:
+Ship only the two Arduino examples above and build them only with the exact
+PioArduino `framework = arduino` environments. Remove any native-IDF example,
+contract checker, compatibility facade, component scaffold, or duplicated
+command implementation. Framework independence is proved by the core boundary
+and host tests; this stage does not implement another firmware framework.
 
-- `app_main`;
-- native ESP-IDF GPIO/timer/task APIs;
-- `vTaskDelay`;
-- fixed C buffers;
-- explicit backend/Bus/Driver construction.
-
-Do not use Arduino headers, `String`, `Serial`, `Wire`, compatibility facades,
-or Arduino CLI source.
-
-Either implement each claimed command meaningfully or remove it from the
-manifest. Specifically, no placeholder `raw`, `chip`, unused `verbose`, or
-CRC-only “selftest” may satisfy parity.
-
-Invalid arguments must produce a visible error and zero Driver I/O.
+Every command claimed by either Arduino CLI must be implemented meaningfully.
+Specifically, no placeholder `raw`, `chip`, unused `verbose`, or CRC-only
+“selftest” may satisfy the command contract. Invalid arguments must produce a
+visible error and zero Driver I/O.
 
 ## Generic fixed-size firmware-owner fixture
 
@@ -734,7 +730,8 @@ Replace token-only checks with a checker that verifies:
 - no handler is a placeholder/no-op;
 - invalid input tests prove zero Driver calls;
 - irreversible handlers require exact confirmation;
-- Arduino and IDF claim only their real supported command intersection.
+- both Arduino CLIs claim only commands they implement with the stated risk and
+  confirmation behavior.
 
 A deliberate no-op replacement must make the checker/test fail.
 
@@ -745,7 +742,6 @@ Host:
 ```text
 python -m platformio test -e native
 python tools/check_cli_contract.py
-python tools/check_idf_example_contract.py
 ```
 
 Arduino:
@@ -758,8 +754,8 @@ python tools/run_firmware_owner_fixture.py --library-root . --environment firmwa
 
 The `firmware_owner_s2` and `firmware_owner_s3` environments must compile the
 generic two-channel owner fixture described above, with both Drivers configured
-for `addressBits=0` on distinct SI/O pins. Native IDF S2/S3 builds remain
-required.
+for `addressBits=0` on distinct SI/O pins. Both environments use the exact
+PioArduino pin with `framework = arduino`; no native-IDF build is required.
 
 Also run:
 
@@ -771,7 +767,7 @@ git status --short
 ## Exit criteria
 
 - Exactly one full Arduino CLI and one concise Arduino multi-device CLI exist.
-- Native IDF example is genuinely native.
+- No native-IDF example, fixture, checker, component, or build claim remains.
 - Parsing and command storage are bounded.
 - Invalid/destructive input cannot silently mutate hardware.
 - Irreversible commands require explicit confirmation.

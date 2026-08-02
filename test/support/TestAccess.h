@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 
 #include "AT21CS/AT21CS.h"
 #include "AT21CS/platform/esp32/Esp32Transport.h"
@@ -56,12 +58,151 @@ class TestAccess {
   }
 
   static void activateWithoutHardware(Esp32Transport& transport,
-                                      int presencePin = 2) {
-    transport._config.sioPin = 1;
+                                      int presencePin = 2,
+                                      int sioPin = 1) {
+    transport._config.sioPin = sioPin;
     transport._config.presencePin = presencePin;
     transport._config.presenceActiveHigh = true;
     transport._timingMux = 0;
+    transport._testNowUs = 0;
+    transport._testCycle = 0;
+    transport._testNowCallCycles = 0;
+    transport._testClockFrozen = false;
+    transport._testLineReleased = true;
+    transport._testPresenceLevel = false;
+    transport._testLevelCount = 0;
+    transport._testLevelRead = 0;
+    transport._testEventCount = 0;
+    transport._testReadCount = 0;
+    transport._testDelayAdvanceLimitUs =
+        std::numeric_limits<uint32_t>::max();
+    transport._testFreezeAfterDelay = false;
+    transport._testTimingLockFailure = false;
+    transport._testTimingLockDepth = 0;
+    transport._testTimingLockAcquireCount = 0;
+    transport._testTimingLockReleaseCount = 0;
+    transport._testOverflow = false;
     transport._initialized = true;
+  }
+
+  static bool pinNumbersInRange(const Esp32TransportConfig& config,
+                                int pinCount) {
+    return Esp32Transport::_pinNumbersInRange(config, pinCount);
+  }
+
+  static int sioPin(const Esp32Transport& transport) {
+    return transport._config.sioPin;
+  }
+
+  static void setNowUs(Esp32Transport& transport, uint64_t nowUs) {
+    transport._testNowUs = nowUs;
+  }
+
+  static uint64_t nowUs(const Esp32Transport& transport) {
+    return transport._testNowUs;
+  }
+
+  static uint32_t cycle(const Esp32Transport& transport) {
+    return transport._testCycle;
+  }
+
+  static void setNowCallCycles(Esp32Transport& transport,
+                               uint32_t cycles) {
+    transport._testNowCallCycles = cycles;
+  }
+
+  static void setPresenceLevel(Esp32Transport& transport, bool high) {
+    transport._testPresenceLevel = high;
+  }
+
+  static bool beginSegment(Esp32Transport& transport,
+                           uint64_t deadlineUs) {
+    Esp32Transport::SegmentClock clock{};
+    return transport._beginSegment(deadlineUs, clock);
+  }
+
+  static void freezeClock(Esp32Transport& transport, bool frozen) {
+    transport._testClockFrozen = frozen;
+  }
+
+  static void freezeAfterCoarseDelay(Esp32Transport& transport,
+                                     uint32_t advanceUs) {
+    transport._testDelayAdvanceLimitUs = advanceUs;
+    transport._testFreezeAfterDelay = true;
+  }
+
+  static void failTimingLock(Esp32Transport& transport, bool fail) {
+    transport._testTimingLockFailure = fail;
+  }
+
+  static uint16_t timingLockDepth(const Esp32Transport& transport) {
+    return transport._testTimingLockDepth;
+  }
+
+  static uint16_t timingLockAcquireCount(
+      const Esp32Transport& transport) {
+    return transport._testTimingLockAcquireCount;
+  }
+
+  static uint16_t timingLockReleaseCount(
+      const Esp32Transport& transport) {
+    return transport._testTimingLockReleaseCount;
+  }
+
+  static bool queueLineLevel(Esp32Transport& transport, bool high) {
+    if (transport._testLevelCount >= transport.TEST_LEVEL_CAPACITY) {
+      return false;
+    }
+    transport._testLevels[transport._testLevelCount++] = high;
+    return true;
+  }
+
+  static uint16_t lineEventCount(const Esp32Transport& transport) {
+    return transport._testEventCount;
+  }
+
+  static uint32_t lineEventCycle(const Esp32Transport& transport,
+                                 uint16_t index) {
+    return transport._testEvents[index].cycle;
+  }
+
+  static bool lineEventReleased(const Esp32Transport& transport,
+                                uint16_t index) {
+    return transport._testEvents[index].released;
+  }
+
+  static uint16_t readCount(const Esp32Transport& transport) {
+    return transport._testReadCount;
+  }
+
+  static uint32_t readCycle(const Esp32Transport& transport,
+                            uint16_t index) {
+    return transport._testReadCycles[index];
+  }
+
+  static bool lineReleased(const Esp32Transport& transport) {
+    return transport._testLineReleased;
+  }
+
+  static bool testOverflow(const Esp32Transport& transport) {
+    return transport._testOverflow;
+  }
+
+  static TransferResult transfer(Esp32Transport& transport,
+                                 const SingleWireTransfer& transfer,
+                                 uint64_t deadlineUs) {
+    return transport._transfer(transfer, deadlineUs);
+  }
+
+  static TransferResult resetAndDiscover(Esp32Transport& transport,
+                                         bool& present,
+                                         uint64_t deadlineUs) {
+    return transport._resetAndDiscover(present, deadlineUs);
+  }
+
+  static TransferResult waitUntilUs(Esp32Transport& transport,
+                                    uint64_t deadlineUs) {
+    return transport._waitUntilUs(deadlineUs);
   }
 
   static uint32_t platformAccessCount(const Esp32Transport& transport) {
@@ -84,8 +225,44 @@ class TestAccess {
     return transport._finishStop(highUs, deadlineUs);
   }
 
-  static uint16_t startHighUs(SpeedMode speed) {
+  static uint32_t startHighUs(SpeedMode speed) {
     return Esp32Transport::_timingFor(speed).startHighUs;
+  }
+
+  static uint32_t bitNs(SpeedMode speed) {
+    return Esp32Transport::_timingFor(speed).bitNs;
+  }
+
+  static uint32_t low0Ns(SpeedMode speed) {
+    return Esp32Transport::_timingFor(speed).low0Ns;
+  }
+
+  static uint32_t low1Ns(SpeedMode speed) {
+    return Esp32Transport::_timingFor(speed).low1Ns;
+  }
+
+  static uint32_t readLowNs(SpeedMode speed) {
+    return Esp32Transport::_timingFor(speed).readLowNs;
+  }
+
+  static uint32_t readSampleNs(SpeedMode speed) {
+    return Esp32Transport::_timingFor(speed).readSampleFromFallNs;
+  }
+
+  static uint32_t cyclesForNs(uint32_t durationNs, uint32_t cyclesPerUs) {
+    return Esp32Transport::_cyclesForNs(durationNs, cyclesPerUs);
+  }
+
+  static uint32_t finalWaitPollLimit() {
+    return Esp32Transport::FINAL_WAIT_POLL_LIMIT;
+  }
+
+  static uint32_t finalWaitGuardUs() {
+    return Esp32Transport::FINAL_WAIT_CYCLE_GUARD_US;
+  }
+
+  static int32_t frozenClockDetail() {
+    return Esp32Transport::FROZEN_CLOCK_DETAIL;
   }
 };
 

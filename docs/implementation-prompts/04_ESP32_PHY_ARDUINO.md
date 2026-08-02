@@ -1,34 +1,35 @@
-# Prompt 04 — ESP32-S2/S3 PHY for Arduino and native ESP-IDF
+# Prompt 04 — ESP32-S2/S3 PHY for Arduino
 
 ## Outcome
 
-Implement and qualify one explicit `Esp32Transport` for ESP32-S2/S3 that
-satisfies the frozen whole-frame transport contract under Arduino-ESP32 and
-native ESP-IDF.
+Implement one explicit `Esp32Transport` for ESP32-S2/S3 that satisfies the
+frozen whole-frame transport contract under Arduino-ESP32. This stage proves
+the software implementation and declared Arduino build matrix; Prompt 08 alone
+owns physical qualification.
 
-This is a physical-layer stage. Do not change Driver feature semantics to hide a
-PHY failure.
+This is a PHY software stage. Do not change Driver feature semantics to hide a
+PHY failure, and do not interpret "PHY" as authorization for physical HIL.
 
 ## Required working method
 
 Read all shared contracts, completed Stages 1–3, DS20005857I timing tables, and
-the selected ESP-IDF GPIO/low-level API documentation. Preserve unrelated
-changes.
+the selected Arduino-ESP32 low-level GPIO/timing API documentation supplied by
+the pinned PioArduino platform. Preserve unrelated changes.
 
 Spawn subagents for:
 
 1. S2 GPIO/timing implementation review;
 2. S3 GPIO/timing implementation review;
-3. Arduino/IDF build-boundary review;
-4. logic-analyzer test-plan review.
+3. Arduino/core build-boundary review;
+4. host timing-oracle and deferred-HIL mapping review.
 
 Keep one integrator for shared backend code. Require a final cross-target review.
-Refactor one backend at the root, reuse one frame/timing implementation for
-Arduino and native IDF, delete the old byte callbacks, and do not band-aid
-target differences with duplicate PHYs. Simplify every timing path that cannot
-be measured. Do not use irreversible chip commands. Do not modify the protected
-report. Follow the packet README's saga checkpoint policy; do not tag, release,
-publish, or upload.
+Refactor one backend at the root, reuse one frame/timing implementation for S2
+and S3 under Arduino, delete the old byte callbacks, and do not band-aid target
+differences with duplicate PHYs. Simplify every timing path that cannot be
+verified by the software oracle. Do not run HIL or use irreversible chip
+commands. Do not modify the protected report. Follow the packet README's saga
+checkpoint policy; do not tag, release, publish, or upload.
 
 ## Sole owned findings
 
@@ -41,8 +42,10 @@ Close:
 - P-20;
 - Q-01.
 
-This stage supplies physical downstream proof for P-02 and P-05 without
-reopening their transport/core contracts.
+This stage supplies software/backend evidence for P-02 and P-05 without
+reopening their transport/core contracts. Physical downstream proof is
+`HIL_ONLY` and belongs exclusively to Prompt 08; its absence does not block the
+Stage 04 software checkpoint.
 
 ## Support matrix
 
@@ -51,11 +54,25 @@ Target:
 - ESP32-S2 and ESP32-S3;
 - Arduino-ESP32 3.3.11 through the maintainer-authorized PioArduino pin
   `https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip`;
-- native ESP-IDF at the two exact release endpoints 5.4.1 and 6.0.1.
+- `framework = arduino` only.
 
-If this matrix cannot be implemented and tested, narrow `library.json`,
-`idf_component.yml`, README, and CI honestly in Prompt 07. Do not retain a broad
-untested claim.
+Do not install/select a standalone ESP-IDF SDK, download PlatformIO's
+`framework-espidf` package, invoke `idf.py`, or add a `framework = espidf`
+environment. Arduino-ESP32 may internally use its bundled ESP-IDF-derived
+libraries; that does not authorize a native-IDF build or support claim.
+
+Remove any native-IDF Stage 04 fixture and native-IDF-only root build path from
+the current worktree. Remove `espidf` from `library.json.frameworks`; remove
+`idf_component.yml` and an IDF-only root `CMakeLists.txt` rather than retaining
+unsupported compatibility metadata. Do not replace them with a second adapter.
+Prompt 06 removes the obsolete native-IDF example, and Prompt 07 removes or
+archives the remaining stale IDF documentation/checkers and verifies package
+contents.
+
+Keep core, Bus, Driver, and the Backend interface framework-independent, but do
+not implement or advertise another framework now. Prompt 07 must keep
+`library.json`, README, package contents, and CI limited to the Arduino support
+matrix actually built.
 
 ## Exact platform API
 
@@ -79,7 +96,7 @@ class Esp32Transport {
 ```
 
 `begin()` requires `GPIO_IS_VALID_OUTPUT_GPIO(sioPin)`, requires
-`presencePin==-1` or an IDF-valid input GPIO, and rejects
+`presencePin==-1` or an Arduino-ESP32/SoC-valid input GPIO, and rejects
 `presencePin==sioPin` before configuring hardware. It leaves SI/O released
 open-drain high. `end()` releases only this instance's SI/O and clears fixed
 state. No heap allocation, logging, task, queue, or mutex.
@@ -122,8 +139,8 @@ DISCOVERY_RELEASE_CHECK_US   = 25
 POST_DISCOVERY_HIGH_US       = 160
 ```
 
-Electrical qualification requires measured `tPUP <= 0.40 us`. Do not claim
-these sample targets valid for a board that exceeds it.
+Prompt 08 electrical qualification requires measured `tPUP <= 0.40 us`. Stage
+04 records this limit but makes no board-level validity claim.
 
 ### Electrical interface safety contract
 
@@ -229,28 +246,32 @@ objective. It is not derived from an I2C transport or any one consuming
 firmware. Prompt 06 shows how an upper scheduler can avoid combining an old
 retained hold with new traffic in one owner command; Bus correctness does not
 depend on that optimization. A product may impose a stricter admission budget,
-but that does not silently change these library measurements. A placeholder,
-unmeasured budget, or unexplained relaxation fails this stage.
+but that does not silently change these library objectives. Stage 04 must prove
+the arithmetic and bounded software paths; Prompt 08 measures the physical
+durations and is the only HIL acceptance gate.
 
-The simplest candidate is a whole-frame critical section, but it is acceptable
-only when its measured worst-case continuous interrupt masking is within 2 ms.
+The simplest candidate is a whole-frame critical section. Its software design
+must make the expected masking interval finite and auditable; Prompt 08 must
+measure and prove worst-case continuous interrupt masking within 2 ms before a
+production-qualified claim.
 The 2 ms ceiling is a deliberate v2 ESP32 coexistence policy, not a datasheet
 timing value and not a consumer-firmware-specific rule.
 Keep deliberate pre-Start, repeated-Start, Stop, and post-frame released-high
 waits outside the interrupt-masked region where possible while retaining
-exclusive frame ownership. Measure both maximum 8-byte read and write shapes:
+exclusive frame ownership. Add host/static coverage for both maximum 8-byte
+read and write shapes and defer physical measurements to Prompt 08:
 
 - High-Speed whole-frame masking is expected to approach the 2 ms ceiling and
-  must be measured, not estimated;
+  must be measured in Prompt 08, not estimated as release evidence;
 - Standard whole-frame masking will normally exceed 2 ms and is therefore not
   a production solution under this contract.
 
 A per-byte critical section may reduce interrupt masking, but by itself it is
 not protocol-safe. It is acceptable only with a scheduler/exclusive-owner
-mechanism and measured worst-case interrupt latency proving that every
-falling-edge-to-falling-edge bit frame remains in the active `tBIT` window.
-Otherwise use a hardware-assisted implementation. No implementation may pass
-merely because an inter-byte high gap remains below `tHTSS`.
+mechanism whose bounded software behavior can later be measured. Prompt 08
+must prove that every falling-edge-to-falling-edge bit frame remains in the
+active `tBIT` window. No implementation may pass final qualification merely
+because an inter-byte high gap remains below `tHTSS`.
 
 Exact waveform acceptance:
 
@@ -261,9 +282,10 @@ High-Speed: every non-Start/Stop bit frame is
 Intentional Start/Restart/Stop: released high for at least active tHTSS.
 ```
 
-Measure inter-byte and interrupt-induced gaps under load. Both conditions must
-hold: no unintended `tHTSS` Start/Stop, and no `tBIT` overrun. A gap below
-`tHTSS` can still violate `tBIT` and corrupt the transaction.
+Prompt 08 measures inter-byte and interrupt-induced gaps under load. Both
+conditions must hold there: no unintended `tHTSS` Start/Stop, and no `tBIT`
+overrun. A gap below `tHTSS` can still violate `tBIT` and corrupt the
+transaction.
 
 Do not assume per-byte critical sections are sufficient. Do not rely on
 undocumented function overhead for pulse width.
@@ -279,7 +301,8 @@ Choose and document one tested policy:
   stable; or
 - hold a supported power-management lock for backend lifetime/transfer.
 
-No cached boot-time MHz assumption is allowed. Test 80/160/240 MHz where the
+No cached boot-time MHz assumption is allowed. Stage 04 compiles and tests the
+chosen policy without hardware claims; Prompt 08 tests 80/160/240 MHz where the
 target supports them and DFS enabled/disabled.
 
 ## Multiple backend instances
@@ -290,15 +313,16 @@ on distinct SI/O pins must coexist and support correctly interleaved calls with
 completely independent descriptors and diagnostics. If the platform requires a
 process-wide arbitration primitive for an explicitly qualified parallel mode,
 it contains no pin/Bus/device pointer or protocol evidence, and its
-serialization and latency are documented and measured.
+serialization and latency are documented and later measured in Prompt 08.
 
 This v2 support claim does not promise simultaneous timing-critical frame
 execution from separate tasks. The default upper-firmware contract serializes
 all AT21CS backend calls through one owner even when physical wires differ. If
 the implementation chooses to claim cross-instance parallel execution, it must
 define the ESP32 critical-section/power-management arbitration, add contention
-tests, and qualify simultaneous S2/S3 HIL without violating either wire's
-timing. Otherwise document parallel calls as unsupported.
+    tests, and qualify simultaneous S2/S3 execution in Prompt 08 without
+    violating either wire's timing. Otherwise document parallel calls as
+    unsupported.
 
 `Esp32Transport::begin()` validates its own SI/O/presence pins only. A
 multi-channel upper owner must reject duplicate SI/O pins and any presence pin
@@ -329,8 +353,8 @@ not add a mutable global pin registry to the library.
 
 - runs outside timing critical sections;
 - guarantees SI/O remains released;
-- may cooperatively yield with `vTaskDelay`/native primitives, then finish
-  against `esp_timer_get_time`;
+- may use bounded Arduino-ESP32/PioArduino-supplied timing primitives, then
+  finish against its monotonic microsecond source;
 - must not return OK before deadline;
 - accepts only intervals needed by this contract, at most 10 ms;
 - has a second termination guard independent of `esp_timer_get_time`: after the
@@ -342,9 +366,9 @@ not add a mutable global pin registry to the library.
 - contains no loop whose only termination condition is the protocol clock.
 
 Acquire whatever power-management protection is required for the cycle ceiling
-to remain conservative. Native fault tests must freeze `nowUs()` before and
-after the coarse yield and prove a finite terminal return. HIL must prove the
-fresh and retained-hold page-call budgets above at 80/160/240 MHz and with DFS.
+to remain conservative. Host fault tests must freeze `nowUs()` before and after
+the coarse yield and prove a finite terminal return. Prompt 08 alone proves the
+fresh and retained-hold page-call budgets at 80/160/240 MHz and with DFS.
 
 ## Presence callback
 
@@ -355,17 +379,17 @@ If configured:
 - do not alter SI/O or perform protocol traffic;
 - validate presence pin differs from SI/O.
 
-## Native IDF and Arduino boundary
+## Arduino and framework-neutral-core boundary
 
-- Core headers/source contain no framework headers.
-- The explicit platform header/source may use guarded ESP-IDF/FreeRTOS APIs.
+- Core headers/source contain no framework or platform headers.
+- The explicit ESP32 transport may use guarded Arduino-ESP32 low-level SoC and
+  FreeRTOS facilities supplied by PioArduino, only under
+  `ARDUINO_ARCH_ESP32`/`framework = arduino`.
 - Arduino examples use Arduino APIs only outside library code.
-- Native IDF example uses `app_main`, native headers, `esp_timer`, `vTaskDelay`,
-  and fixed C buffers.
-- No Arduino facade is introduced into IDF.
-
-Build backend-enabled and transport-only/backend-disabled component forms. In
-backend-disabled form, Bus/Driver compile without GPIO/FreeRTOS dependencies.
+- Do not add a native-IDF example, component, CMake build, `ESP_PLATFORM`
+  support claim, or `framework = espidf` environment.
+- Prove framework independence through host/core builds and boundary scans, not
+  by implementing a second framework adapter in this stage.
 
 ## Host/backend tests
 
@@ -394,54 +418,24 @@ stage. Create only:
 test/consumer/phy_smoke/arduino/
   platformio.ini
   src/main.cpp
-test/consumer/phy_smoke/idf/
-  CMakeLists.txt
-  sdkconfig.defaults
-  main/CMakeLists.txt
-  main/main.cpp
 ```
 
-Both consumers use the exact v2 `Esp32Transport -> Bus -> Driver` construction,
-fixed buffers, and a non-destructive initialize/Manufacturer-ID/read path.
-They contain no private source copy and resolve the library through normal
-consumer semantics.
-
-The IDF fixture exposes one CMake option with this exact name:
-
-```text
-AT21CS_ENABLE_ESP32_BACKEND
-```
-
-With `ON`, compile `Esp32Transport.cpp` and declare the exact GPIO, timer,
-FreeRTOS, and low-level CPU/power-management requirements used by that source.
-With `OFF`, compile and link only `Bus.cpp` and `AT21CS.cpp`; no Arduino,
-ESP-IDF GPIO, timer, FreeRTOS, or ESP32 dependency may leak into core. Stage 7
-reuses these fixtures for package verification. Stage 6 alone owns migration
-of shipped examples.
+The consumer uses the exact v2 `Esp32Transport -> Bus -> Driver` construction,
+fixed buffers, and a non-destructive initialize/Manufacturer-ID/read path. It
+contains no private source copy and resolves the library through normal
+consumer semantics. Stage 7 reuses it for package verification. Stage 6 alone
+owns migration of shipped examples.
 
 ## Required build commands
-
-Arduino:
 
 ```text
 python -m platformio run -d test/consumer/phy_smoke/arduino -e phy_smoke_s2
 python -m platformio run -d test/consumer/phy_smoke/arduino -e phy_smoke_s3
 ```
 
-Native IDF, in a separately activated 5.4.1 environment and again in a
-separately activated 6.0.1 environment, using new build directories for every
-target/mode:
-
-```text
-idf.py -C test/consumer/phy_smoke/idf -B build-s2-on  -DAT21CS_ENABLE_ESP32_BACKEND=ON  set-target esp32s2 build
-idf.py -C test/consumer/phy_smoke/idf -B build-s3-on  -DAT21CS_ENABLE_ESP32_BACKEND=ON  set-target esp32s3 build
-idf.py -C test/consumer/phy_smoke/idf -B build-s2-off -DAT21CS_ENABLE_ESP32_BACKEND=OFF set-target esp32s2 build
-idf.py -C test/consumer/phy_smoke/idf -B build-s3-off -DAT21CS_ENABLE_ESP32_BACKEND=OFF set-target esp32s3 build
-```
-
-The exact option spelling and ON/OFF source/dependency behavior are acceptance
-criteria; do not emulate OFF with a macro while still compiling the platform
-source. Report an unavailable endpoint rather than claiming it passed.
+Both environments must resolve the exact PioArduino pin and
+`framework = arduino`. Report an unavailable environment rather than claiming
+it passed. No native-IDF package may be provisioned as part of these commands.
 
 Core regression:
 
@@ -451,46 +445,26 @@ python -m platformio test -e native
 git diff --check
 ```
 
-## Non-destructive HIL gate for this stage
+## Deferred physical qualification
 
-Before any EEPROM write:
-
-1. capture Reset/Discovery on S2 and S3;
-2. capture High-Speed 0, 1, read, ACK, Start, repeated Start, Stop;
-3. capture Standard equivalents on AT21CS01;
-4. measure `tPUP`;
-5. repeat under CPU/DFS and interrupt/Wi-Fi/flash load;
-6. record min/max, not one screenshot.
-
-Sample instants are not visible on SI/O alone. Use a HIL-only, private
-instrumentation build that brackets each Discovery/data/ACK GPIO-read
-instruction with direct IRAM-safe writes to a separate marker pin. Record the
-marker-to-read error bound and include it in the timing margin. The marker must
-not be added to the public transport API or production build. Capture an
-uninstrumented production waveform as well and prove the marker build did not
-change bit-frame timing outside that bounded error.
-
-Measure `tPUP` with an analog oscilloscope at the actual ESP32 input thresholds;
-a digital logic analyzer trace alone is insufficient. Record oscilloscope and
-logic-analyzer bandwidth/sample rate, threshold, probe loading, marker pin, raw
-captures, and measurement uncertainty. The total uncertainty must be smaller
-than the claimed HS `tRD`/`tMRS` margin.
-
-If a limit fails, fix PHY timing. Do not compensate in Driver protocol.
+Do not run physical HIL in Stage 04 and do not block its software checkpoint on
+missing boards, parts, pins, pull-ups, instruments, captures, or measurements.
+Mark physical timing/electrical acceptance `HIL_ONLY` and map it to Prompt 08,
+which exclusively owns waveform capture, `tPUP`, CPU/DFS/load, interrupt-mask,
+page-call-duration, and hardware fault qualification. Structure-only records
+are not hardware evidence.
 
 ## Exit criteria
 
-- Arduino and declared IDF consumers compile on S2/S3.
-- Logic traces satisfy all non-destructive timing limits.
-- Discovery has one request pulse.
-- Discovery is low at the 4 us presence sample and high at the 25 us release
-  check; held-low returns `LINE_STUCK` and missing-pull-up never returns present.
-- Read sampling is inside the absolute `tMRS` window with measured margin.
-- Every ordinary bit frame satisfies `tBIT`, including under worst-case
-  scheduler/interrupt load.
-- No frame has an unintended inter-byte Stop.
-- Continuous interrupt masking and page-call duration remain within the exact
-  budgets above.
-- Every tested VPUP uses the direct 3.3 V profile or a documented, qualified
-  open-drain level shifter.
+- Exact PioArduino 55.03.311 Arduino consumers compile on S2/S3.
+- Host tests prove one Discovery request, exact modeled sample/release instants,
+  held-low typing, MSb order, ACK/NACK phases, read termination, transactional
+  outputs, checked deadlines, line release, and independent instances.
+- Static/compile checks cover both GPIO banks and S2/S3 guards and verify every
+  emitted timing-critical helper uses the intended IRAM/cache policy.
+- Core boundary checks prove Bus/Driver remain framework-independent.
+- No native-IDF fixture, component metadata, IDF-only root build, package/CI
+  gate, or support claim remains in the Stage 04 build surface.
+- Every physical-only criterion is recorded for Prompt 08 and does not block
+  the Stage 04 software checkpoint.
 - Platform support metadata can be stated precisely in Prompt 07.

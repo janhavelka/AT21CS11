@@ -8,6 +8,13 @@ bus-global high-only reservation and Prompt 02's lifecycle/health rules.
 This stage owns write evidence and exact mutation protocols. It must not alter
 frame transport or state vocabulary.
 
+Keep all production changes in this stage framework-independent. The current
+supported firmware framework remains Arduino through the exact PioArduino pin
+frozen by the shared contract, but this stage does not install or build any
+platform framework. Do not install/select standalone ESP-IDF, add a native-IDF
+path, or perform physical HIL. Prompt 08 alone owns physical qualification,
+including every mutable or irreversible hardware operation.
+
 ## Required working method
 
 Read all shared contracts and completed Prompt 01/02 changes. Re-open

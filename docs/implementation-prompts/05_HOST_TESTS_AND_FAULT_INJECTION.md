@@ -1,4 +1,4 @@
-# Prompt 05 — exhaustive native tests and fault injection
+# Prompt 05 — exhaustive host tests and fault injection
 
 ## Outcome
 
@@ -9,12 +9,17 @@ multi-device bus interaction.
 This stage primarily tests. It may change production code only when a new test
 demonstrates a root defect. It must not weaken a test to preserve existing code.
 
+In this prompt, "native" means bounded desktop host tests through PlatformIO's
+host test environment; it never means native ESP-IDF. Keep production core
+framework-independent, retain Arduino as the only supported firmware framework,
+do not install/select standalone ESP-IDF, and do not run physical HIL. Prompt 08
+alone owns physical qualification.
+
 ## Required working method
 
 Read the shared contract, finding registry, completed Stages 1–4, all existing
-tests, and the Stage 4 v2 smoke consumers under
-`test/consumer/phy_smoke/arduino/` and `test/consumer/phy_smoke/idf/`.
-Preserve unrelated changes.
+tests, and the Stage 4 v2 S2/S3 Arduino smoke consumer under
+`test/consumer/phy_smoke/arduino/`. Preserve unrelated changes.
 
 Spawn subagents for:
 
@@ -75,12 +80,12 @@ Remove their include paths from PlatformIO configuration.
 No test may calculate an expected frame, CRC, address, or state by calling the
 production helper being tested.
 
-`test_main.cpp` is the single Unity/native runner and registers the focused test
+`test_main.cpp` is the single Unity/host runner and registers the focused test
 functions. Do not add one competing `main()` per source file.
 
 When a saturation or otherwise unreachable invariant needs private-state setup,
 use exactly one `AT21CS_TESTING`-guarded friend named `TestAccess`, implemented
-in `test/support/TestAccess.h`. Define `AT21CS_TESTING` only in native test
+in `test/support/TestAccess.h`. Define `AT21CS_TESTING` only in host-test
 environments. It must add no data member, virtual function, public method, or
 installed test header. Do not use `#define private public`, linker tricks, or
 test behavior in production builds.
@@ -403,7 +408,7 @@ bit-frame execution. Prompt 04 owns any stronger concurrency claim.
 
 ## Sanitizers and warnings
 
-Add native environments:
+Add PlatformIO host environments:
 
 ```text
 native
@@ -435,13 +440,15 @@ Create `test/COVERAGE_MATRIX.md` mapping:
 requirement/finding -> named test -> source/helper under test
 ```
 
-Every P/A finding in `FINDINGS_REGISTRY.md` must have at least one named native
+Every P/A finding in `FINDINGS_REGISTRY.md` must have at least one named host
 test or be marked `HIL_ONLY` with the Stage 8 evidence item.
 
-Also map each Stage 4 smoke consumer to its exact build configuration and the
-physical-only findings it exercises. A Stage 4 item may be marked `HIL_ONLY`,
-but the manifest must still name the smoke source/build and the Stage 8 capture
-row that closes it. Do not copy the ESP32 backend into native test support.
+Also map each Stage 4 S2/S3 Arduino smoke environment to its exact build
+configuration and the physical-only findings it exercises. A Stage 4 item may
+be marked `HIL_ONLY`, but the manifest must still name the smoke source/build
+and the Stage 8 capture row that closes it. Stage 5 does not run HIL, and
+missing physical evidence does not block its software checkpoint. Do not copy
+the ESP32 backend into host-test support.
 
 Create `tools/check_no_production_placeholders.py`. It scans `include/` and
 `src/` for `TODO`, `FIXME`, `placeholder`, and `not implemented`, prints exact

@@ -1,8 +1,8 @@
 # AI coder prompt - implement one AT21CS stage
 
 Use this with exactly one numbered packet prompt. Follow its frozen contract
-and maintainer decisions. Follow `AGENTS.md`, except for Q-16 in Prompt 01 and
-Q-17 in Prompt 07. Stop for any other material contradiction.
+and maintainer decisions. Follow `AGENTS.md`, except for Q-16 in Prompt 01.
+Stop for any other material contradiction.
 
 Implement only the current prompt's findings. Preserve completed earlier-stage
 requirements and fix regressions you introduce, but do not implement later
@@ -58,8 +58,11 @@ final read-only simplification/coverage review; verify every report.
 
 Reread the prompt, inspect the diff and callers, check every criterion, remove
 duplication, and run current checks plus affected earlier gates. Claim only
-validation performed. Structure-only HIL is not hardware success; mutable or
-irreversible HIL requires Prompt 08 authorization.
+validation performed. Prompts 01–07 do not run physical HIL and do not remain
+blocked solely because physical evidence is pending; map physical-only items to
+Prompt 08 as `HIL_ONLY`. Structure-only HIL is not hardware success. Prompt 08
+alone owns physical, mutable, and irreversible HIL under its authorization
+rules.
 
 Report changed/removed files and APIs, decisions, findings closed, checks run,
 blockers, and remaining later-stage or hardware work. Do not checkpoint during

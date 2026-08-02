@@ -13,6 +13,18 @@ commit and exact firmware artifacts built from it.
 This stage owns closure of P-21, P-22, Q-03, and Q-15. It independently
 verifies every other finding without taking over its design ownership.
 
+Prompt 08 is the sole physical-HIL stage. Prompts 01–07 may record
+`HIL_ONLY` mappings and create structure/checkers, but they must not energize
+hardware, require captures or measurements, or block their software checkpoint
+solely because physical evidence is pending. All deferred Stage 04 waveform,
+`tPUP`, CPU/DFS/load, interrupt-mask, page-duration, and fault-isolation
+qualification is executed here against the immutable release candidate.
+
+Every firmware build and physical HIL row in this stage uses Arduino through
+the exact PioArduino pin frozen by the shared contract. Keep core
+framework-independent, but do not install/select standalone ESP-IDF or add a
+native-IDF build, example, component, package, CI, or validation path.
+
 ## Required working method
 
 Read `AGENTS.md`, every file in this prompt pack, the complete final diff, and
@@ -39,7 +51,7 @@ Spawn independent subagents that did not own the corresponding implementation:
 3. lifecycle/state/health reviewer;
 4. tests/fault-injection reviewer;
 5. ESP32 S2/S3 timing reviewer;
-6. Arduino/IDF/package/reproducibility reviewer;
+6. Arduino/package/reproducibility reviewer;
 7. simplification/dead-code reviewer.
 
 If concurrency limits prevent all at once, run them in waves. Require concrete
@@ -148,7 +160,8 @@ follow the packet README policy.
 - shared-wire and separate-wire ownership, per-channel shutdown, serialization
   limits, and the application/harness responsibility boundary are documented;
 - clean package consumers build;
-- IDF support claim equals actual tested matrix;
+- Arduino support claim equals the actual tested S2/S3 matrix, the core remains
+  framework-independent, and no native-IDF support claim/artifact remains;
 - generated metadata is deterministic;
 - all documentation/API links are current.
 
@@ -182,7 +195,7 @@ Each run record contains:
 - immutable tested RC Git commit;
 - source-tree/package digest and ELF/bin SHA-256;
 - later evidence-only commit ID, if applicable;
-- exact PlatformIO/Arduino/IDF/compiler versions;
+- exact PlatformIO/PioArduino/Arduino/compiler versions;
 - board/module revision;
 - ESP32 CPU frequency and DFS setting;
 - AT21CS part, package, and whether sacrificial;
@@ -251,15 +264,15 @@ Use these exact SI/O-powered electrical profiles:
 
 | Row | Board/framework | SDK endpoint | Device/mode/count | Required runtime conditions | Electrical/temperature profile |
 |---|---|---|---|---|---|
-| HIL-01 | ESP32-S2 Arduino | pinned Stage 7 Arduino stack | AT21CS11 HS, one | 80/160/240 MHz; DFS off/on; idle and Wi-Fi/interrupt/flash contention | `E-DIRECT-3V3`, 25 C |
-| HIL-02 | ESP32-S3 Arduino | pinned Stage 7 Arduino stack | AT21CS01 HS and Standard, one | 80/160/240 MHz; DFS off/on; idle and Wi-Fi/interrupt/flash contention | separate `E-DIRECT-3V3` and `E-RISE-WORST-3V3` subruns, 25 C |
-| HIL-03 | ESP32-S2 native IDF | ESP-IDF 5.4.1 | AT21CS01 HS and Standard, one | 80/160/240 MHz; DFS off/on; contention | separate HS `E-AT01-HS-1V7-LS` and Standard `E-AT01-SS-2V7-LS` subruns, 25 C |
-| HIL-04 | ESP32-S3 native IDF | ESP-IDF 5.4.1 | AT21CS11 HS, one | 80/160/240 MHz; DFS off/on; contention | `E-AT11-HS-4V5-LS`, 25 C |
-| HIL-05 | ESP32-S2 native IDF | ESP-IDF 6.0.1 | AT21CS11 HS, one | 80/160/240 MHz; DFS off/on; contention | `E-RISE-WORST-3V3`, 25 C |
-| HIL-06 | ESP32-S3 native IDF | ESP-IDF 6.0.1 | two differently addressed devices on one SI/O Bus, HS | 80/160/240 MHz; DFS off/on; contention; cross-device write hold/reset generation | separate `E-DIRECT-3V3` and `E-RISE-WORST-3V3` subruns, 25 C |
-| HIL-07 | ESP32-S3 native IDF | ESP-IDF 6.0.1 | AT21CS01 HS and Standard, mutable device | fixed worst timing CPU/DFS/load condition selected from HIL-02/03 | separate HS `E-AT01-HS-1V7-LS` and Standard `E-AT01-SS-2V7-LS` subruns at exact ordered-part rated minimum, 25 C, and rated maximum temperature; exactly 100 accepted EEPROM page writes per mode per temperature |
-| HIL-08 | ESP32-S3 native IDF | ESP-IDF 6.0.1 | AT21CS11 HS, mutable device | fixed worst timing CPU/DFS/load condition selected from HIL-01/04/05 | `E-AT11-HS-4V5-LS` at exact ordered-part rated minimum, 25 C, and rated maximum temperature; exactly 100 accepted EEPROM page writes per temperature |
-| HIL-09 | ESP32-S3 Arduino firmware-owner fixture | pinned Stage 7 Arduino stack | two AT21CS11 HS devices, both address zero, one per independent SI/O wire; channel A mutable | one firmware owner services both channels sequentially; observe B quiet while A's synchronous page write/hold runs, then read B immediately after return; disconnect/reconnect and held-low fault on A while B continues; independent Reset/generation/diagnostics/shutdown | `E-REMOVABLE-2CH-3V3`, 25 C |
+| HIL-01 | ESP32-S2 Arduino | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | AT21CS11 HS, one | 80/160/240 MHz; DFS off/on; idle and Wi-Fi/interrupt/flash contention | `E-DIRECT-3V3`, 25 C |
+| HIL-02 | ESP32-S3 Arduino | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | AT21CS01 HS and Standard, one | 80/160/240 MHz; DFS off/on; idle and Wi-Fi/interrupt/flash contention | separate `E-DIRECT-3V3` and `E-RISE-WORST-3V3` subruns, 25 C |
+| HIL-03 | ESP32-S2 Arduino | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | AT21CS01 HS and Standard, one | 80/160/240 MHz; DFS off/on; contention | separate HS `E-AT01-HS-1V7-LS` and Standard `E-AT01-SS-2V7-LS` subruns, 25 C |
+| HIL-04 | ESP32-S3 Arduino | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | AT21CS11 HS, one | 80/160/240 MHz; DFS off/on; contention | `E-AT11-HS-4V5-LS`, 25 C |
+| HIL-05 | ESP32-S2 Arduino | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | AT21CS11 HS, one | 80/160/240 MHz; DFS off/on; contention | `E-RISE-WORST-3V3`, 25 C |
+| HIL-06 | ESP32-S3 Arduino | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | two differently addressed devices on one SI/O Bus, HS | 80/160/240 MHz; DFS off/on; contention; cross-device write hold/reset generation | separate `E-DIRECT-3V3` and `E-RISE-WORST-3V3` subruns, 25 C |
+| HIL-07 | ESP32-S3 Arduino | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | AT21CS01 HS and Standard, mutable device | fixed worst timing CPU/DFS/load condition selected from HIL-02/03 | separate HS `E-AT01-HS-1V7-LS` and Standard `E-AT01-SS-2V7-LS` subruns at exact ordered-part rated minimum, 25 C, and rated maximum temperature; exactly 100 accepted EEPROM page writes per mode per temperature |
+| HIL-08 | ESP32-S3 Arduino | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | AT21CS11 HS, mutable device | fixed worst timing CPU/DFS/load condition selected from HIL-01/04/05 | `E-AT11-HS-4V5-LS` at exact ordered-part rated minimum, 25 C, and rated maximum temperature; exactly 100 accepted EEPROM page writes per temperature |
+| HIL-09 | ESP32-S3 Arduino firmware-owner fixture | PioArduino 55.03.311 / Arduino-ESP32 3.3.11 | two AT21CS11 HS devices, both address zero, one per independent SI/O wire; channel A mutable | one firmware owner services both channels sequentially; observe B quiet while A's synchronous page write/hold runs, then read B immediately after return; disconnect/reconnect and held-low fault on A while B continues; independent Reset/generation/diagnostics/shutdown | `E-REMOVABLE-2CH-3V3`, 25 C |
 
 Before running, replace qualitative electrical profile names in each run record
 with measured SI/O pull-up supply voltage, pull-up resistance, capacitance, and
@@ -541,8 +554,8 @@ an explicit risk acceptance.
 After all explicit HIL rows and irreversible proofs pass:
 
 1. rerun every Prompt 07 software command from clean consumers;
-2. rerun the exact ESP-IDF 5.4.1 and 6.0.1 package-consumer matrix, including
-   backend ON/OFF and core-only;
+2. rerun the exact PioArduino 55.03.311 Arduino S2/S3 package-consumer matrix
+   and the framework-neutral core-only consumer;
 3. rerun docs, protected-report hash, format, native/sanitizer, examples,
    version consistency, package allowlist, and
    `check_hil_evidence.py --require-release-matrix`;

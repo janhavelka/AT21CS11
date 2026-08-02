@@ -5,8 +5,8 @@ stage; do not begin the next one.
 
 Reread `AGENTS.md`, packet `README.md`, `00_SHARED_V2_CONTRACT.md`,
 `FINDINGS_REGISTRY.md`, the current and earlier prompts. Follow `AGENTS.md`,
-except for Q-16 in Prompt 01 and Q-17 in Prompt 07. Treat maintainer decisions
-as authoritative. Never modify the protected complete-driver report.
+except for Q-16 in Prompt 01. Treat maintainer decisions as authoritative.
+Never modify the protected complete-driver report.
 
 Audit current findings and completed-stage regressions. Record later work
 without implementing it. Use only the packet's verified datasheet for protocol
@@ -63,8 +63,10 @@ HIL is not hardware evidence; mutable or irreversible HIL needs Prompt 08
 authorization.
 
 Report findings, corrections, refactoring, removed APIs, requirements verified,
-checks run, blockers, and remaining later-stage or hardware work. If and only
-if the stage is complete, create its non-empty `stage NN:` checkpoint commit and
-push it using the packet README policy. Do not checkpoint a blocked stage. Do
-not tag, release, publish, amend history, force-push, or modify downstream
-repositories.
+checks run, blockers, and remaining later-stage or hardware work. Prompts 01–07
+do not run physical HIL and are not blocked solely by deferred physical
+evidence; record such work as `HIL_ONLY` for Prompt 08. If and only if the
+stage's software criteria are complete, create its non-empty `stage NN:`
+checkpoint commit and push it using the packet README policy. Do not checkpoint
+a genuinely blocked software stage. Do not tag, release, publish, amend history,
+force-push, or modify downstream repositories.

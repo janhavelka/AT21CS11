@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import sys
@@ -17,6 +18,17 @@ CLEAN_CORE_HEADERS = (
     "include/AT21CS/Transport.h",
     "include/AT21CS/Status.h",
     "include/AT21CS/CommandTable.h",
+)
+
+ARDUINO_TRANSPORT_FILES = (
+    "include/AT21CS/platform/esp32/Esp32Transport.h",
+    "src/platform/esp32/Esp32Transport.cpp",
+)
+
+FORBIDDEN_NATIVE_IDF_BUILD_PATHS = (
+    "CMakeLists.txt",
+    "idf_component.yml",
+    "test/consumer/phy_smoke/idf",
 )
 
 FORBIDDEN_CLEAN_HEADER_TOKENS = (
@@ -179,6 +191,48 @@ def main() -> int:
         for pattern in patterns:
             if re.search(pattern, code):
                 errors.append(f"obsolete v1 public symbol in {rel}: {pattern}")
+
+    for rel in ARDUINO_TRANSPORT_FILES:
+        path = ROOT / rel
+        if not path.exists():
+            errors.append(f"missing Arduino ESP32 transport file: {rel}")
+            continue
+        code = strip_non_code(path.read_text(encoding="utf-8", errors="replace"))
+        if "ESP_PLATFORM" in code:
+            errors.append(f"native-IDF ESP_PLATFORM branch in Arduino transport: {rel}")
+        if "UNSUPPORTED_COMMAND" in code:
+            errors.append(f"obsolete non-Arduino runtime stub in ESP32 transport: {rel}")
+
+    transport_header = ROOT / ARDUINO_TRANSPORT_FILES[0]
+    transport_header_text = transport_header.read_text(
+        encoding="utf-8", errors="replace"
+    )
+    if (
+        "!defined(ARDUINO_ARCH_ESP32) && !defined(AT21CS_TESTING)"
+        not in transport_header_text
+        or '#error "Esp32Transport is available only for Arduino-ESP32"'
+        not in transport_header_text
+    ):
+        errors.append(
+            "ESP32 transport must reject non-Arduino production compilation"
+        )
+
+    for rel in FORBIDDEN_NATIVE_IDF_BUILD_PATHS:
+        if (ROOT / rel).exists():
+            errors.append(f"unsupported native-IDF build path remains: {rel}")
+
+    library_json = ROOT / "library.json"
+    try:
+        metadata = json.loads(library_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"cannot parse library.json: {exc}")
+    else:
+        frameworks = metadata.get("frameworks", [])
+        if frameworks != ["arduino"]:
+            errors.append(
+                "library.json frameworks must contain only arduino: "
+                f"{frameworks!r}"
+            )
 
     if errors:
         print("Core timing guard FAILED:")

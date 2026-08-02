@@ -96,16 +96,22 @@ Do not modify its technical content unless explicitly requested by the maintaine
 
 ---
 
-## Framework Boundary And ESP-IDF Examples
+## Framework Boundary And PioArduino
 
-- Public/core code must stay framework-neutral unless a platform-specific
-  single-wire timing path is explicitly documented and guarded.
-- Core code must not depend on Arduino runtime APIs.
-- Arduino examples may use Arduino APIs.
-- ESP-IDF examples must be native IDF programs using `app_main`, native driver
-  headers, `esp_timer`, `vTaskDelay`, and fixed C buffers.
-- ESP-IDF examples must not include Arduino CLI source or use
-  `ArduinoCompat`, `IdfArduinoCompat`, `Arduino.h`, `Wire.h`, `String`,
-  `Serial`, `TwoWire`, `HardwareSerial`, or Arduino-style facades.
-- Keep command parity through repo-local native command contracts/checks rather
-  than sharing Arduino implementation.
+- The currently supported firmware framework is Arduino on ESP32-S2/S3 through
+  this exact PioArduino platform pin:
+  `https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip`.
+- Public/core code must stay framework-neutral. A future framework may provide
+  another Backend without changing Bus or Driver, but native ESP-IDF support is
+  not implemented, built, tested, packaged, advertised, or required now.
+- Core code must not depend on Arduino runtime APIs, ESP-IDF, FreeRTOS, ESP32
+  GPIO headers, board pins, or scheduler policy.
+- The explicit ESP32 Arduino transport may use guarded Arduino-ESP32 low-level
+  SoC/FreeRTOS facilities supplied by PioArduino. It must compile only in
+  `framework = arduino` environments and must not create a parallel
+  `framework = espidf` path.
+- Do not install or select a standalone ESP-IDF SDK, download a PlatformIO
+  `framework-espidf` package, invoke `idf.py`, ship an ESP-IDF example/component,
+  or add native-IDF CI/package gates.
+- Keep exactly two shipped Arduino examples: one full single-device CLI and one
+  concise multi-device CLI.
