@@ -746,7 +746,9 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
   for (uint8_t value : expected) {
     for (int bit = 7; bit >= 0; --bit) {
       queueLevel(readTransport,
-                 ((value >> static_cast<uint32_t>(bit)) & 0x01u) != 0u);
+                 ((static_cast<uint32_t>(value) >>
+                   static_cast<uint32_t>(bit)) &
+                  0x01u) != 0u);
     }
   }
   queueLevel(readTransport, true);
@@ -815,7 +817,9 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
   for (uint8_t value : expected) {
     for (int bit = 7; bit >= 0; --bit) {
       queueLevel(standardReadTransport,
-                 ((value >> static_cast<uint32_t>(bit)) & 0x01u) != 0u);
+                 ((static_cast<uint32_t>(value) >>
+                   static_cast<uint32_t>(bit)) &
+                  0x01u) != 0u);
     }
   }
   queueLevel(standardReadTransport, true);

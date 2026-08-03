@@ -217,6 +217,23 @@ Status mapCode(const TransferResult& result) {
   return Status::Error(Err::IO_ERROR, result.detail);
 }
 
+Status waitForHighDeadline(const SingleWireTransport& transport,
+                           uint64_t deadlineUs,
+                           TransferResult& result) {
+  result = transport.waitUntilUs(deadlineUs, transport.user);
+  if (!validAuxiliaryResult(result, TransferPhase::WAIT_HIGH)) {
+    return Status::Error(Err::IO_ERROR, result.detail);
+  }
+  const Status waitStatus = mapCode(result);
+  if (!waitStatus.ok()) {
+    return waitStatus;
+  }
+  if (transport.nowUs(transport.user) < deadlineUs) {
+    return Status::Error(Err::CLOCK_STALLED);
+  }
+  return Status::Ok();
+}
+
 }  // namespace
 
 Status Bus::bind(const BusConfig& config) {
@@ -390,7 +407,17 @@ Status Bus::_executeWrite(const SingleWireTransfer& transfer,
 
   _lastWriteCycle = result;
   TransferResult hold{};
-  const Status holdStatus = _completeWriteHighHold(hold);
+  Status holdStatus{};
+  if (_writeHighUntilUs == std::numeric_limits<uint64_t>::max()) {
+    holdStatus = waitForHighDeadline(_transport, _writeHighUntilUs, hold);
+    _lastWriteCycle.hold = hold;
+    _lastWriteCycle.holdCompleted = holdStatus.ok();
+    if (holdStatus.ok()) {
+      _writeHighUntilUs = 0;
+    }
+  } else {
+    holdStatus = _completeWriteHighHold(hold);
+  }
   result = _lastWriteCycle;
   if (!frameStatus.ok()) {
     return frameStatus;
@@ -463,18 +490,12 @@ Status Bus::_completeWriteHighHold(TransferResult& result) {
     return Status::Ok();
   }
 
-  result = _transport.waitUntilUs(_writeHighUntilUs, _transport.user);
+  const Status waitStatus =
+      waitForHighDeadline(_transport, _writeHighUntilUs, result);
   _lastWriteCycle.hold = result;
   _lastWriteCycle.holdCompleted = false;
-  if (!validAuxiliaryResult(result, TransferPhase::WAIT_HIGH)) {
-    return Status::Error(Err::IO_ERROR, result.detail);
-  }
-  const Status waitStatus = mapCode(result);
   if (!waitStatus.ok()) {
     return waitStatus;
-  }
-  if (_transport.nowUs(_transport.user) < _writeHighUntilUs) {
-    return Status::Error(Err::CLOCK_STALLED);
   }
 
   _lastWriteCycle.holdCompleted = true;

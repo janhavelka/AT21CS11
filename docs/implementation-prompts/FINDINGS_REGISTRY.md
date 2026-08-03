@@ -25,7 +25,7 @@ acceptance gate, not shared implementation ownership.
 | P-11 | Discovery failures are collapsed to generic absence | `src/AT21CS.cpp:221` | 2 | Exact transport result and detail survive initialization | OPEN | Stage 5 lifecycle/fault matrix |
 | P-12 | Check Lock sends opcode `2h` with `R/W=1` and omits `0x60` | `src/AT21CS.cpp:744` | 3 | Exact `2h/W -> 0x60` trace with ACK/NACK on memory address | OPEN | Stage 5 trace oracle; Stage 8 sacrificial verification |
 | P-13 | Freeze status invents an undocumented opcode `1h/R` query | `src/AT21CS.cpp:901` | 3 | Public query removed; no `1h/R` frame remains | OPEN | Stage 5 symbol/trace oracle |
-| P-14 | CRC tests calculate their expectation with the function under test | `test/test_basic.cpp` | 5 | Independent CRC-8/Maxim vectors | OPEN | Stage 8 serial-number reads |
+| P-14 | CRC tests calculate their expectation with the function under test | `test/test_basic.cpp` | 5 | Independent CRC-8/Maxim vectors | CLOSED | Stage 8 serial-number reads |
 | P-15 | Arbitrary delay callbacks and cached CPU frequency can invalidate bit timing | ESP32 backend delay path | 4 | Timing owned by backend; no user delay inside bit slots; explicit DFS policy | CLOSED | Stage 8 CPU/DFS/load captures (`HIL_ONLY`) |
 | P-16 | Speed-query APIs reset/set the state before querying it | `src/AT21CS.cpp:948` | 2 | Destructive query APIs removed; cached speed plus explicit recovery | OPEN | Stage 5 event oracle |
 | P-17 | Physical Reset, Discovery, Standard sampling, and post-frame timing do not meet the current datasheet contract | current timing tables/backend waveform | 4 | Universal 600 us Reset, one-pulse Discovery, absolute read sample, qualified post-frame high | CLOSED | Stage 8 timing matrix (`HIL_ONLY`) |
@@ -67,7 +67,7 @@ acceptance gate, not shared implementation ownership.
 | ID | Finding | Evidence | Owner | Required owner evidence | Status | Downstream verification |
 |---|---|---|---:|---|---|---|
 | Q-01 | Repository advertises an unwanted, unmaintained native ESP-IDF support path instead of the maintainer-selected Arduino/PioArduino matrix | ESP32 build metadata, fixtures, and docs | 4 | Stage 4 defines/builds only S2/S3 `framework = arduino` through exact PioArduino 55.03.311; removes `espidf` framework metadata, native-IDF fixture/component, and IDF-only root build path | CLOSED | Stage 7 package/CI deny native-IDF artifacts and stale docs/checkers; Stage 8 release audit |
-| Q-02 | Native tests cover only 25 cases and encode unsafe behavior | `test/test_basic.cpp` | 5 | Public-API matrix and event/timing oracle | OPEN | Stage 7 CI; Stage 8 independent test review |
+| Q-02 | Native tests cover only 25 cases and encode unsafe behavior | `test/test_basic.cpp` | 5 | Public-API matrix and event/timing oracle | CLOSED | Stage 7 CI; Stage 8 independent test review |
 | Q-03 | Hardware timing is unvalidated despite production claims | README and platform docs | 8 | Explicit HIL rows and raw capture hashes | OPEN | Maintainer review before stable finalization |
 | Q-04 | Example helpers use repository-root includes and do not compile as consumers | `examples/common/Log.h:13` | 6 | Local includes and independent example builds | OPEN | Stage 7 packaged consumer builds |
 | Q-05 | Example command-contract checks accept placeholders/no-ops | Arduino CLI checker and examples | 6 | Semantic manifest/handler checks for both supported Arduino CLIs | OPEN | Stage 7 static-contract CI |

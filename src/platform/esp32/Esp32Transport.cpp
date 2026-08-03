@@ -1029,7 +1029,9 @@ bool Esp32Transport::_writeEightBits(
   allBitsDelivered = false;
   for (int bit = 7; bit >= 0; --bit) {
     bool bitDelivered = false;
-    if (!_writeBit(((value >> static_cast<uint32_t>(bit)) & 0x01u) != 0u,
+    if (!_writeBit(((static_cast<uint32_t>(value) >>
+                     static_cast<uint32_t>(bit)) &
+                    0x01u) != 0u,
                    timing, clock, &bitDelivered)) {
       allBitsDelivered = bit == 0 && bitDelivered;
       return false;

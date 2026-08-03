@@ -184,15 +184,18 @@ Status Driver::probe() {
   if (!boundStatus.ok()) {
     return boundStatus;
   }
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED);
-  }
   if (_state == DriverState::BUSY) {
     return Status::Error(Err::BUSY);
+  }
+  if (_state == DriverState::UNINIT) {
+    return Status::Error(Err::NOT_INITIALIZED);
   }
   if (_state != DriverState::READY && _state != DriverState::DEGRADED &&
       _state != DriverState::OFFLINE) {
     return Status::Error(Err::INVALID_STATE);
+  }
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED);
   }
 
   const DriverState entryState = _state;
@@ -865,8 +868,10 @@ uint8_t Driver::crc8Maxim(const uint8_t* data, size_t length) {
 
 uint8_t Driver::_deviceAddress(uint8_t opcode, bool read) const {
   const uint8_t readBit = read ? 0x01u : 0x00u;
-  return static_cast<uint8_t>((opcode << 4u) |
-                              ((_config.addressBits & 0x07u) << 1u) |
+  return static_cast<uint8_t>((static_cast<uint32_t>(opcode) << 4u) |
+                              (static_cast<uint32_t>(
+                                   _config.addressBits & 0x07u)
+                               << 1u) |
                               readBit);
 }
 
@@ -877,11 +882,6 @@ bool Driver::_hasCurrentBusBinding() const {
   const BusSnapshot busState = _bus->snapshot();
   return busState.bound && busState.bindingEpochValid &&
          busState.bindingEpoch == _seenBusBindingEpoch;
-}
-
-bool Driver::_canUseNormalIo() const {
-  return _initialized &&
-         (_state == DriverState::READY || _state == DriverState::DEGRADED);
 }
 
 Status Driver::_requireBound() const {
@@ -903,14 +903,18 @@ Status Driver::_requireInitializedForIo() const {
   if (!boundStatus.ok()) {
     return boundStatus;
   }
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED);
-  }
   if (_state == DriverState::BUSY) {
     return Status::Error(Err::BUSY);
   }
-  if (!_canUseNormalIo()) {
+  if (_state == DriverState::UNINIT ||
+      (_state == DriverState::OFFLINE && !_initialized)) {
+    return Status::Error(Err::NOT_INITIALIZED);
+  }
+  if (_state != DriverState::READY && _state != DriverState::DEGRADED) {
     return Status::Error(Err::INVALID_STATE);
+  }
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED);
   }
   return Status::Ok();
 }
@@ -1149,7 +1153,10 @@ Status Driver::_writePageRaw(uint8_t opcode,
 
   WriteCycleResult writeCycle{};
   const Status status = _bus->_executeWrite(transfer, writeCycle);
-  result.lastPageBytesAccepted = writeCycle.frame.dataBytesTransferred;
+  result.lastPageBytesAccepted =
+      writeCycle.frame.dataBytesTransferred <= length
+          ? writeCycle.frame.dataBytesTransferred
+          : 0u;
   if (status.ok()) {
     result.bytesCommitted = length;
     result.lastPageEffect = WriteEffect::COMMITTED;

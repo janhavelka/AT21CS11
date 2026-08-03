@@ -4,7 +4,7 @@
 #include <unity.h>
 
 #include "AT21CS/AT21CS.h"
-#include "support/DriverTestSupport.h"
+#include "support/TestBuilders.h"
 #include "support/TestAccess.h"
 
 using namespace AT21CS;
@@ -25,13 +25,78 @@ TransferScript transferFailure(TransportCode code,
   return script;
 }
 
+ExpectedTransfer expectedEepromRead(uint8_t addressBits = 0u,
+                                    uint8_t address = 0u,
+                                    size_t length = 1u,
+                                    SpeedMode speed =
+                                        SpeedMode::HIGH_SPEED) {
+  return expected::randomRead(
+      expected::rawAddress(expected::EEPROM_OPCODE, addressBits, false),
+      address,
+      expected::rawAddress(expected::EEPROM_OPCODE, addressBits, true),
+      length, speed,
+      speed == SpeedMode::HIGH_SPEED
+          ? expected::HIGH_SPEED_POST_HIGH_US
+          : expected::STANDARD_SPEED_POST_HIGH_US);
+}
+
+ExpectedTransfer expectedSecurityRead(uint8_t addressBits = 0u,
+                                      uint8_t address = 0u,
+                                      size_t length = 1u,
+                                      SpeedMode speed =
+                                          SpeedMode::HIGH_SPEED) {
+  return expected::randomRead(
+      expected::rawAddress(expected::SECURITY_OPCODE, addressBits, false),
+      address,
+      expected::rawAddress(expected::SECURITY_OPCODE, addressBits, true),
+      length, speed,
+      speed == SpeedMode::HIGH_SPEED
+          ? expected::HIGH_SPEED_POST_HIGH_US
+          : expected::STANDARD_SPEED_POST_HIGH_US);
+}
+
+ExpectedTransfer expectedSpeedChange(uint8_t opcode,
+                                     uint8_t addressBits = 0u,
+                                     SpeedMode current =
+                                         SpeedMode::HIGH_SPEED) {
+  return expected::addressOnly(
+      expected::rawAddress(opcode, addressBits, false), current,
+      expected::SPEED_CHANGE_POST_HIGH_US);
+}
+
+ExpectedTransfer expectedManufacturerIdRead(
+    uint8_t addressBits = 0u,
+    SpeedMode speed = SpeedMode::HIGH_SPEED) {
+  return expected::directRead(
+      expected::rawAddress(expected::MANUFACTURER_ID_OPCODE,
+                           addressBits, true),
+      3u, speed,
+      speed == SpeedMode::HIGH_SPEED
+          ? expected::HIGH_SPEED_POST_HIGH_US
+          : expected::STANDARD_SPEED_POST_HIGH_US);
+}
+
 }  // namespace
 
 void test_driver_bind_is_callback_free() {
+  Bus unboundBus;
+  Driver unboundDriver;
+  assertStatus(Err::NOT_BOUND,
+               unboundDriver.bind(unboundBus, Config{}));
+  TEST_ASSERT_FALSE(unboundDriver.isBound());
+
   ScriptedTransport fake;
   Bus bus;
   bindBus(bus, fake);
   const size_t eventsBefore = fake.eventCount;
+
+  TestAccess::seedBindingEpoch(bus, bus.snapshot().bindingEpoch, false);
+  Driver invalidEpochDriver;
+  assertStatus(Err::INVALID_STATE,
+               invalidEpochDriver.bind(bus, Config{}));
+  TEST_ASSERT_FALSE(invalidEpochDriver.isBound());
+  TEST_ASSERT_EQUAL_HEX8(0u, bus.snapshot().claimedAddressMask);
+  TestAccess::seedBindingEpoch(bus, bus.snapshot().bindingEpoch, true);
 
   Driver driver;
   Config config{};
@@ -65,7 +130,8 @@ void test_driver_invalid_rebind_preserves_working_binding() {
   TEST_ASSERT_EQUAL_UINT8(0x00u, busB.snapshot().claimedAddressMask);
 
   const uint8_t expected = 0x5Au;
-  TEST_ASSERT_TRUE(fakeA.queueTransfer(randomReadOk(&expected, 1)));
+  TEST_ASSERT_TRUE(fakeA.queueTransfer(withExpected(
+      randomReadOk(&expected, 1u), expectedEepromRead(2u))));
   uint8_t value = 0;
   TEST_ASSERT_TRUE(driver.readEeprom(0, &value, 1).ok());
   TEST_ASSERT_EQUAL_HEX8(expected, value);
@@ -87,6 +153,8 @@ void test_standard_startup_requires_explicit_at21cs01() {
   TEST_ASSERT_TRUE(driver.bind(bus, config).ok());
   driver.end();
   config.addressBits = 8;
+  assertStatus(Err::INVALID_CONFIG, driver.bind(bus, config));
+  config.addressBits = 0xFFu;
   assertStatus(Err::INVALID_CONFIG, driver.bind(bus, config));
   config.addressBits = 0;
   config.expectedPart = static_cast<PartType>(0xFFu);
@@ -131,7 +199,7 @@ void test_recover_after_boot_absence_needs_no_config_resupply() {
   assertStatus(Err::NOT_PRESENT, driver.begin(bus, config));
 
   queuePresence(fake, true);
-  queueInitialize(fake, CS11_ID);
+  queueInitialize(fake, CS11_ID, false, 1u);
   TEST_ASSERT_TRUE(driver.recover().ok());
   TEST_ASSERT_TRUE(driver.isInitialized());
   TEST_ASSERT_TRUE(driver.isOnline());
@@ -197,6 +265,9 @@ void test_initialize_failures_preserve_exact_status_and_identity_nack_state() {
     bindBus(bus, fake);
     queueResetOk(fake);
     TransferScript nack{};
+    nack.expected = expected::directRead(
+        0xC1u, 3u, SpeedMode::HIGH_SPEED,
+        expected::HIGH_SPEED_POST_HIGH_US);
     nack.result.code = TransportCode::NACK;
     nack.result.phase = TransferPhase::DEVICE_ADDRESS_READ;
     TEST_ASSERT_TRUE(fake.queueTransfer(nack));
@@ -222,6 +293,9 @@ void test_initialize_failures_preserve_exact_status_and_identity_nack_state() {
       TransferScript failure =
           transferFailure(TransportCode::IO_ERROR, phases[index],
                           static_cast<int32_t>(300u + index));
+      failure.expected = expected::directRead(
+          0xC1u, 3u, SpeedMode::HIGH_SPEED,
+          expected::HIGH_SPEED_POST_HIGH_US);
       if (phases[index] == TransferPhase::DATA_READ ||
           phases[index] == TransferPhase::STOP) {
         failure.result.firstDeviceAddressAcked = true;
@@ -267,8 +341,11 @@ void test_initialize_failures_preserve_exact_status_and_identity_nack_state() {
     Bus bus;
     bindBus(bus, fake);
     queueResetOk(fake);
-    TEST_ASSERT_TRUE(fake.queueTransfer(manufacturerIdOk(CS01_ID)));
+    TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+        manufacturerIdOk(CS01_ID), expectedManufacturerIdRead())));
     TransferScript speedNack{};
+    speedNack.expected = expectedSpeedChange(
+        expected::STANDARD_SPEED_OPCODE);
     speedNack.result.code = TransportCode::NACK;
     speedNack.result.phase = TransferPhase::DEVICE_ADDRESS_WRITE;
     TEST_ASSERT_TRUE(fake.queueTransfer(speedNack));
@@ -296,10 +373,14 @@ void test_initialize_failures_preserve_exact_status_and_identity_nack_state() {
       Bus bus;
       bindBus(bus, fake);
       queueResetOk(fake);
-      TEST_ASSERT_TRUE(fake.queueTransfer(manufacturerIdOk(CS01_ID)));
+      TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+          manufacturerIdOk(CS01_ID), expectedManufacturerIdRead())));
       const int32_t expectedDetail = static_cast<int32_t>(450u + index);
-      TEST_ASSERT_TRUE(fake.queueTransfer(transferFailure(
-          TransportCode::TIMEOUT, speedFailurePhases[index], expectedDetail)));
+      TransferScript speedFailure = transferFailure(
+          TransportCode::TIMEOUT, speedFailurePhases[index], expectedDetail);
+      speedFailure.expected = expectedSpeedChange(
+          expected::STANDARD_SPEED_OPCODE);
+      TEST_ASSERT_TRUE(fake.queueTransfer(speedFailure));
 
       Driver driver;
       Config config{};
@@ -326,9 +407,12 @@ void test_initialize_failures_preserve_exact_status_and_identity_nack_state() {
     Bus bus;
     bindBus(bus, fake);
     queueResetOk(fake);
-    TEST_ASSERT_TRUE(fake.queueTransfer(manufacturerIdOk(CS01_ID)));
+    TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+        manufacturerIdOk(CS01_ID), expectedManufacturerIdRead())));
     TransferScript speedFailure = transferFailure(
         TransportCode::IO_ERROR, TransferPhase::STOP, 401);
+    speedFailure.expected = expectedSpeedChange(
+        expected::STANDARD_SPEED_OPCODE);
     speedFailure.result.firstDeviceAddressAcked = true;
     TEST_ASSERT_TRUE(fake.queueTransfer(speedFailure));
     Driver driver;
@@ -354,22 +438,28 @@ void test_initialize_is_uninit_only_and_ordinary_calls_never_reset() {
   assertStatus(Err::INVALID_STATE, driver.initialize());
 
   uint8_t eeprom = 0x11;
-  TEST_ASSERT_TRUE(fake.queueTransfer(randomReadOk(&eeprom, 1)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      randomReadOk(&eeprom, 1u), expectedEepromRead())));
   uint8_t output = 0;
   TEST_ASSERT_TRUE(driver.readEeprom(0, &output, 1).ok());
   const uint8_t securityByte = 0x22u;
-  TEST_ASSERT_TRUE(fake.queueTransfer(randomReadOk(&securityByte, 1)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      randomReadOk(&securityByte, 1u), expectedSecurityRead())));
   TEST_ASSERT_TRUE(driver.readSecurity(0, &output, 1).ok());
-  TEST_ASSERT_TRUE(fake.queueTransfer(manufacturerIdOk(CS11_ID)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      manufacturerIdOk(CS11_ID), expectedManufacturerIdRead())));
   uint32_t manufacturerId = 0;
   TEST_ASSERT_TRUE(driver.readManufacturerId(manufacturerId).ok());
   const uint8_t serialBytes[8] = {0xA0u, 1u, 2u, 3u,
                                   4u,    5u, 6u, 0xF8u};
   TEST_ASSERT_TRUE(
-      fake.queueTransfer(randomReadOk(serialBytes, sizeof(serialBytes))));
+      fake.queueTransfer(withExpected(
+          randomReadOk(serialBytes, sizeof(serialBytes)),
+          expectedSecurityRead(0u, 0u, sizeof(serialBytes)))));
   SerialNumberInfo serial{};
   TEST_ASSERT_TRUE(driver.readSerialNumber(serial).ok());
-  TEST_ASSERT_TRUE(fake.queueTransfer(manufacturerIdOk(CS11_ID)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      manufacturerIdOk(CS11_ID), expectedManufacturerIdRead())));
   TEST_ASSERT_TRUE(driver.probe().ok());
   TEST_ASSERT_TRUE(driver.setSpeedMode(SpeedMode::HIGH_SPEED).ok());
   TEST_ASSERT_EQUAL_UINT32(resetCount, fake.resetCalls);
@@ -438,7 +528,8 @@ void test_state_admission_and_centralized_finish_are_exact() {
 
   TestAccess::seedDriverState(driver, DriverState::DEGRADED, true);
   const uint8_t recoveredValue = 0x31u;
-  TEST_ASSERT_TRUE(fake.queueTransfer(randomReadOk(&recoveredValue, 1)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      randomReadOk(&recoveredValue, 1u), expectedEepromRead())));
   TEST_ASSERT_TRUE(driver.readEeprom(0, &output, 1).ok());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
                           static_cast<uint8_t>(driver.state()));
@@ -446,6 +537,7 @@ void test_state_admission_and_centralized_finish_are_exact() {
   TestAccess::seedDriverState(driver, DriverState::READY, true);
   TransferScript failure = transferFailure(TransportCode::TIMEOUT,
                                            TransferPhase::START, 818);
+  failure.expected = expectedEepromRead();
   TEST_ASSERT_TRUE(fake.queueTransfer(failure));
   const uint32_t failuresBefore = driver.snapshot().totalFailures;
   assertStatus(Err::TRANSPORT_TIMEOUT, driver.readEeprom(0, &output, 1));
@@ -497,7 +589,8 @@ void test_binding_epoch_blocks_stale_traffic_until_recover() {
   queueInitialize(replacement, CS11_ID);
   TEST_ASSERT_TRUE(driver.recover().ok());
   const uint8_t expected = 0xA6u;
-  TEST_ASSERT_TRUE(replacement.queueTransfer(randomReadOk(&expected, 1)));
+  TEST_ASSERT_TRUE(replacement.queueTransfer(withExpected(
+      randomReadOk(&expected, 1u), expectedEepromRead())));
   TEST_ASSERT_TRUE(driver.readEeprom(0, &value, 1).ok());
   TEST_ASSERT_EQUAL_HEX8(expected, value);
 }
@@ -519,7 +612,8 @@ void test_shared_reset_generation_resynchronizes_without_reset_loop() {
   const size_t resetsBefore = fake.resetCalls;
 
   const uint8_t expected = 0x29u;
-  TEST_ASSERT_TRUE(fake.queueTransfer(randomReadOk(&expected, 1)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      randomReadOk(&expected, 1u), expectedEepromRead())));
   uint8_t value = 0;
   TEST_ASSERT_TRUE(first.readEeprom(0, &value, 1).ok());
   TEST_ASSERT_EQUAL_UINT32(resetsBefore, fake.resetCalls);
@@ -543,9 +637,14 @@ void test_standard_speed_is_restored_lazily_after_shared_reset() {
   const size_t captureBefore = fake.capturedCount;
   const size_t resetsBefore = fake.resetCalls;
 
-  TEST_ASSERT_TRUE(fake.queueTransfer(addressOnlyOk()));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      addressOnlyOk(),
+      expectedSpeedChange(expected::STANDARD_SPEED_OPCODE))));
   const uint8_t expected = 0x7Cu;
-  TEST_ASSERT_TRUE(fake.queueTransfer(randomReadOk(&expected, 1)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      randomReadOk(&expected, 1u),
+      expectedEepromRead(0u, 0u, 1u,
+                         SpeedMode::STANDARD_SPEED))));
   uint8_t value = 0;
   TEST_ASSERT_TRUE(standard.readEeprom(0, &value, 1).ok());
   TEST_ASSERT_EQUAL_UINT32(resetsBefore, fake.resetCalls);
@@ -571,6 +670,8 @@ void test_standard_speed_is_restored_lazily_after_shared_reset() {
                    resetterConfig, CS01_ID);
   TransferScript ambiguousRestore = transferFailure(
       TransportCode::IO_ERROR, TransferPhase::STOP, 1201);
+  ambiguousRestore.expected = expectedSpeedChange(
+      expected::STANDARD_SPEED_OPCODE);
   ambiguousRestore.result.firstDeviceAddressAcked = true;
   TEST_ASSERT_TRUE(ambiguousFake.queueTransfer(ambiguousRestore));
   uint8_t blockedValue = 0;
@@ -595,6 +696,8 @@ void test_standard_speed_is_restored_lazily_after_shared_reset() {
   const size_t retryTransfers = retryFake.transferCalls;
   const uint32_t retryFailures = retryStandard.snapshot().totalFailures;
   TransferScript restoreNack{};
+  restoreNack.expected = expectedSpeedChange(
+      expected::STANDARD_SPEED_OPCODE);
   restoreNack.result.code = TransportCode::NACK;
   restoreNack.result.phase = TransferPhase::DEVICE_ADDRESS_WRITE;
   TEST_ASSERT_TRUE(retryFake.queueTransfer(restoreNack));
@@ -609,6 +712,8 @@ void test_standard_speed_is_restored_lazily_after_shared_reset() {
 
   TransferScript restoreStartFailure = transferFailure(
       TransportCode::TIMEOUT, TransferPhase::START, 1202);
+  restoreStartFailure.expected = expectedSpeedChange(
+      expected::STANDARD_SPEED_OPCODE);
   restoreStartFailure.result.stopCompleted = true;
   TEST_ASSERT_TRUE(retryFake.queueTransfer(restoreStartFailure));
   assertStatus(Err::TRANSPORT_TIMEOUT,
@@ -616,9 +721,14 @@ void test_standard_speed_is_restored_lazily_after_shared_reset() {
   TEST_ASSERT_TRUE(retryStandard.isSpeedKnown());
   TEST_ASSERT_EQUAL_UINT32(retryTransfers + 2u, retryFake.transferCalls);
 
-  TEST_ASSERT_TRUE(retryFake.queueTransfer(addressOnlyOk()));
+  TEST_ASSERT_TRUE(retryFake.queueTransfer(withExpected(
+      addressOnlyOk(),
+      expectedSpeedChange(expected::STANDARD_SPEED_OPCODE))));
   const uint8_t retryValue = 0x63u;
-  TEST_ASSERT_TRUE(retryFake.queueTransfer(randomReadOk(&retryValue, 1)));
+  TEST_ASSERT_TRUE(retryFake.queueTransfer(withExpected(
+      randomReadOk(&retryValue, 1u),
+      expectedEepromRead(0u, 0u, 1u,
+                         SpeedMode::STANDARD_SPEED))));
   TEST_ASSERT_TRUE(retryStandard.readEeprom(0, &blockedValue, 1).ok());
   TEST_ASSERT_EQUAL_HEX8(retryValue, blockedValue);
   TEST_ASSERT_EQUAL_UINT32(retryTransfers + 4u, retryFake.transferCalls);
@@ -660,6 +770,7 @@ void test_speed_failure_evidence_controls_speed_knowledge() {
   initializeDriver(driver, bus, fake, config, CS01_ID);
 
   TransferScript nack{};
+  nack.expected = expectedSpeedChange(expected::STANDARD_SPEED_OPCODE);
   nack.result.code = TransportCode::NACK;
   nack.result.phase = TransferPhase::DEVICE_ADDRESS_WRITE;
   TEST_ASSERT_TRUE(fake.queueTransfer(nack));
@@ -672,13 +783,17 @@ void test_speed_failure_evidence_controls_speed_knowledge() {
 
   TransferScript startFailure = transferFailure(
       TransportCode::TIMEOUT, TransferPhase::START, 1401);
+  startFailure.expected = expectedSpeedChange(
+      expected::STANDARD_SPEED_OPCODE);
   startFailure.result.stopCompleted = true;
   TEST_ASSERT_TRUE(fake.queueTransfer(startFailure));
   assertStatus(Err::TRANSPORT_TIMEOUT,
                driver.setSpeedMode(SpeedMode::STANDARD_SPEED));
   TEST_ASSERT_TRUE(driver.isSpeedKnown());
 
-  TEST_ASSERT_TRUE(fake.queueTransfer(addressOnlyOk()));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      addressOnlyOk(),
+      expectedSpeedChange(expected::STANDARD_SPEED_OPCODE))));
   TEST_ASSERT_TRUE(driver.setSpeedMode(SpeedMode::STANDARD_SPEED).ok());
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(SpeedMode::STANDARD_SPEED),
@@ -689,7 +804,10 @@ void test_speed_failure_evidence_controls_speed_knowledge() {
   TEST_ASSERT_EQUAL_UINT32(
       650u, fake.captured[fake.capturedCount - 1u].minimumPostTransferHighUs);
 
-  TEST_ASSERT_TRUE(fake.queueTransfer(addressOnlyOk()));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      addressOnlyOk(),
+      expectedSpeedChange(expected::HIGH_SPEED_OPCODE, 0u,
+                          SpeedMode::STANDARD_SPEED))));
   TEST_ASSERT_TRUE(driver.setSpeedMode(SpeedMode::HIGH_SPEED).ok());
   const CapturedTransfer& highTransition =
       fake.captured[fake.capturedCount - 1u];
@@ -700,8 +818,11 @@ void test_speed_failure_evidence_controls_speed_knowledge() {
   TEST_ASSERT_EQUAL_UINT32(650u,
                            highTransition.minimumPostTransferHighUs);
 
-  TEST_ASSERT_TRUE(fake.queueTransfer(transferFailure(
-      TransportCode::TIMEOUT, TransferPhase::DEVICE_ADDRESS_WRITE, 1402)));
+  TransferScript addressedFailure = transferFailure(
+      TransportCode::TIMEOUT, TransferPhase::DEVICE_ADDRESS_WRITE, 1402);
+  addressedFailure.expected = expectedSpeedChange(
+      expected::STANDARD_SPEED_OPCODE);
+  TEST_ASSERT_TRUE(fake.queueTransfer(addressedFailure));
   assertStatus(Err::TRANSPORT_TIMEOUT,
                driver.setSpeedMode(SpeedMode::STANDARD_SPEED));
   TEST_ASSERT_FALSE(driver.isSpeedKnown());
@@ -732,6 +853,8 @@ void test_speed_failure_evidence_controls_speed_knowledge() {
   initializeDriver(malformedStartDriver, malformedStartBus,
                    malformedStartFake, config, CS01_ID);
   TransferScript malformedStart{};
+  malformedStart.expected = expectedSpeedChange(
+      expected::STANDARD_SPEED_OPCODE);
   malformedStart.result.code = TransportCode::OK;
   malformedStart.result.phase = TransferPhase::START;
   TEST_ASSERT_TRUE(malformedStartFake.queueTransfer(malformedStart));
@@ -747,6 +870,8 @@ void test_speed_failure_evidence_controls_speed_knowledge() {
   initializeDriver(stopDriver, stopBus, stopFake, config, CS01_ID);
   TransferScript stopFailure = transferFailure(
       TransportCode::IO_ERROR, TransferPhase::STOP, 1403);
+  stopFailure.expected = expectedSpeedChange(
+      expected::STANDARD_SPEED_OPCODE);
   stopFailure.result.firstDeviceAddressAcked = true;
   TEST_ASSERT_TRUE(stopFake.queueTransfer(stopFailure));
   assertStatus(Err::IO_ERROR,
@@ -767,6 +892,8 @@ void test_at21cs11_standard_rejection_is_silent_and_untracked() {
 
   assertStatus(Err::UNSUPPORTED_COMMAND,
                driver.setSpeedMode(SpeedMode::STANDARD_SPEED));
+  assertStatus(Err::INVALID_PARAM,
+               driver.setSpeedMode(static_cast<SpeedMode>(0xFFu)));
   const SettingsSnapshot after = driver.snapshot();
   TEST_ASSERT_EQUAL_UINT32(eventsBefore, fake.eventCount);
   TEST_ASSERT_EQUAL_UINT32(before.totalSuccess, after.totalSuccess);
@@ -853,7 +980,8 @@ void test_probe_is_nondestructive_tracked_and_offline_sticky_on_failure() {
   initializeDriver(driver, bus, fake, config, CS11_ID);
   const size_t resets = fake.resetCalls;
   const uint32_t successes = driver.snapshot().totalSuccess;
-  TEST_ASSERT_TRUE(fake.queueTransfer(manufacturerIdOk(CS11_ID)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      manufacturerIdOk(CS11_ID), expectedManufacturerIdRead())));
   TEST_ASSERT_TRUE(driver.probe().ok());
   const CapturedTransfer& probeFrame = fake.captured[fake.capturedCount - 1u];
   TEST_ASSERT_EQUAL_HEX8(0xC1u, probeFrame.deviceAddress);
@@ -865,12 +993,16 @@ void test_probe_is_nondestructive_tracked_and_offline_sticky_on_failure() {
 
   TransferScript readFailure = transferFailure(
       TransportCode::TIMEOUT, TransferPhase::START, 1701);
+  readFailure.expected = expectedEepromRead();
   TEST_ASSERT_TRUE(fake.queueTransfer(readFailure));
   uint8_t value = 0;
   assertStatus(Err::TRANSPORT_TIMEOUT, driver.readEeprom(0, &value, 1));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
                           static_cast<uint8_t>(driver.state()));
   TransferScript probeNack{};
+  probeNack.expected = expected::directRead(
+      0xC1u, 3u, SpeedMode::HIGH_SPEED,
+      expected::HIGH_SPEED_POST_HIGH_US);
   probeNack.result.code = TransportCode::NACK;
   probeNack.result.phase = TransferPhase::DEVICE_ADDRESS_READ;
   TEST_ASSERT_TRUE(fake.queueTransfer(probeNack));
@@ -881,12 +1013,14 @@ void test_probe_is_nondestructive_tracked_and_offline_sticky_on_failure() {
   TEST_ASSERT_EQUAL_UINT32(resets, fake.resetCalls);
 
   TestAccess::seedDriverState(driver, DriverState::OFFLINE, true);
-  TEST_ASSERT_TRUE(fake.queueTransfer(manufacturerIdOk(CS11_ID)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      manufacturerIdOk(CS11_ID), expectedManufacturerIdRead())));
   TEST_ASSERT_TRUE(driver.probe().ok());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::READY),
                           static_cast<uint8_t>(driver.state()));
 
-  TEST_ASSERT_TRUE(fake.queueTransfer(manufacturerIdOk(CS01_ID)));
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      manufacturerIdOk(CS01_ID), expectedManufacturerIdRead())));
   assertStatus(Err::PART_MISMATCH, driver.probe());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::FAULT),
                           static_cast<uint8_t>(driver.state()));
@@ -934,8 +1068,8 @@ void test_address_claims_are_per_bus_and_transactional() {
   TEST_ASSERT_TRUE(independent.bind(busB, config).ok());
   TEST_ASSERT_EQUAL_UINT8(0x80u, busA.snapshot().claimedAddressMask);
   TEST_ASSERT_EQUAL_UINT8(0x80u, busB.snapshot().claimedAddressMask);
-  queueInitialize(fakeA, CS11_ID);
-  queueInitialize(fakeB, CS11_ID);
+  queueInitialize(fakeA, CS11_ID, false, 7u);
+  queueInitialize(fakeB, CS11_ID, false, 7u);
   TEST_ASSERT_TRUE(first.initialize().ok());
   TEST_ASSERT_TRUE(independent.initialize().ok());
 }
@@ -958,11 +1092,130 @@ void test_replacement_preserves_claim_and_stale_owner_can_recover() {
   Driver alias;
   assertStatus(Err::INVALID_CONFIG, alias.bind(bus, config));
 
-  queueInitialize(replacement, CS11_ID);
+  queueInitialize(replacement, CS11_ID, false, 4u);
   TEST_ASSERT_TRUE(owner.recover().ok());
   const uint8_t expected = 0x44u;
-  TEST_ASSERT_TRUE(replacement.queueTransfer(randomReadOk(&expected, 1)));
+  TEST_ASSERT_TRUE(replacement.queueTransfer(withExpected(
+      randomReadOk(&expected, 1u), expectedEepromRead(4u))));
   uint8_t value = 0;
   TEST_ASSERT_TRUE(owner.readEeprom(0, &value, 1).ok());
   TEST_ASSERT_EQUAL_HEX8(expected, value);
+}
+
+void test_lifecycle_and_speed_transport_fault_matrix_tracks_once() {
+  static constexpr TransportCode CODES[] = {
+      TransportCode::TIMEOUT, TransportCode::LINE_STUCK,
+      TransportCode::IO_ERROR};
+  static constexpr Err ERRORS[] = {
+      Err::TRANSPORT_TIMEOUT, Err::LINE_STUCK, Err::IO_ERROR};
+  for (size_t index = 0u; index < 3u; ++index) {
+    const int32_t detail = static_cast<int32_t>(1800u + index * 10u);
+    for (uint8_t lifecycle = 0u; lifecycle < 3u; ++lifecycle) {
+      ScriptedTransport fake;
+      Bus bus;
+      bindBus(bus, fake);
+      Driver driver;
+      if (lifecycle != 1u) {
+        TEST_ASSERT_TRUE(driver.bind(bus, Config{}).ok());
+      }
+      BooleanScript reset{};
+      reset.result.code = CODES[index];
+      reset.result.phase = TransferPhase::RESET_LOW;
+      reset.result.detail = detail + lifecycle;
+      reset.verifyDeadline = true;
+      reset.expectedDeadlineUs = 6000u;
+      TEST_ASSERT_TRUE(fake.queueReset(reset));
+      Status status{};
+      if (lifecycle == 0u) {
+        status = driver.initialize();
+      } else if (lifecycle == 1u) {
+        status = driver.begin(bus, Config{});
+      } else {
+        status = driver.recover();
+      }
+      assertStatus(ERRORS[index], status);
+      TEST_ASSERT_EQUAL_INT32(detail + lifecycle, status.detail);
+      const SettingsSnapshot after = driver.snapshot();
+      TEST_ASSERT_TRUE(after.bound);
+      TEST_ASSERT_FALSE(after.initialized);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                              static_cast<uint8_t>(after.state));
+      TEST_ASSERT_EQUAL_UINT32(0u, after.totalSuccess);
+      TEST_ASSERT_EQUAL_UINT32(1u, after.totalFailures);
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ERRORS[index]),
+                              static_cast<uint8_t>(after.lastStatusCode));
+      TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ERRORS[index]),
+                              static_cast<uint8_t>(after.lastErrorCode));
+      TEST_ASSERT_EQUAL_INT32(detail + lifecycle, after.lastErrorDetail);
+      TEST_ASSERT_EQUAL_UINT32(1u, fake.resetCalls);
+      TEST_ASSERT_EQUAL_UINT32(0u, fake.transferCalls);
+      assertOracleClean(fake);
+    }
+
+    ScriptedTransport fake;
+    Bus bus;
+    bindBus(bus, fake);
+    Driver driver;
+    Config config{};
+    config.expectedPart = PartType::AT21CS01;
+    initializeDriver(driver, bus, fake, config, CS01_ID);
+    const SettingsSnapshot before = driver.snapshot();
+    TransferScript failure = transferFailure(
+        CODES[index], TransferPhase::START, detail + 3);
+    failure.expected = expectedSpeedChange(
+        expected::STANDARD_SPEED_OPCODE);
+    TEST_ASSERT_TRUE(fake.queueTransfer(failure));
+    assertStatus(ERRORS[index],
+                 driver.setSpeedMode(SpeedMode::STANDARD_SPEED));
+    const SettingsSnapshot after = driver.snapshot();
+    TEST_ASSERT_TRUE(after.speedKnown);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SpeedMode::HIGH_SPEED),
+                            static_cast<uint8_t>(after.activeSpeed));
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SpeedMode::HIGH_SPEED),
+                            static_cast<uint8_t>(after.configuredSpeed));
+    TEST_ASSERT_EQUAL_UINT32(before.totalSuccess, after.totalSuccess);
+    TEST_ASSERT_EQUAL_UINT32(before.totalFailures + 1u,
+                             after.totalFailures);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(ERRORS[index]),
+                            static_cast<uint8_t>(after.lastErrorCode));
+    TEST_ASSERT_EQUAL_INT32(detail + 3, after.lastErrorDetail);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::DEGRADED),
+                            static_cast<uint8_t>(after.state));
+    assertOracleClean(fake);
+  }
+
+  for (uint8_t lifecycle = 0u; lifecycle < 3u; ++lifecycle) {
+    ScriptedTransport fake;
+    Bus bus;
+    bindBus(bus, fake);
+    Driver driver;
+    if (lifecycle != 1u) {
+      TEST_ASSERT_TRUE(driver.bind(bus, Config{}).ok());
+    }
+    queueResetOk(fake);
+    TransferScript nack{};
+    nack.expected = expectedManufacturerIdRead();
+    nack.result.code = TransportCode::NACK;
+    nack.result.phase = TransferPhase::DEVICE_ADDRESS_READ;
+    TEST_ASSERT_TRUE(fake.queueTransfer(nack));
+    Status status{};
+    if (lifecycle == 0u) {
+      status = driver.initialize();
+    } else if (lifecycle == 1u) {
+      status = driver.begin(bus, Config{});
+    } else {
+      status = driver.recover();
+    }
+    assertStatus(Err::NACK_DEVICE_ADDRESS, status);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DriverState::OFFLINE),
+                            static_cast<uint8_t>(driver.state()));
+    TEST_ASSERT_TRUE(driver.isBound());
+    TEST_ASSERT_FALSE(driver.isInitialized());
+    TEST_ASSERT_EQUAL_UINT32(0u, driver.snapshot().totalSuccess);
+    TEST_ASSERT_EQUAL_UINT32(1u, driver.snapshot().totalFailures);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(Err::NACK_DEVICE_ADDRESS),
+                            static_cast<uint8_t>(
+                                driver.snapshot().lastErrorCode));
+    assertOracleClean(fake);
+  }
 }

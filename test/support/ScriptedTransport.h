@@ -29,7 +29,24 @@ struct FakeEvent {
   size_t index = 0;
 };
 
+struct ExpectedTransfer {
+  bool enabled = false;
+  SpeedMode speed = SpeedMode::HIGH_SPEED;
+  uint8_t deviceAddress = 0;
+  bool hasMemoryAddress = false;
+  uint8_t memoryAddress = 0;
+  uint8_t txData[8] = {};
+  size_t txLength = 0;
+  bool hasRepeatedStart = false;
+  uint8_t repeatedDeviceAddress = 0;
+  size_t rxLength = 0;
+  uint32_t minimumPostTransferHighUs = 0;
+  bool verifyDeadline = false;
+  uint64_t deadlineUs = 0;
+};
+
 struct TransferScript {
+  ExpectedTransfer expected{};
   TransferResult result{};
   uint8_t rxData[8] = {};
   size_t rxLength = 0;
@@ -38,11 +55,16 @@ struct TransferScript {
 struct BooleanScript {
   TransferResult result{};
   bool value = false;
+  bool verifyDeadline = false;
+  uint64_t expectedDeadlineUs = 0;
 };
 
 struct WaitScript {
   TransferResult result{};
   bool advanceToDeadline = false;
+  bool verifyDeadline = false;
+  uint64_t expectedDeadlineUs = 0;
+  bool allowArbitraryDeadline = false;
 };
 
 struct CapturedTransfer {
@@ -79,6 +101,10 @@ class ScriptedTransport {
   }
 
   bool queueTransfer(const TransferScript& script) {
+    if (!script.expected.enabled) {
+      mismatch = true;
+      return false;
+    }
     if (transferWrite >= TRANSFER_CAPACITY) {
       overflow = true;
       return false;
@@ -138,6 +164,17 @@ class ScriptedTransport {
     return count;
   }
 
+  bool allScriptsConsumed() const {
+    return transferRead == transferWrite && resetRead == resetWrite &&
+           presenceRead == presenceWrite && waitRead == waitWrite &&
+           nowRead == nowWrite;
+  }
+
+  bool oracleOk() const {
+    return !overflow && !mismatch && !transferDuringWriteHighHold &&
+           !resetDuringWriteHighHold && allScriptsConsumed();
+  }
+
   FakeEvent events[EVENT_CAPACITY] = {};
   size_t eventCount = 0;
   CapturedTransfer captured[TRANSFER_CAPACITY] = {};
@@ -167,6 +204,11 @@ class ScriptedTransport {
   uint64_t lastPresenceDeadlineUs = 0;
   bool nowObserved = false;
   bool overflow = false;
+  bool mismatch = false;
+  uint32_t mismatchFields = 0;
+  bool transferDuringWriteHighHold = false;
+  bool resetDuringWriteHighHold = false;
+  uint64_t activeWriteHighUntilUs = 0;
 
  private:
   static TransferResult scriptError() {
@@ -195,6 +237,10 @@ class ScriptedTransport {
       }
     }
     self.nowObserved = true;
+    if (self.activeWriteHighUntilUs != 0u &&
+        self.currentUs >= self.activeWriteHighUntilUs) {
+      self.activeWriteHighUntilUs = 0u;
+    }
     if (!self.record(FakeEventKind::NOW_US)) {
       return 0;
     }
@@ -206,6 +252,20 @@ class ScriptedTransport {
                                   void* user) {
     auto& self = *static_cast<ScriptedTransport*>(user);
     ++self.transferCalls;
+    if (self.activeWriteHighUntilUs != 0 &&
+        self.currentUs < self.activeWriteHighUntilUs) {
+      self.transferDuringWriteHighHold = true;
+      return scriptError();
+    }
+    if (transfer.txLength > 8u || transfer.rxLength > 8u ||
+        (transfer.txLength != 0u && transfer.txData == nullptr) ||
+        (transfer.rxLength != 0u && transfer.rxData == nullptr) ||
+        deadlineUs < self.currentUs ||
+        deadlineUs - self.currentUs != 9000u) {
+      self.mismatch = true;
+      self.mismatchFields |= 0x80000000u;
+      return scriptError();
+    }
     if (self.transferRead >= self.transferWrite ||
         self.capturedCount >= TRANSFER_CAPACITY) {
       self.overflow = true;
@@ -227,6 +287,45 @@ class ScriptedTransport {
     capture.rxLength = transfer.rxLength;
     capture.minimumPostTransferHighUs = transfer.minimumPostTransferHighUs;
     capture.deadlineUs = deadlineUs;
+
+    const ExpectedTransfer& expected = script.expected;
+    uint32_t mismatchFields = 0u;
+    mismatchFields |= expected.txLength <= 8u ? 0u : 0x0001u;
+    mismatchFields |= expected.speed == transfer.speed ? 0u : 0x0002u;
+    mismatchFields |= expected.deviceAddress == transfer.deviceAddress
+                          ? 0u : 0x0004u;
+    mismatchFields |= expected.hasMemoryAddress == transfer.hasMemoryAddress
+                          ? 0u : 0x0008u;
+    mismatchFields |= expected.memoryAddress == transfer.memoryAddress
+                          ? 0u : 0x0010u;
+    mismatchFields |= expected.txLength == transfer.txLength
+                          ? 0u : 0x0020u;
+    mismatchFields |= expected.hasRepeatedStart == transfer.hasRepeatedStart
+                          ? 0u : 0x0040u;
+    mismatchFields |=
+        expected.repeatedDeviceAddress == transfer.repeatedDeviceAddress
+            ? 0u : 0x0080u;
+    mismatchFields |= expected.rxLength == transfer.rxLength
+                          ? 0u : 0x0100u;
+    mismatchFields |= expected.minimumPostTransferHighUs ==
+                              transfer.minimumPostTransferHighUs
+                          ? 0u : 0x0200u;
+    mismatchFields |= !expected.verifyDeadline ||
+                              expected.deadlineUs == deadlineUs
+                          ? 0u : 0x0400u;
+    bool expectedMatches = mismatchFields == 0u;
+    for (size_t index = 0;
+         expectedMatches && index < expected.txLength; ++index) {
+      if (expected.txData[index] != transfer.txData[index]) {
+        expectedMatches = false;
+        mismatchFields |= 0x0800u;
+      }
+    }
+    if (!expectedMatches) {
+      self.mismatch = true;
+      self.mismatchFields |= mismatchFields;
+      return scriptError();
+    }
 
     bool traceOk = self.record(FakeEventKind::TRANSFER_BEGIN);
     const bool firstAddressAttempted =
@@ -299,6 +398,12 @@ class ScriptedTransport {
                                           void* user) {
     auto& self = *static_cast<ScriptedTransport*>(user);
     ++self.resetCalls;
+    if (self.activeWriteHighUntilUs != 0 &&
+        self.currentUs < self.activeWriteHighUntilUs) {
+      self.resetDuringWriteHighHold = true;
+      present = false;
+      return scriptError();
+    }
     self.lastResetDeadlineUs = deadlineUs;
     if (!self.record(FakeEventKind::RESET_DISCOVER)) {
       return scriptError();
@@ -309,6 +414,15 @@ class ScriptedTransport {
       return scriptError();
     }
     const BooleanScript& script = self.resetScripts[self.resetRead++];
+    if (deadlineUs < self.currentUs ||
+        deadlineUs - self.currentUs != 5000u) {
+      self.mismatch = true;
+      return scriptError();
+    }
+    if (script.verifyDeadline && script.expectedDeadlineUs != deadlineUs) {
+      self.mismatch = true;
+      return scriptError();
+    }
     present = script.value;
     return script.result;
   }
@@ -326,6 +440,20 @@ class ScriptedTransport {
       return scriptError();
     }
     const WaitScript& script = self.waitScripts[self.waitRead++];
+    bool deadlineMatches = script.allowArbitraryDeadline;
+    if (script.verifyDeadline) {
+      deadlineMatches = script.expectedDeadlineUs == deadlineUs;
+    } else if (!script.allowArbitraryDeadline) {
+      deadlineMatches = self.activeWriteHighUntilUs != 0u
+                            ? deadlineUs == self.activeWriteHighUntilUs
+                            : deadlineUs >= self.currentUs &&
+                                  deadlineUs - self.currentUs == 10000u;
+    }
+    if (!deadlineMatches) {
+      self.mismatch = true;
+      return scriptError();
+    }
+    self.activeWriteHighUntilUs = deadlineUs;
     if (script.advanceToDeadline && deadlineUs > self.currentUs) {
       self.currentUs = deadlineUs;
     }
@@ -347,6 +475,15 @@ class ScriptedTransport {
       return scriptError();
     }
     const BooleanScript& script = self.presenceScripts[self.presenceRead++];
+    if (deadlineUs < self.currentUs ||
+        deadlineUs - self.currentUs != 9000u) {
+      self.mismatch = true;
+      return scriptError();
+    }
+    if (script.verifyDeadline && script.expectedDeadlineUs != deadlineUs) {
+      self.mismatch = true;
+      return scriptError();
+    }
     present = script.value;
     return script.result;
   }
