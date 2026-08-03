@@ -1,5 +1,15 @@
 # AGENTS.md - AT21CS01/AT21CS11 Production Embedded Guidelines
 
+## PlatformIO
+
+Before editing, fetch remotes and fast-forward the newest intended working
+branch to its upstream. Stop and report dirty, divergent, or conflicted state;
+never overwrite work to force a sync.
+
+On Windows, use `.\scripts\pio.cmd <arguments>`; it selects the current user's
+VS Code-managed installation. Never install another PlatformIO Core; if the
+wrapper cannot find it, stop and report the missing installation.
+
 ## Role and Target
 You are a professional embedded software engineer building a production-grade driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs.
 
