@@ -387,8 +387,10 @@ the backend instance is not initialized.
 - One `transfer()` call owns the complete uninterrupted frame. It must not
   expose scheduler gaps between byte callbacks because byte callbacks do not
   exist.
-- `deadlineUs` is an absolute monotonic deadline. The backend checks it before
-  starting and guarantees a finite terminal return.
+- `deadlineUs` is an absolute monotonic deadline. Bus generates only finite
+  values in `1..UINT64_MAX-1`; it never passes the reserved `UINT64_MAX`
+  write-high poison sentinel to a callback. The backend checks the supplied
+  deadline before starting and guarantees a finite terminal return.
 - `minimumPostTransferHighUs` is measured after Stop completion. Speed-change
   commands use a conservative 650 us. Normal High-Speed and Standard frames use
   backend-qualified values of at least 160 us and 650 us respectively.
@@ -502,6 +504,11 @@ conservative v2 policy, not an unqualified wider-temperature guarantee. Stage
 
 Bus rules:
 
+- `writeHighUntilUs` has exactly three meanings: `0` is inactive,
+  `1..UINT64_MAX-1` is a finite retained deadline, and `UINT64_MAX` is permanent
+  post-acceptance write-high poison. The poison value is not a time that can be
+  reached or cleared by `nowUs()`.
+
 - Successful bind validates the complete descriptor before replacing any
   current binding.
 - Bus contains `uint8_t _claimedAddressMask`. Private transactional
@@ -512,8 +519,9 @@ Bus rules:
   stale through the binding epoch and may explicitly recover against the
   replacement descriptor.
 - `bind()` always performs zero callbacks. Quiescent `end()` performs zero
-  callbacks; if a write-high deadline is retained, `end()` first calls the same
-  bounded `_completeWriteHighHold()` path used before traffic.
+  callbacks; if a finite write-high deadline is retained, `end()` first calls
+  the same bounded `_completeWriteHighHold()` path used before traffic. Poisoned
+  `end()` returns callback-free `CLOCK_STALLED` and preserves the binding.
 - Every successful initial bind or replacement bind advances
   `bindingEpoch` before publishing the new descriptor. `end()` also invalidates
   the current epoch. A Driver whose cached epoch differs must perform no normal
@@ -529,9 +537,11 @@ Bus rules:
   and release their claims before Bus teardown. Only after the mask is zero may
   Bus complete a retained high deadline and unbind.
 - `end()` never clears a retained deadline or descriptor early. If its bounded
-  hold completion fails or the clock returns early, it returns that exact error
-  and preserves the binding, epoch, and deadline. Only proven completion lets
-  `end()` clear the binding and invalidate/advance the epoch.
+  finite-hold completion fails or the clock returns early, it returns that exact
+  error and preserves the binding, epoch, and deadline. Only proven finite
+  completion lets `end()` clear the binding and invalidate/advance the epoch.
+  Poison permanently prevents successful `end()`; the Backend must remain
+  alive because the normal Bus shutdown precondition can never be satisfied.
 - `end()` on an already unbound Bus is idempotent `OK`, performs zero callbacks,
   and does not advance the epoch again.
 - Backend outlives the bound Bus and cannot be ended until `Bus::end()` returns
@@ -550,20 +560,24 @@ Bus rules:
   check; it is not an allocating trace facility.
 - If a write frame has at least one proven accepted payload byte, or reports a
   fully delivered current payload byte whose ACK is unknown, Bus
-  conservatively records
-  `writeHighUntilUs = nowUs + WRITE_HIGH_HOLD_US`, then calls `waitUntilUs`,
-  even if the frame later reports malformed evidence, transport failure, or
-  Stop uncertainty.
+  conservatively calculates `nowUs + WRITE_HIGH_HOLD_US`. A finite result below
+  `UINT64_MAX` is recorded and passed to `waitUntilUs`, even if the frame later
+  reports malformed evidence, transport failure, or Stop uncertainty. Equality
+  with the reserved sentinel or arithmetic overflow stores poison and invokes
+  no wait callback.
 - Zero proven accepted bytes skip the hold only when
   `currentWriteByteMayBeAccepted=false`. A definite first-data-byte NACK skips
   it; an ACK-sampling fault after that byte's eight data bits does not.
-- If the frame itself failed, `_executeWrite()` completes any required hold and
-  returns the original frame Status. If the frame succeeded and the hold
-  failed, it returns the hold Status.
-- A wait callback returning success before the deadline maps to
-  `CLOCK_STALLED`; the deadline remains active.
-- While the deadline is active, no Driver on that Bus can transmit, probe, or
-  Reset.
+- If the frame itself failed and a finite hold was created, `_executeWrite()`
+  completes that hold and returns the original frame Status. If the frame
+  succeeded and the finite hold failed, it returns the hold Status. Reserved
+  sentinel equality/overflow is the fail-closed exception: it returns
+  `CLOCK_STALLED`, while the raw frame failure remains available in
+  `WriteCycleResult::frame`.
+- A wait callback returning success before a finite deadline maps to
+  `CLOCK_STALLED`; the finite deadline remains active until proven reached.
+- While a finite deadline or poison is active, no Driver on that Bus can
+  transmit, probe, or Reset. No `nowUs()` result clears poison.
 - Every Reset attempt increments generation conservatively because it may have
   affected all devices.
 - Only successful Reset+Discovery sets
@@ -571,13 +585,17 @@ Bus rules:
 - Bus generation is `uint64_t`. If it has reached `UINT64_MAX`, Bus refuses a
   further Reset before line activity rather than wrapping and losing
   invalidation evidence.
-- Every `nowUs + interval` operation uses checked addition. Transfer and Reset
-  deadline overflow fails with `CLOCK_STALLED` before line activity. A mutating
-  frame preflights room for both `TRANSFER_TIMEOUT_US` and
-  `WRITE_HIGH_HOLD_US`; if the clock nevertheless jumps so far that the
-  post-acceptance hold deadline cannot be represented, Bus records
-  `writeHighUntilUs=UINT64_MAX`, returns `CLOCK_STALLED` with ambiguous write
-  evidence, and permanently refuses further traffic on that Bus object.
+- Every `nowUs + interval` operation uses strict checked deadline addition:
+  success requires the mathematical sum to be less than `UINT64_MAX`. Transfer,
+  Reset, presence, and mutating preflight equality/overflow return
+  `CLOCK_STALLED` before the corresponding physical callback. A mutating frame
+  preflights room for both `TRANSFER_TIMEOUT_US` and `WRITE_HIGH_HOLD_US`; if
+  the clock nevertheless jumps so far that the post-acceptance hold sum equals
+  the reserved sentinel or overflows, Bus records
+  `writeHighUntilUs=UINT64_MAX`, invokes no wait callback, returns
+  `CLOCK_STALLED` with ambiguous write evidence, and permanently refuses
+  further protocol traffic, replacement bind, and successful `end()` on that
+  Bus object.
 
 ## 7. Driver configuration and snapshots
 
@@ -805,7 +823,8 @@ unrelated methods.
   before the frame because Driver cannot observe the address/data ACK while the
   whole-frame callback is executing. A retained Bus deadline after a failed
   wait is represented by `BusSnapshot::writeHighUntilUs`, not by leaving one
-  Driver in `BUSY`; no other Driver's state is changed.
+  Driver in `BUSY`; no other Driver's state is changed. A snapshot value of
+  `UINT64_MAX` is permanent poison, not a schedulable deadline.
 - `SLEEPING` has no entry in v2.
 - `Driver::end()` releases its Bus address claim and clears local state. This
   is zero physical I/O but is intentionally a bounded in-memory Bus ownership
@@ -1224,10 +1243,12 @@ the 10 ms write hold: the fixed 9 ms frame deadline plus hold is a 19 ms
 library wait budget.
 
 Bus itself enforces a retained write-high deadline, so reading
-`BusSnapshot::writeHighUntilUs` is not required for protocol correctness. An
-upper scheduler may defer the next call on that same channel until the deadline
-to prevent one owner command from first completing an old hold and then
-starting new traffic. A retained hold never propagates to a different Bus.
+`BusSnapshot::writeHighUntilUs` is not required for protocol correctness. For a
+finite value, an upper scheduler may defer the next call on that same channel
+until the deadline to prevent one owner command from first completing an old
+hold and then starting new traffic. `UINT64_MAX` is permanent poison and must
+not be treated as a future scheduling time. A retained hold or poison never
+propagates to a different Bus.
 
 Attachment lifecycle is upper-firmware policy:
 

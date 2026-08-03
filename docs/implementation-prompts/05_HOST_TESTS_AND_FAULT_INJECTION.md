@@ -196,8 +196,9 @@ Zone index: 0, 1, 2, 3, 4, 0xFF
 - one attempt only;
 - binding survives absence/error;
 - later recovery success;
-- checked transfer and Reset deadline addition near `UINT64_MAX`; overflow
-  returns `CLOCK_STALLED` before the corresponding wire callback;
+- checked transfer, Reset, and input-only presence deadline addition near
+  `UINT64_MAX`; a sum equal to the reserved sentinel or arithmetic overflow
+  returns `CLOCK_STALLED` before the corresponding callback;
 - part IDs `00D200`, `00D380`, unknown, expected mismatch;
 - no Standard opcode for AT21CS11;
 - Driver end is idempotent, releases only its in-memory address claim, and
@@ -276,13 +277,18 @@ CRC mismatch stores `(computedCrc << 8) | storedCrc`.
 - wait callback error;
 - early-return/stalled time;
 - exact 10 ms deadline;
-- checked deadline addition immediately below/at/above the safe
-  `UINT64_MAX` boundary, with pre-frame overflow causing zero line activity and
-  mutating preflight reserving both transfer and hold intervals, and
-  post-acceptance hold overflow failing closed at `UINT64_MAX`;
+- checked deadline addition immediately below/at/above the reserved
+  `UINT64_MAX` boundary: only sums below `UINT64_MAX` are finite; equality and
+  overflow cause zero pre-frame activity, mutating preflight reserves both
+  transfer and hold intervals, and post-acceptance hold equality/overflow stores
+  permanent poison at `UINT64_MAX` without invoking the wait callback; poison
+  returns `CLOCK_STALLED` even when the retained frame evidence contains an
+  earlier failure;
 - no SI/O transfer or Reset/Discovery event inside hold; an optional
   input-only presence read neither drives SI/O nor touches/clears the retained
   deadline;
+- permanent poison blocks later reads, writes, Reset, replacement bind, and
+  successful Bus shutdown on only that Bus; an independent Bus remains usable;
 - no automatic replay;
 - bytesCommitted and last-page evidence at every failure point.
 

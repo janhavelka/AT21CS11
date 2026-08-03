@@ -143,7 +143,7 @@ void test_esp32_transfer_validation_and_wait_guards_are_bounded() {
   queueLevel(transport, false);
   queueLevel(transport, true);
   const TransferResult hugeDeadline = TestAccess::transfer(
-      transport, addressOnly(), std::numeric_limits<uint64_t>::max());
+      transport, addressOnly(), std::numeric_limits<uint64_t>::max() - 1u);
   assertCodePhase(hugeDeadline, TransportCode::OK,
                   TransferPhase::STOP);
   TEST_ASSERT_TRUE(hugeDeadline.firstDeviceAddressAcked);

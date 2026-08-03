@@ -229,8 +229,9 @@ Rules:
   extra proven byte and is legal only for the shared-contract
   `DATA_WRITE` failure shape.
 - `_execute()` checks/completes any retained write-high deadline first.
-- Derive absolute transfer/reset/write deadlines with checked `uint64_t`
-  addition. Overflow is `CLOCK_STALLED`; apply the fail-closed
+- Derive absolute transfer/reset/presence/write deadlines with strict checked
+  `uint64_t` addition. A result equal to the reserved `UINT64_MAX` poison
+  sentinel or arithmetic overflow is `CLOCK_STALLED`; apply the fail-closed
   post-acceptance rule from the shared contract. Avoid loops in core.
 - `result.code == TransportCode::NACK` maps by phase:
   - device write/read -> `NACK_DEVICE_ADDRESS` with encoded exact phase;
@@ -264,24 +265,32 @@ with `txLength > 0`. `_executeWrite()`:
    dataBytesTransferred < txLength`;
 3. if `holdRequired=false`, performs no wait and preserves the frame Status;
 4. otherwise samples `nowUs` after the pre-frame checked-arithmetic guard;
-5. sets `_writeHighUntilUs = now + WRITE_HIGH_HOLD_US`;
-6. invokes `waitUntilUs(_writeHighUntilUs)`;
+5. for a sum below `UINT64_MAX`, sets
+   `_writeHighUntilUs = now + WRITE_HIGH_HOLD_US`;
+6. invokes `waitUntilUs(_writeHighUntilUs)` only for that finite deadline;
 7. stores that callback result separately in `WriteCycleResult::hold`;
 8. verifies a second `nowUs()` is at or beyond the deadline;
 9. sets `holdCompleted=true` and clears the deadline only after that proof.
 
 If the frame failed after proven acceptance or after a fully delivered byte
-whose ACK is unknown, complete the hold and return the original mapped frame
-Status. If the frame succeeded but the hold failed, return the mapped hold
-Status. This preserves the primary protocol failure while retaining both
-physical results for `WriteResult`. A malformed frame still maps to `IO_ERROR`,
-but plausible programming evidence still arms the hold.
+whose ACK is unknown, complete any finite hold and return the original mapped
+frame Status. If the frame succeeded but the finite hold failed, return the
+mapped hold Status. This preserves the primary protocol failure while retaining
+both physical results for `WriteResult`. A malformed frame still maps to
+`IO_ERROR`, but plausible programming evidence still arms the hold. Reserved
+sentinel equality/overflow remains the fail-closed exception described below.
 
 If the callback fails or returns early:
 
 - return mapped transport error or `CLOCK_STALLED`;
-- retain `_writeHighUntilUs`;
-- reject every later transfer/Reset until time has actually reached it.
+- retain the finite `_writeHighUntilUs`;
+- reject every later transfer/Reset until time has actually reached that finite
+  deadline.
+
+`UINT64_MAX` is not a finite deadline. If post-acceptance addition equals that
+reserved value or overflows, store `UINT64_MAX`, skip `waitUntilUs`, return
+`CLOCK_STALLED` with ambiguous write evidence, and permanently reject protocol
+traffic, replacement bind, and successful `Bus::end()` on that Bus object.
 
 No Bus/Driver method may ACK-poll during this interval. The wait callback must
 not drive SI/O low. This stage establishes the mechanism; Stage 3 decides
@@ -455,8 +464,9 @@ Add named tests proving:
 10. Transport timeout/line-stuck/I/O remain distinct.
 11. Consecutive physical outcomes shift through
     `previousTransfer`/`lastTransfer` without allocation.
-12. Checked deadline arithmetic fails before I/O, and post-acceptance clock
-   discontinuity fails closed.
+12. Checked deadline arithmetic rejects both reserved-sentinel equality and
+   overflow before I/O, and post-acceptance equality/overflow fails closed as
+   permanent poison without a wait callback.
 13. Bus-level presence false is distinct from callback failure and does not
    touch SI/O.
 14. `_executeWrite()` preserves separate frame/hold results and a write-high

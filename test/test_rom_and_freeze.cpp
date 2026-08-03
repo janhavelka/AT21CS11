@@ -697,6 +697,61 @@ void test_freeze_first_data_nack_has_no_hold_or_effect() {
   TEST_ASSERT_EQUAL_UINT32(transferCalls + 2u, fake.transferCalls);
   TEST_ASSERT_EQUAL_UINT32(fake.transferWrite, fake.transferRead);
   TEST_ASSERT_FALSE(fake.overflow);
+
+  ScriptedTransport malformedFake;
+  Bus malformedBus;
+  bindBus(malformedBus, malformedFake);
+  Driver malformedDriver;
+  initializeDriver(malformedDriver, malformedBus, malformedFake, Config{},
+                   CS11_ID);
+  TEST_ASSERT_TRUE(malformedFake.queueTransfer(withExpected(
+      addressOnlyOk(), freezeObservation())));
+  TransferScript malformed{};
+  malformed.expected = freezeMutation();
+  malformed.result.code = TransportCode::TIMEOUT;
+  malformed.result.phase = TransferPhase::START;
+  malformed.result.detail = 4699;
+  malformed.result.currentWriteByteMayBeAccepted = true;
+  TEST_ASSERT_TRUE(malformedFake.queueTransfer(malformed));
+
+  MutationResult malformedResult{MutationEffect::VERIFIED, true};
+  const Status malformedStatus =
+      malformedDriver.permanentlyFreezeRomZones(malformedResult);
+  assertStatus(Err::IO_ERROR, malformedStatus);
+  TEST_ASSERT_EQUAL_INT32(4699, malformedStatus.detail);
+  assertMutationResult(malformedResult, MutationEffect::NOT_ATTEMPTED, false);
+  TEST_ASSERT_FALSE(malformedBus.snapshot().lastWriteCycle.holdRequired);
+  TEST_ASSERT_EQUAL_UINT32(0u, malformedFake.waitCalls);
+  assertOracleClean(malformedFake);
+
+  ScriptedTransport ambiguousFake;
+  Bus ambiguousBus;
+  bindBus(ambiguousBus, ambiguousFake);
+  Driver ambiguousDriver;
+  initializeDriver(ambiguousDriver, ambiguousBus, ambiguousFake, Config{},
+                   CS11_ID);
+  TEST_ASSERT_TRUE(ambiguousFake.queueTransfer(withExpected(
+      addressOnlyOk(), freezeObservation())));
+  TransferScript ambiguous{};
+  ambiguous.expected = freezeMutation();
+  ambiguous.result.code = TransportCode::TIMEOUT;
+  ambiguous.result.phase = TransferPhase::DATA_WRITE;
+  ambiguous.result.detail = 4700;
+  ambiguous.result.currentWriteByteMayBeAccepted = true;
+  TEST_ASSERT_TRUE(ambiguousFake.queueTransfer(ambiguous));
+  TEST_ASSERT_TRUE(ambiguousFake.queueWait(mutationWaitOk()));
+
+  MutationResult ambiguousResult{};
+  const Status ambiguousStatus =
+      ambiguousDriver.permanentlyFreezeRomZones(ambiguousResult);
+  assertStatus(Err::IO_ERROR, ambiguousStatus);
+  TEST_ASSERT_EQUAL_INT32(4700, ambiguousStatus.detail);
+  assertMutationResult(ambiguousResult,
+                       MutationEffect::MAY_HAVE_COMMITTED, false);
+  TEST_ASSERT_TRUE(ambiguousBus.snapshot().lastWriteCycle.holdRequired);
+  TEST_ASSERT_TRUE(ambiguousBus.snapshot().lastWriteCycle.holdCompleted);
+  TEST_ASSERT_EQUAL_UINT32(1u, ambiguousFake.waitCalls);
+  assertOracleClean(ambiguousFake);
 }
 
 void test_freeze_uncertain_payload_is_held_ambiguous_and_not_replayed() {

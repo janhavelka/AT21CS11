@@ -727,8 +727,7 @@ Status Driver::permanentlyFreezeRomZones(MutationResult& result) {
   _enterOperation(DriverState::BUSY);
   status = _bus->_executeWrite(transfer, writeCycle);
   if (!status.ok()) {
-    if (writeCycle.frame.dataBytesTransferred != 0 ||
-        writeCycle.frame.currentWriteByteMayBeAccepted) {
+    if (writeCycle.holdRequired) {
       result.effect = MutationEffect::MAY_HAVE_COMMITTED;
     }
     if (status.code == Err::NACK_DEVICE_ADDRESS &&
@@ -884,6 +883,10 @@ bool Driver::_hasCurrentBusBinding() const {
          busState.bindingEpoch == _seenBusBindingEpoch;
 }
 
+bool Driver::_canUseNormalIo() const {
+  return _state == DriverState::READY || _state == DriverState::DEGRADED;
+}
+
 Status Driver::_requireBound() const {
   if (!_bound || _bus == nullptr) {
     return Status::Error(Err::NOT_BOUND);
@@ -910,7 +913,7 @@ Status Driver::_requireInitializedForIo() const {
       (_state == DriverState::OFFLINE && !_initialized)) {
     return Status::Error(Err::NOT_INITIALIZED);
   }
-  if (_state != DriverState::READY && _state != DriverState::DEGRADED) {
+  if (!_canUseNormalIo()) {
     return Status::Error(Err::INVALID_STATE);
   }
   if (!_initialized) {
@@ -1160,8 +1163,7 @@ Status Driver::_writePageRaw(uint8_t opcode,
   if (status.ok()) {
     result.bytesCommitted = length;
     result.lastPageEffect = WriteEffect::COMMITTED;
-  } else if (writeCycle.frame.dataBytesTransferred != 0 ||
-             writeCycle.frame.currentWriteByteMayBeAccepted) {
+  } else if (writeCycle.holdRequired) {
     result.lastPageEffect = WriteEffect::MAY_HAVE_COMMITTED;
   }
   return status;

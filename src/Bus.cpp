@@ -7,8 +7,10 @@
 namespace AT21CS {
 namespace {
 
-constexpr bool checkedAdd(uint64_t base, uint64_t increment, uint64_t& sum) {
-  if (base > (std::numeric_limits<uint64_t>::max() - increment)) {
+constexpr bool checkedDeadlineAdd(uint64_t base,
+                                  uint64_t increment,
+                                  uint64_t& sum) {
+  if (base >= (std::numeric_limits<uint64_t>::max() - increment)) {
     sum = 0;
     return false;
   }
@@ -336,7 +338,7 @@ Status Bus::_execute(const SingleWireTransfer& transfer, TransferResult& result)
 
   const uint64_t nowUs = _transport.nowUs(_transport.user);
   uint64_t deadlineUs = 0;
-  if (!checkedAdd(nowUs, TRANSFER_TIMEOUT_US, deadlineUs)) {
+  if (!checkedDeadlineAdd(nowUs, TRANSFER_TIMEOUT_US, deadlineUs)) {
     return Status::Error(Err::CLOCK_STALLED);
   }
 
@@ -374,7 +376,7 @@ Status Bus::_executeWrite(const SingleWireTransfer& transfer,
   uint64_t preflightEndUs = 0;
   constexpr uint64_t REQUIRED_RANGE_US =
       static_cast<uint64_t>(TRANSFER_TIMEOUT_US) + WRITE_HIGH_HOLD_US;
-  if (!checkedAdd(nowUs, REQUIRED_RANGE_US, preflightEndUs)) {
+  if (!checkedDeadlineAdd(nowUs, REQUIRED_RANGE_US, preflightEndUs)) {
     return Status::Error(Err::CLOCK_STALLED);
   }
   (void)preflightEndUs;
@@ -399,7 +401,8 @@ Status Bus::_executeWrite(const SingleWireTransfer& transfer,
   }
 
   const uint64_t holdStartUs = _transport.nowUs(_transport.user);
-  if (!checkedAdd(holdStartUs, WRITE_HIGH_HOLD_US, _writeHighUntilUs)) {
+  if (!checkedDeadlineAdd(holdStartUs, WRITE_HIGH_HOLD_US,
+                          _writeHighUntilUs)) {
     _writeHighUntilUs = std::numeric_limits<uint64_t>::max();
     _lastWriteCycle = result;
     return Status::Error(Err::CLOCK_STALLED);
@@ -407,17 +410,7 @@ Status Bus::_executeWrite(const SingleWireTransfer& transfer,
 
   _lastWriteCycle = result;
   TransferResult hold{};
-  Status holdStatus{};
-  if (_writeHighUntilUs == std::numeric_limits<uint64_t>::max()) {
-    holdStatus = waitForHighDeadline(_transport, _writeHighUntilUs, hold);
-    _lastWriteCycle.hold = hold;
-    _lastWriteCycle.holdCompleted = holdStatus.ok();
-    if (holdStatus.ok()) {
-      _writeHighUntilUs = 0;
-    }
-  } else {
-    holdStatus = _completeWriteHighHold(hold);
-  }
+  const Status holdStatus = _completeWriteHighHold(hold);
   result = _lastWriteCycle;
   if (!frameStatus.ok()) {
     return frameStatus;
@@ -444,7 +437,7 @@ Status Bus::_resetAndDiscover(bool& present, TransferResult& result) {
 
   const uint64_t nowUs = _transport.nowUs(_transport.user);
   uint64_t deadlineUs = 0;
-  if (!checkedAdd(nowUs, RESET_TIMEOUT_US, deadlineUs)) {
+  if (!checkedDeadlineAdd(nowUs, RESET_TIMEOUT_US, deadlineUs)) {
     return Status::Error(Err::CLOCK_STALLED);
   }
 
@@ -515,7 +508,7 @@ Status Bus::_readPresence(bool& present, TransferResult& result) {
 
   const uint64_t nowUs = _transport.nowUs(_transport.user);
   uint64_t deadlineUs = 0;
-  if (!checkedAdd(nowUs, TRANSFER_TIMEOUT_US, deadlineUs)) {
+  if (!checkedDeadlineAdd(nowUs, TRANSFER_TIMEOUT_US, deadlineUs)) {
     return Status::Error(Err::CLOCK_STALLED);
   }
   result = _transport.readPresence(present, deadlineUs, _transport.user);

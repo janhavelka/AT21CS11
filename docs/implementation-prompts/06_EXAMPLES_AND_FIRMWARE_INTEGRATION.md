@@ -422,6 +422,10 @@ struct CachedChannelStatus {
 };
 ```
 
+`writeHighUntilUs` preserves the Bus snapshot encoding: `0` is inactive,
+`1..UINT64_MAX-1` is a finite deadline, and `UINT64_MAX` is permanent Bus
+poison. The owner never treats poison as a future scheduling timestamp.
+
 Define the fixture owner surface exactly:
 
 ```cpp
@@ -551,10 +555,12 @@ Owner rules:
 6. A page write uses only `writeEepromPage()`. A read turn transfers at most
    eight bytes. Exact `Status` plus `WriteResult` evidence is copied into the
    result; ambiguous writes are never replayed.
-7. If channel A has a retained `writeHighUntilUs`, the scheduler may defer A to
-   keep the next request's latency bounded and continue servicing B. Bus A
-   remains responsible for protocol enforcement; the optimization is not a
-   correctness dependency.
+7. If channel A has a finite retained `writeHighUntilUs`, the scheduler may
+   defer A to keep the next request's latency bounded and continue servicing B.
+   Bus A remains responsible for protocol enforcement; the optimization is not
+   a correctness dependency. `UINT64_MAX` is permanent poison: publish the exact
+   failure, reject further A work, keep A's Backend alive when `Bus::end()`
+   fails, and continue servicing independent channels.
 
 Submission validation precedence is fixed: owner/channel stopping state,
 request ID/channel/enum/shape, deadline, duplicate ID, outstanding-result

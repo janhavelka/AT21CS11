@@ -28,6 +28,8 @@ struct BusSnapshot {
   uint64_t generation = 0;
   uint8_t claimedAddressMask = 0;
   bool resetEstablishedHighSpeed = false;
+  /// 0 is inactive; UINT64_MAX is permanent post-write poison; all other
+  /// values are finite deadlines.
   uint64_t writeHighUntilUs = 0;
   TransferResult previousTransfer{};
   TransferResult lastTransfer{};

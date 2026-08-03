@@ -716,7 +716,8 @@ void test_malformed_success_and_evidence_are_rejected() {
   invalid.hasMemoryAddress = true;
   invalid.memoryAddress = 0x60;
   TransferResult backendResult = backendDescriptor.transfer(
-      invalid, std::numeric_limits<uint64_t>::max(), backendDescriptor.user);
+      invalid, std::numeric_limits<uint64_t>::max() - 1u,
+      backendDescriptor.user);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
                           static_cast<uint8_t>(backendResult.code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferPhase::NONE),
@@ -724,7 +725,8 @@ void test_malformed_success_and_evidence_are_rejected() {
   invalid = randomRead(&output);
   invalid.repeatedDeviceAddress = 0xB1;
   backendResult = backendDescriptor.transfer(
-      invalid, std::numeric_limits<uint64_t>::max(), backendDescriptor.user);
+      invalid, std::numeric_limits<uint64_t>::max() - 1u,
+      backendDescriptor.user);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransportCode::IO_ERROR),
                           static_cast<uint8_t>(backendResult.code));
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(TransferPhase::NONE),
@@ -1043,7 +1045,7 @@ void test_checked_deadline_boundaries_are_exact() {
   {
     const uint64_t nowValues[] = {MAX - 9001u, MAX - 9000u,
                                   MAX - 8999u};
-    const bool expectCallback[] = {true, true, false};
+    const bool expectCallback[] = {true, false, false};
     for (size_t index = 0; index < 3u; ++index) {
       ScriptedTransport fake;
       Bus bus;
@@ -1070,7 +1072,7 @@ void test_checked_deadline_boundaries_are_exact() {
   {
     const uint64_t nowValues[] = {MAX - 5001u, MAX - 5000u,
                                   MAX - 4999u};
-    const bool expectCallback[] = {true, true, false};
+    const bool expectCallback[] = {true, false, false};
     for (size_t index = 0; index < 3u; ++index) {
       ScriptedTransport fake;
       Bus bus;
@@ -1101,7 +1103,7 @@ void test_checked_deadline_boundaries_are_exact() {
     const SingleWireTransfer transfer = writeFrame(&value);
     const uint64_t nowValues[] = {MAX - 19001u, MAX - 19000u,
                                   MAX - 18999u};
-    const bool expectCallback[] = {true, true, false};
+    const bool expectCallback[] = {true, false, false};
     for (size_t index = 0; index < 3u; ++index) {
       ScriptedTransport fake;
       Bus bus;
@@ -1133,13 +1135,41 @@ void test_checked_deadline_boundaries_are_exact() {
       TEST_ASSERT_FALSE(fake.mismatch);
     }
   }
+  {
+    const uint64_t nowValues[] = {MAX - 9001u, MAX - 9000u,
+                                  MAX - 8999u};
+    const bool expectCallback[] = {true, false, false};
+    for (size_t index = 0; index < 3u; ++index) {
+      ScriptedTransport fake;
+      Bus bus;
+      bindBus(bus, fake, true);
+      TEST_ASSERT_TRUE(fake.queueNow(nowValues[index]));
+      if (expectCallback[index]) {
+        BooleanScript presence{};
+        presence.result = okAux(TransferPhase::PRESENCE);
+        presence.value = true;
+        presence.verifyDeadline = true;
+        presence.expectedDeadlineUs = nowValues[index] + 9000u;
+        TEST_ASSERT_TRUE(fake.queuePresence(presence));
+      }
+      bool present = false;
+      const Status status = bus.readPresenceIndicator(present);
+      assertErr(expectCallback[index] ? Err::OK : Err::CLOCK_STALLED,
+                status);
+      TEST_ASSERT_EQUAL(expectCallback[index], present);
+      TEST_ASSERT_EQUAL_UINT32(expectCallback[index] ? 1u : 0u,
+                               fake.presenceCalls);
+      TEST_ASSERT_FALSE(fake.mismatch);
+    }
+  }
 }
 
 void test_post_acceptance_hold_addition_handles_below_at_and_above_max() {
   constexpr uint64_t MAX = std::numeric_limits<uint64_t>::max();
   const uint64_t holdStarts[] = {MAX - 10001u, MAX - 10000u,
                                  MAX - 9999u};
-  const Err expectedStatus[] = {Err::OK, Err::OK, Err::CLOCK_STALLED};
+  const Err expectedStatus[] = {Err::OK, Err::CLOCK_STALLED,
+                                Err::CLOCK_STALLED};
   const uint8_t value = 0xA6u;
   const SingleWireTransfer transfer = writeFrame(&value);
 
@@ -1156,7 +1186,7 @@ void test_post_acceptance_hold_addition_handles_below_at_and_above_max() {
         9100u);
     script.result = okFrame(transfer);
     TEST_ASSERT_TRUE(fake.queueTransfer(script));
-    if (index < 2u) {
+    if (index == 0u) {
       WaitScript wait{};
       wait.result = okAux(TransferPhase::WAIT_HIGH);
       wait.advanceToDeadline = true;
@@ -1170,7 +1200,7 @@ void test_post_acceptance_hold_addition_handles_below_at_and_above_max() {
     TEST_ASSERT_EQUAL_UINT8(
         static_cast<uint8_t>(TransportCode::OK),
         static_cast<uint8_t>(bus.snapshot().lastWriteCycle.frame.code));
-    if (index < 2u) {
+    if (index == 0u) {
       TEST_ASSERT_TRUE(result.holdCompleted);
       TEST_ASSERT_EQUAL_UINT64(0u, bus.snapshot().writeHighUntilUs);
       TEST_ASSERT_EQUAL_UINT32(1u, fake.waitCalls);
@@ -1178,10 +1208,115 @@ void test_post_acceptance_hold_addition_handles_below_at_and_above_max() {
       TEST_ASSERT_FALSE(result.holdCompleted);
       TEST_ASSERT_EQUAL_UINT64(MAX, bus.snapshot().writeHighUntilUs);
       TEST_ASSERT_EQUAL_UINT32(0u, fake.waitCalls);
+      TEST_ASSERT_TRUE(bus.snapshot().lastWriteCycle.holdRequired);
+      assertTransferEqual(TransferResult{},
+                          bus.snapshot().lastWriteCycle.hold);
+      const size_t transferCalls = fake.transferCalls;
+      const size_t resetCalls = fake.resetCalls;
+      TransferResult blocked{};
+      assertErr(Err::CLOCK_STALLED,
+                TestAccess::execute(bus, addressOnly(), blocked));
+      WriteCycleResult blockedWrite{};
+      assertErr(Err::CLOCK_STALLED,
+                TestAccess::executeWrite(bus, transfer, blockedWrite));
+      bool present = false;
+      assertErr(Err::CLOCK_STALLED,
+                TestAccess::resetAndDiscover(bus, present, blocked));
+      TEST_ASSERT_FALSE(present);
+      BusConfig replacement{};
+      replacement.transport = fake.descriptor();
+      assertErr(Err::BUSY, bus.bind(replacement));
+
+      BooleanScript presence{};
+      presence.result = okAux(TransferPhase::PRESENCE);
+      presence.value = true;
+      TEST_ASSERT_TRUE(fake.queuePresence(presence));
+      TEST_ASSERT_TRUE(bus.readPresenceIndicator(present).ok());
+      TEST_ASSERT_TRUE(present);
+      TEST_ASSERT_EQUAL_UINT64(MAX, bus.snapshot().writeHighUntilUs);
+
+      assertErr(Err::CLOCK_STALLED, bus.end());
+      TEST_ASSERT_EQUAL_UINT32(transferCalls, fake.transferCalls);
+      TEST_ASSERT_EQUAL_UINT32(resetCalls, fake.resetCalls);
+      TEST_ASSERT_EQUAL_UINT64(MAX, bus.snapshot().writeHighUntilUs);
+
+      ScriptedTransport independentFake;
+      Bus independentBus;
+      bindBus(independentBus, independentFake);
+      queueFrame(independentFake, expectedAddressOnly(),
+                 okFrame(addressOnly()));
+      TransferResult independentResult{};
+      TEST_ASSERT_TRUE(
+          TestAccess::execute(independentBus, addressOnly(),
+                              independentResult)
+              .ok());
+      TEST_ASSERT_EQUAL_UINT32(1u, independentFake.transferCalls);
+      TEST_ASSERT_EQUAL_UINT64(0u,
+                               independentBus.snapshot().writeHighUntilUs);
+      TEST_ASSERT_EQUAL_UINT64(MAX, bus.snapshot().writeHighUntilUs);
+      TEST_ASSERT_TRUE(independentFake.oracleOk());
     }
     TEST_ASSERT_FALSE(fake.mismatch);
   }
 
+  ScriptedTransport failedFrameFake;
+  Bus failedFrameBus;
+  bindBus(failedFrameBus, failedFrameFake);
+  TEST_ASSERT_TRUE(failedFrameFake.queueNow(100u));
+  TEST_ASSERT_TRUE(failedFrameFake.queueNow(MAX - 10000u));
+  TransferScript failedFrame{};
+  failedFrame.expected = expected::withDeadline(
+      expected::pageWrite(0xA0u, 0x20u, &value, 1u,
+                          SpeedMode::HIGH_SPEED, 160u),
+      9100u);
+  failedFrame.result = rawFailure(
+      TransportCode::TIMEOUT, TransferPhase::DATA_WRITE, 702u);
+  failedFrame.result.currentWriteByteMayBeAccepted = true;
+  failedFrame.result.firstDeviceAddressAcked = true;
+  failedFrame.result.memoryAddressAcked = true;
+  TEST_ASSERT_TRUE(failedFrameFake.queueTransfer(failedFrame));
+  WriteCycleResult failedFrameResult{};
+  const Status failedFrameStatus = TestAccess::executeWrite(
+      failedFrameBus, transfer, failedFrameResult);
+  assertErr(Err::CLOCK_STALLED, failedFrameStatus);
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(TransportCode::TIMEOUT),
+      static_cast<uint8_t>(failedFrameResult.frame.code));
+  TEST_ASSERT_EQUAL_INT32(702, failedFrameResult.frame.detail);
+  TEST_ASSERT_TRUE(failedFrameResult.holdRequired);
+  TEST_ASSERT_FALSE(failedFrameResult.holdCompleted);
+  TEST_ASSERT_EQUAL_UINT64(MAX,
+                           failedFrameBus.snapshot().writeHighUntilUs);
+  TEST_ASSERT_EQUAL_UINT32(0u, failedFrameFake.waitCalls);
+  TEST_ASSERT_TRUE(failedFrameFake.oracleOk());
+
+  ScriptedTransport retainedFake;
+  Bus retainedBus;
+  bindBus(retainedBus, retainedFake);
+  TEST_ASSERT_TRUE(retainedFake.queueNow(100u));
+  TEST_ASSERT_TRUE(retainedFake.queueNow(MAX - 10001u));
+  TransferScript retainedFrame{};
+  retainedFrame.expected = expected::withDeadline(
+      expected::pageWrite(0xA0u, 0x20u, &value, 1u,
+                          SpeedMode::HIGH_SPEED, 160u),
+      9100u);
+  retainedFrame.result = okFrame(transfer);
+  TEST_ASSERT_TRUE(retainedFake.queueTransfer(retainedFrame));
+  WaitScript failedWait{};
+  failedWait.result = rawFailure(
+      TransportCode::TIMEOUT, TransferPhase::WAIT_HIGH, 701u);
+  failedWait.verifyDeadline = true;
+  failedWait.expectedDeadlineUs = MAX - 1u;
+  TEST_ASSERT_TRUE(retainedFake.queueWait(failedWait));
+  WriteCycleResult retainedResult{};
+  assertErr(Err::TRANSPORT_TIMEOUT,
+            TestAccess::executeWrite(retainedBus, transfer, retainedResult));
+  TEST_ASSERT_EQUAL_UINT64(MAX - 1u,
+                           retainedBus.snapshot().writeHighUntilUs);
+  TEST_ASSERT_TRUE(retainedFake.queueNow(MAX - 1u));
+  TEST_ASSERT_TRUE(retainedBus.end().ok());
+  TEST_ASSERT_FALSE(retainedBus.isBound());
+  TEST_ASSERT_TRUE(retainedFake.oracleOk());
 }
 
 void test_presence_false_is_not_transport_failure() {

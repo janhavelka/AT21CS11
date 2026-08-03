@@ -147,6 +147,7 @@ class Driver {
 
   uint8_t _deviceAddress(uint8_t opcode, bool read) const;
   bool _hasCurrentBusBinding() const;
+  bool _canUseNormalIo() const;
 
   Status _requireBound() const;
   Status _requireInitializedForIo() const;

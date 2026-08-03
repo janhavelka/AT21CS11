@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 #include "AT21CS/Transport.h"
 
@@ -260,6 +261,7 @@ class ScriptedTransport {
     if (transfer.txLength > 8u || transfer.rxLength > 8u ||
         (transfer.txLength != 0u && transfer.txData == nullptr) ||
         (transfer.rxLength != 0u && transfer.rxData == nullptr) ||
+        deadlineUs == std::numeric_limits<uint64_t>::max() ||
         deadlineUs < self.currentUs ||
         deadlineUs - self.currentUs != 9000u) {
       self.mismatch = true;
@@ -414,7 +416,8 @@ class ScriptedTransport {
       return scriptError();
     }
     const BooleanScript& script = self.resetScripts[self.resetRead++];
-    if (deadlineUs < self.currentUs ||
+    if (deadlineUs == std::numeric_limits<uint64_t>::max() ||
+        deadlineUs < self.currentUs ||
         deadlineUs - self.currentUs != 5000u) {
       self.mismatch = true;
       return scriptError();
@@ -440,14 +443,19 @@ class ScriptedTransport {
       return scriptError();
     }
     const WaitScript& script = self.waitScripts[self.waitRead++];
-    bool deadlineMatches = script.allowArbitraryDeadline;
+    bool deadlineMatches =
+        deadlineUs != std::numeric_limits<uint64_t>::max() &&
+        script.allowArbitraryDeadline;
     if (script.verifyDeadline) {
-      deadlineMatches = script.expectedDeadlineUs == deadlineUs;
+      deadlineMatches =
+          deadlineUs != std::numeric_limits<uint64_t>::max() &&
+          script.expectedDeadlineUs == deadlineUs;
     } else if (!script.allowArbitraryDeadline) {
-      deadlineMatches = self.activeWriteHighUntilUs != 0u
+      deadlineMatches = deadlineUs != std::numeric_limits<uint64_t>::max() &&
+                        (self.activeWriteHighUntilUs != 0u
                             ? deadlineUs == self.activeWriteHighUntilUs
                             : deadlineUs >= self.currentUs &&
-                                  deadlineUs - self.currentUs == 10000u;
+                                  deadlineUs - self.currentUs == 10000u);
     }
     if (!deadlineMatches) {
       self.mismatch = true;
@@ -475,7 +483,8 @@ class ScriptedTransport {
       return scriptError();
     }
     const BooleanScript& script = self.presenceScripts[self.presenceRead++];
-    if (deadlineUs < self.currentUs ||
+    if (deadlineUs == std::numeric_limits<uint64_t>::max() ||
+        deadlineUs < self.currentUs ||
         deadlineUs - self.currentUs != 9000u) {
       self.mismatch = true;
       return scriptError();

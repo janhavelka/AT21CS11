@@ -106,6 +106,8 @@ struct SingleWireTransfer {
   uint32_t minimumPostTransferHighUs = 0;
 };
 
+// Bus-generated callback deadlines are finite values below UINT64_MAX;
+// UINT64_MAX is reserved for Bus-internal permanent write-high poison.
 using NowUsFn = uint64_t (*)(void* user);
 using TransferFn = TransferResult (*)(const SingleWireTransfer& transfer,
                                      uint64_t deadlineUs,

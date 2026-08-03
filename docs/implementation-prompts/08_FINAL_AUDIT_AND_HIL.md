@@ -157,6 +157,10 @@ follow the packet README policy.
   stale queued EEPROM work and invalidate application calibration/association;
 - operation budgets, checked deadline/backoff arithmetic, channel-only stop,
   and stop-all behavior match Prompt 06 exactly;
+- host evidence proves Bus never passes reserved `UINT64_MAX` to a Backend,
+  finite `UINT64_MAX-1` holds remain completable, and post-acceptance poison
+  permanently blocks protocol traffic and successful Bus shutdown without
+  affecting an independent Bus;
 - shared-wire and separate-wire ownership, per-channel shutdown, serialization
   limits, and the application/harness responsibility boundary are documented;
 - clean package consumers build;

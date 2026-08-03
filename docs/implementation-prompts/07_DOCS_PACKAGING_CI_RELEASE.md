@@ -146,7 +146,9 @@ Required content:
   harness; product cable/connector/protection claims are limited to Prompt 08
   profiles actually tested;
 - shutdown order is Driver(s) -> fallible `Bus::end()` -> Backend, independently
-  for every physical wire;
+  for every physical wire; reserved `UINT64_MAX` write-high poison makes
+  `Bus::end()` permanently return `CLOCK_STALLED`, so the Backend remains alive
+  and upper firmware stops that channel;
 - exact state semantics;
 - page write as bounded owner scheduling unit;
 - fixed 10 ms bus-global high-only software policy, clearly labeled as requiring

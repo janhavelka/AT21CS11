@@ -536,13 +536,24 @@ void test_write_transport_failures_preserve_phase_prefix_and_exact_error() {
   struct Scenario {
     TransferPhase phase;
     size_t accepted;
+    bool currentMayBeAccepted;
+    bool dropAddressEvidence;
+    bool holdExpected;
+    Err expected;
   };
   static constexpr Scenario scenarios[] = {
-      {TransferPhase::START, 0},
-      {TransferPhase::DEVICE_ADDRESS_WRITE, 0},
-      {TransferPhase::MEMORY_ADDRESS, 0},
-      {TransferPhase::DATA_WRITE, 3},
-      {TransferPhase::STOP, 8}};
+      {TransferPhase::START, 0, false, false, false,
+       Err::TRANSPORT_TIMEOUT},
+      {TransferPhase::DEVICE_ADDRESS_WRITE, 0, false, false, false,
+       Err::TRANSPORT_TIMEOUT},
+      {TransferPhase::MEMORY_ADDRESS, 0, false, false, false,
+       Err::TRANSPORT_TIMEOUT},
+      {TransferPhase::DATA_WRITE, 3, false, false, true,
+       Err::TRANSPORT_TIMEOUT},
+      {TransferPhase::STOP, 8, false, false, true,
+       Err::TRANSPORT_TIMEOUT},
+      {TransferPhase::START, 0, true, false, false, Err::IO_ERROR},
+      {TransferPhase::DATA_WRITE, 0, true, true, true, Err::IO_ERROR}};
   const uint8_t payload[8] = {};
 
   for (const Scenario& scenario : scenarios) {
@@ -552,28 +563,33 @@ void test_write_transport_failures_preserve_phase_prefix_and_exact_error() {
     Driver driver;
     initializeDriver(driver, bus, fake, Config{}, CS11_ID);
     TransferScript failure = writeFailure(
-        TransportCode::TIMEOUT, scenario.phase, 3101, scenario.accepted);
+        TransportCode::TIMEOUT, scenario.phase, 3101, scenario.accepted,
+        scenario.currentMayBeAccepted);
+    if (scenario.dropAddressEvidence) {
+      failure.result.firstDeviceAddressAcked = false;
+      failure.result.memoryAddressAcked = false;
+    }
     failure.expected = expected::pageWrite(
         0xA0u, 0u, payload, 8u, SpeedMode::HIGH_SPEED,
         expected::HIGH_SPEED_POST_HIGH_US);
     TEST_ASSERT_TRUE(fake.queueTransfer(failure));
-    if (scenario.accepted != 0) {
+    if (scenario.holdExpected) {
       TEST_ASSERT_TRUE(fake.queueWait(waitOk()));
     }
 
     WriteResult result{};
     const size_t firstTransferCalls = fake.transferCalls;
     const Status status = driver.writeEepromPage(0, payload, 8, result);
-    assertStatus(Err::TRANSPORT_TIMEOUT, status);
+    assertStatus(scenario.expected, status);
     TEST_ASSERT_EQUAL_INT32(3101, status.detail);
     TEST_ASSERT_EQUAL_UINT32(scenario.accepted,
                              result.lastPageBytesAccepted);
     TEST_ASSERT_EQUAL_UINT8(
-        static_cast<uint8_t>(scenario.accepted == 0
-                                 ? WriteEffect::NOT_ATTEMPTED
-                                 : WriteEffect::MAY_HAVE_COMMITTED),
+        static_cast<uint8_t>(scenario.holdExpected
+                                 ? WriteEffect::MAY_HAVE_COMMITTED
+                                 : WriteEffect::NOT_ATTEMPTED),
         static_cast<uint8_t>(result.lastPageEffect));
-    TEST_ASSERT_EQUAL_UINT32(scenario.accepted == 0 ? 0 : 1,
+    TEST_ASSERT_EQUAL_UINT32(scenario.holdExpected ? 1 : 0,
                              fake.waitCalls);
     TEST_ASSERT_EQUAL_UINT32(firstTransferCalls + 1u, fake.transferCalls);
     TEST_ASSERT_FALSE(fake.overflow);
