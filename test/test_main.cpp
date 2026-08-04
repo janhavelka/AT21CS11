@@ -121,6 +121,15 @@ void test_one_bus_routes_unique_addresses_and_isolates_driver_health();
 void test_shared_reset_resynchronizes_each_device_without_cross_health();
 void test_failed_shared_reset_invalidates_both_device_speed_views();
 void test_separate_buses_reuse_addresses_and_isolate_hold_and_lifecycle();
+void test_bounded_cli_handles_empty_crlf_and_exact_line_limit();
+void test_bounded_cli_rejects_excess_arguments_without_truncation();
+void test_cli_numeric_and_hex_parsers_are_strict_and_transactional();
+void test_command_dispatch_checks_name_arity_and_confirmation_before_action();
+void test_hotplug_cadence_is_immediate_exact_wrap_safe_and_has_no_catchup();
+void test_presence_debounce_handles_bounce_absence_attach_and_sample_errors();
+void test_hotplug_action_rules_and_terminal_blocking_are_simple();
+void test_serial_identity_comparison_preserves_last_good_value_on_error();
+void test_example_arbiters_prevent_command_and_wire_starvation();
 
 void setUp() {}
 void tearDown() {}
@@ -248,5 +257,14 @@ int main() {
   RUN_TEST(test_shared_reset_resynchronizes_each_device_without_cross_health);
   RUN_TEST(test_failed_shared_reset_invalidates_both_device_speed_views);
   RUN_TEST(test_separate_buses_reuse_addresses_and_isolate_hold_and_lifecycle);
+  RUN_TEST(test_bounded_cli_handles_empty_crlf_and_exact_line_limit);
+  RUN_TEST(test_bounded_cli_rejects_excess_arguments_without_truncation);
+  RUN_TEST(test_cli_numeric_and_hex_parsers_are_strict_and_transactional);
+  RUN_TEST(test_command_dispatch_checks_name_arity_and_confirmation_before_action);
+  RUN_TEST(test_hotplug_cadence_is_immediate_exact_wrap_safe_and_has_no_catchup);
+  RUN_TEST(test_presence_debounce_handles_bounce_absence_attach_and_sample_errors);
+  RUN_TEST(test_hotplug_action_rules_and_terminal_blocking_are_simple);
+  RUN_TEST(test_serial_identity_comparison_preserves_last_good_value_on_error);
+  RUN_TEST(test_example_arbiters_prevent_command_and_wire_starvation);
   return UNITY_END();
 }

@@ -69,6 +69,7 @@ Statuses:
 | A-20 | uncertain write-byte acceptance is represented without replay | 1 | CLOSED | every-index fault tests |
 | A-21 | independent physical-wire instances share no mutable state | 1 | CLOSED | backend and two-Bus isolation tests; HIL-04 pending |
 | A-22 | duplicate live address claims fail within one Bus; separate Buses may reuse the address | 1 | CLOSED | claim/multi-Bus tests |
+| A-23 | a multi-frame public read can expose an earlier completed frame when a later frame fails, contrary to whole-call transactional output | 8 | OPEN | final audit must use fixed scratch storage and add a later-frame failure regression without changing the public API |
 
 ## Examples, packaging, and release quality
 
@@ -77,21 +78,21 @@ Statuses:
 | Q-01 | supported framework is Arduino S2/S3 only | 4 | CLOSED | pinned Stage-04 builds; package verification is tracked by Q-11/Q-12 |
 | Q-02 | host suite covers production paths and injected faults | 5 | CLOSED | native and sanitizer suites |
 | Q-03 | physical timing remains unqualified until raw HIL evidence exists | 8 | HIL_PENDING | Prompt-08 waveform rows |
-| Q-04 | example helpers/builds must work without repository-root includes | 6 | OPEN | two independent example builds |
-| Q-05 | command checking must reject placeholders and missing handlers | 6 | OPEN | semantic manifest/handler checker |
+| Q-04 | example helpers/builds must work without repository-root includes | 6 | CLOSED | four pinned independent Arduino example builds use local common headers |
+| Q-05 | command checking must reject placeholders and missing handlers | 6 | CLOSED | fixed catalog/registration dispatcher tests and semantic CLI checker |
 | Q-06 | version generation must be deterministic | 7 | OPEN | generator `--check` and byte-identical runs |
-| Q-07 | unsafe parser, scan, and unbounded example behavior | 6 | OPEN | bounded parser tests; scan removed |
-| Q-08 | product `LoadCellMap` and duplicated paging do not belong in examples | 6 | OPEN | obsolete helper removed |
-| Q-09 | concise two-device/two-pin example is missing | 6 | OPEN | S2/S3 multi-example builds |
+| Q-07 | unsafe parser, scan, and unbounded example behavior | 6 | CLOSED | fixed 128-byte parser tests; scans/stress/raw paths removed |
+| Q-08 | product `LoadCellMap` and duplicated paging do not belong in examples | 6 | CLOSED | product helper removed; page write calls production API once |
+| Q-09 | concise two-device/two-pin example is missing | 6 | CLOSED | S2/S3 multi-example builds with independent address-zero tuples |
 | Q-10 | consumer documentation does not match current API | 7 | OPEN | docs/link/API checks |
 | Q-11 | package contents are not explicitly curated | 7 | OPEN | allowlist and unpacked consumers |
 | Q-12 | CI lacks final docs/package/example gates | 7 | OPEN | pinned separated jobs |
-| Q-13 | destructive example input lacks a strong interlock | 6 | OPEN | exact page-write confirmation and rejection tests; irreversible commands absent |
+| Q-13 | destructive example input lacks a strong interlock | 6 | CLOSED | exact page-write confirmation/rejection tests; irreversible commands absent |
 | Q-14 | non-protected docs contain stale protocol/product claims | 7 | OPEN | documentation consistency checks |
 | Q-15 | mutable/irreversible HIL needs explicit authorization and evidence | 8 | HIL_PENDING | Prompt-08 authorization records |
 | Q-16 | governing `tWR` wording now requires no-ACK-poll released-high hold | 1 | CLOSED | `AGENTS.md` and write tests |
-| Q-17 | obsolete native-IDF example/checker contradicts the two-Arduino-example model | 6 | OPEN | Stage-06 removal; Stage-07 package/docs verification |
-| Q-18 | no concise synchronous multi-instance/hot-plug examples and RTOS guidance exist | 6 | OPEN | optional-polarity detect or 1,000 ms probe/recover poll, serial comparison, one owner, no RTOS framework |
+| Q-17 | obsolete native-IDF example/checker contradicts the two-Arduino-example model | 6 | CLOSED | native-IDF example/checker removed; exact layout check passes |
+| Q-18 | no concise synchronous multi-instance/hot-plug examples and RTOS guidance exist | 6 | CLOSED | detect debounce/no-detect polling, serial comparison, fairness tests, and one-owner guidance |
 | Q-19 | docs lack simple topology, serialization, hot-plug, and firmware responsibility guidance | 7 | OPEN | exact detect/no-detect behavior in README/MIGRATION/package docs |
 
 ## Closure rule

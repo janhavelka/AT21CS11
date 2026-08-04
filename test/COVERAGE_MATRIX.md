@@ -59,7 +59,7 @@ is covered by `test_driver_end_is_idempotent_silent_and_releases_one_claim`.
 | P-19 | `test_manufacturer_revisions_and_part_mismatch_are_exact` | `Driver::_classifyManufacturerIdRaw` |
 | P-20 | `test_discovery_sample_and_release_are_distinct`; `test_esp32_reset_discovery_has_one_exact_request_and_release_check`; held-low waveform is Stage 08 HIL-01 through HIL-06 | `Bus::_resetAndDiscover`, `Esp32Transport::_resetAndDiscover` |
 | P-21 | **HIL_ONLY:** Stage 08 HIL-07/HIL-08 temperature write qualification | 10 ms Bus write-high policy and released parts |
-| P-22 | **HIL_ONLY:** Stage 08 HIL-09 removable two-channel harness qualification | released harness electrical profile |
+| P-22 | **OUT_OF_SCOPE:** no generic remote-harness behavior is claimed; Stage 08 records only the exact HIL-04/HIL-05 setups used | firmware-owned wiring and electrical qualification |
 
 ## Architecture findings
 
@@ -85,7 +85,7 @@ is covered by `test_driver_end_is_idempotent_silent_and_releases_one_claim`.
 | A-18 | `test_binding_epoch_lifecycle_and_stale_driver_cache`; `test_rebind_and_end_preserve_retained_hold`; `test_live_claims_block_bus_end_until_driver_end` | Bus binding epoch, `Bus::bind`, `Bus::end` |
 | A-19 | `test_checked_deadline_boundaries_are_exact`; `test_post_acceptance_hold_addition_handles_below_at_and_above_max`; `test_esp32_transfer_validation_and_wait_guards_are_bounded` | strict finite deadline arithmetic, reserved `UINT64_MAX` poison/status precedence, independent-Bus isolation, and bounded waits |
 | A-20 | `test_every_uncertain_data_ack_is_held_reported_and_never_replayed`; `test_write_transport_failures_preserve_phase_prefix_and_exact_error`; `test_freeze_first_data_nack_has_no_hold_or_effect`; `test_esp32_write_ack_boundaries_preserve_ambiguous_and_definite_evidence` | current-byte acceptance evidence and write/mutation effect mapping, including malformed non-payload evidence |
-| A-21 | `test_separate_buses_reuse_addresses_and_isolate_hold_and_lifecycle`; `test_failed_shared_reset_invalidates_both_device_speed_views`; `test_esp32_instances_keep_descriptors_pins_and_line_state_independent`; physical proof is Stage 08 HIL-09 | independent Transport -> Bus -> Driver tuples |
+| A-21 | `test_separate_buses_reuse_addresses_and_isolate_hold_and_lifecycle`; `test_failed_shared_reset_invalidates_both_device_speed_views`; `test_esp32_instances_keep_descriptors_pins_and_line_state_independent`; physical proof is Stage 08 HIL-04 | independent Transport -> Bus -> Driver tuples |
 | A-22 | `test_address_claims_and_transactional_rebind`; `test_separate_buses_reuse_addresses_and_isolate_hold_and_lifecycle` | per-Bus address claim mask |
 
 ## Stage 04 smoke consumers and physical rows
@@ -101,9 +101,8 @@ structure/build checks only.
 | `phy_smoke_s2` | `esp32-s2-saola-1` | **HIL_ONLY:** HIL-01, HIL-03, HIL-05 |
 | `phy_smoke_s3` | `esp32-s3-devkitc-1` | **HIL_ONLY:** HIL-02, HIL-04, HIL-06 |
 
-HIL-07/HIL-08 are separate mutable S3 qualification runs. HIL-09 uses the
-Stage 06 firmware-owner fixture; the Stage 04 smoke source does not exercise
-those rows.
+Stage 08 HIL-04/HIL-05 use the Stage 06 synchronous examples with their exact
+recorded build overrides. The Stage 04 smoke source does not exercise hot-plug.
 
 ## Stage 05 owned quality finding
 
@@ -115,3 +114,13 @@ those rows.
 uses ASan+UBSan on supported non-Windows hosts and GCC trap-mode UBSan on the
 local MinGW host, whose compiler installation provides neither sanitizer
 runtime library.
+
+## Stage 06 example findings
+
+| Finding | Evidence | Example/helper under test |
+|---|---|---|
+| Q-04/Q-09 | `ex_cli_s2`, `ex_cli_s3`, `ex_multi_s2`, and `ex_multi_s3` builds | two local-include Arduino examples and five common headers |
+| Q-05/Q-13 | `test_command_dispatch_checks_name_arity_and_confirmation_before_action`; `tools/check_cli_contract.py` | authoritative command catalog, exact registration tables, destructive confirmation |
+| Q-07 | `test_bounded_cli_handles_empty_crlf_and_exact_line_limit`; `test_bounded_cli_rejects_excess_arguments_without_truncation`; `test_cli_numeric_and_hex_parsers_are_strict_and_transactional` | `BoundedCli.h` fixed storage and parsers |
+| Q-08/Q-17 | `tools/check_cli_contract.py` exact layout/forbidden-artifact checks | obsolete product map, helper facades, and native-IDF example removed |
+| Q-18 | `test_hotplug_cadence_is_immediate_exact_wrap_safe_and_has_no_catchup`; `test_presence_debounce_handles_bounce_absence_attach_and_sample_errors`; `test_hotplug_action_rules_and_terminal_blocking_are_simple`; `test_serial_identity_comparison_preserves_last_good_value_on_error`; `test_example_arbiters_prevent_command_and_wire_starvation` | example-only `HotPlugPolicy`, serial comparison, and fairness selectors in `WireInstance.h` |
