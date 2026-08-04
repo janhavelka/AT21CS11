@@ -90,13 +90,36 @@ a wire instance and show the actual Backend/Bus/Driver objects.
 ### Hot-plug
 
 - absence during initialization retains valid bindings;
-- firmware decides when to call explicit `recover()` after attachment;
+- `Esp32TransportConfig::presencePin == -1` disables the optional detect input;
+  an enabled valid pin uses `presenceActiveHigh` for active-high/active-low
+  mapping and requires stable external bias because internal pulls are off;
+- `Bus::readPresenceIndicator()` is one raw logical Bus-wide sample; disabled
+  returns `UNSUPPORTED_COMMAND`, false is absence, and callback faults remain
+  errors;
+- firmware debounces an enabled detect input and calls explicit `recover()`
+  after stable attachment;
+- without a detect input, firmware may make one liveness `probe()` per bounded
+  polling event while online and one `recover()` attempt per event while
+  uninitialized/offline; document the examples' configurable 1,000 ms default;
+- transport failures may remain `DEGRADED` until `offlineThreshold`; a
+  replacement that returns before `OFFLINE`, or entirely between polls, may be
+  unobservable without a detect signal;
+- the example policy follows public Driver initialization/state and does not
+  reinterpret every error or duplicate the Driver lifecycle;
+- document the exact `AT21CS_EXAMPLE_*` build-time overrides for SI/O pin,
+  optional detect pin, polarity, address, and AT21CS01/AT21CS11 selection; the
+  committed defaults keep detect disabled;
 - `probe()` is liveness-only and does not replace recovery after power-up;
-- an optional presence input is a connector hint, not identity;
+- a presence input is a connector/Bus hint, not chip or address identity;
 - after recovery, firmware may read/compare the serial before using
   application-owned data associated with the previous device;
-- the library does not debounce, retry automatically, track attachment
-  generations, or own calibration/replacement policy.
+- the library does not wake itself, debounce, retry automatically, track
+  attachment generations, or own replacement policy;
+- on a shared Bus, recovery Reset affects every Driver and one detect input
+  cannot distinguish addresses; independent Buses remain independent;
+- with no detect input, idle removal is unknowable until an explicit operation
+  or scheduled probe fails, and a remove/replacement entirely between polls can
+  be missed; do not hide that physical limitation.
 
 ### Protocol and safety
 
@@ -111,8 +134,8 @@ a wire instance and show the actual Backend/Bus/Driver objects.
 - Arduino ESP32-S2/S3 is the only supported firmware integration, while core
   interfaces remain framework-neutral.
 
-Do not advertise a generic remote cable, load-cell harness, temperature range,
-or physical production qualification not proven by Prompt 08 evidence.
+Do not advertise a generic remote harness, temperature range, or physical
+production qualification not proven by Prompt 08 evidence.
 
 ## Documentation checks
 
@@ -123,6 +146,8 @@ Provide a focused `tools/check_docs.py` that checks:
 - example and PlatformIO environment names;
 - version consistency;
 - absence of obsolete v1/native-IDF/RTOS-owner claims;
+- consistency of optional detect-pin defaults/polarity and the example polling
+  constants with the shared contract and Prompt 06;
 - protected report SHA-256 without modifying it;
 - authoritative datasheet URL/hash/size consistency.
 
@@ -229,7 +254,7 @@ only successful commands actually executed.
 
 ## Exit criteria
 
-- Public docs match current synchronous API and hot-plug behavior.
+- Public docs match current synchronous API and both hot-plug paths.
 - One-task ownership is recommended without supplying an RTOS framework.
 - Exactly two Arduino examples build for S2/S3 from the clean package.
 - No owner fixture, mailbox DTO, native-IDF artifact, v1 API, or product schema

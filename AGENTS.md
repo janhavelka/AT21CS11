@@ -56,9 +56,13 @@ Rules:
   calling them sequentially. Multiple tasks may own separate physical-wire
   instances only after that Backend's simultaneous cross-instance timing has
   been qualified; Drivers sharing one Bus always share one owner.
-- Hot-plug is explicit: retain valid Backend/Bus/Driver bindings while a device
-  is absent, then let firmware call `recover()` after attachment. The library
-  does not poll, retry, or reconnect in the background.
+- Hot-plug is explicit. `Esp32TransportConfig::presencePin == -1` disables the
+  optional detect input; an enabled input uses `presenceActiveHigh` to select
+  active-high or active-low logic. It is a raw Bus-wide hint, not chip identity.
+- Retain valid Backend/Bus/Driver bindings while a device is absent. Firmware
+  may debounce an enabled detect input or periodically call `probe()`/`recover()`
+  when no detect input exists. The library itself creates no poller, timer,
+  retry loop, interrupt handler, or background reconnect work.
 
 ## Protocol Rules (AT21CS)
 

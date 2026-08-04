@@ -10,6 +10,10 @@ Completed and checkpointed. This file records the supported Backend boundary.
   `https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip`.
 - Core remains framework-neutral; native ESP-IDF is not supported or claimed.
 - `Esp32Transport` owns pin configuration and precise single-wire timing.
+- Its optional detect input is disabled only by `presencePin == -1`. An enabled
+  valid input distinct from SI/O is sampled once per callback and mapped by
+  `presenceActiveHigh`; internal pulls, interrupts, debounce, and polling remain
+  disabled/absent.
 - Each callback executes one bounded whole frame with correct open-drain GPIO,
   MSb order, ACK sampling, Reset/Discovery, and released-high cleanup.
 - Timing-critical backend sections may use guarded Arduino-ESP32/FreeRTOS

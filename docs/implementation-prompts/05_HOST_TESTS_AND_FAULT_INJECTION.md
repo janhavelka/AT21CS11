@@ -19,6 +19,9 @@ expected frames and injected faults, including:
 - address claims, stale bindings, shared Reset generation, and retained holds;
 - two Drivers on one Bus and two independent address-zero Buses;
 - absent-at-boot binding retention and later explicit hot-plug recovery;
+- disabled, active-high, and active-low presence configuration; invalid and
+  colliding pins; logical absence versus presence-callback transport failure;
+- one-shot presence sampling with no SI/O frame, Reset, or retained-hold clear;
 - backend pin/descriptor/timing isolation under serialized interleaving;
 - sanitizers and strict warnings.
 
@@ -29,4 +32,6 @@ does not claim physical waveform success; those rows remain Prompt-08 HIL.
 
 Stages 06-07 run the native suite after affected changes. Add focused tests for
 new example/parser/package behavior, but do not create a second transport, fake
-protocol implementation, RTOS owner fixture, or application scheduler model.
+protocol implementation, RTOS owner fixture, or general application scheduler
+model. Prompt 06's tiny pure cadence/debounce helper remains example firmware,
+not a replacement lifecycle or scheduler framework.

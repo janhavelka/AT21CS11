@@ -28,16 +28,21 @@ Maintain the simple architecture:
 - calls are synchronous, bounded, deterministic, and externally serialized;
 - the safe default is one firmware task/loop owning all instances;
 - the library creates no task, queue, scheduler, application-facing mutex,
-  retry loop, or hot-plug poller; private bounded Backend timing-critical
-  facilities remain allowed;
-- absence retains valid bindings and firmware explicitly calls `recover()` after
-  attachment;
+  internal retry loop, or hot-plug poller; private bounded Backend
+  timing-critical facilities remain allowed;
+- `presencePin == -1` disables the optional Bus-wide detect input; enabled
+  detection maps polarity with `presenceActiveHigh` and remains a raw one-shot
+  hint rather than identity;
+- absence retains valid bindings. Firmware may debounce an enabled detect input
+  or make one no-detect `probe()`/`recover()` action at each bounded polling
+  event according to public Driver state;
 - firmware owns RTOS messaging, retry/backoff, identity association,
   persistence, logging, calibration, machine control, and safety policy.
 
 Prompt 06 adds no RTOS owner fixture, mailbox, application DTOs, or scheduling
-layer. Do not create `test/consumer/firmware_owner/` or
-`tools/run_firmware_owner_fixture.py`.
+layer. Its fixed-state cadence/debounce helper is example firmware called by
+Arduino `loop()`, never library background work. Do not create
+`test/consumer/firmware_owner/` or `tools/run_firmware_owner_fixture.py`.
 
 Validate complete inputs before I/O. Preserve transactional outputs, exact
 NACK/transport distinctions, whole-frame callbacks, checked deadlines,

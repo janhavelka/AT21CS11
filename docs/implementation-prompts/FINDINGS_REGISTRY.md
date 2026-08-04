@@ -41,7 +41,7 @@ Statuses:
 | P-19 | Manufacturer-ID part classification masks only revision bits | 2 | CLOSED | all-revision tests |
 | P-20 | Discovery verifies both response and release-high | 4 | CLOSED | backend/fault tests; held-low HIL pending |
 | P-21 | fixed 10 ms write policy must not be advertised beyond qualified part/temperature conditions | 8 | HIL_PENDING | scoped HIL and honest documentation |
-| P-22 | generic remote cable/load-cell harness behavior is not a library guarantee | 8 | OUT_OF_SCOPE | only explicitly recorded electrical setups may be qualified |
+| P-22 | generic remote harness behavior is not a library guarantee | 8 | OUT_OF_SCOPE | only explicitly recorded electrical setups may be qualified |
 
 ## Architecture, lifecycle, and diagnostics
 
@@ -91,8 +91,8 @@ Statuses:
 | Q-15 | mutable/irreversible HIL needs explicit authorization and evidence | 8 | HIL_PENDING | Prompt-08 authorization records |
 | Q-16 | governing `tWR` wording now requires no-ACK-poll released-high hold | 1 | CLOSED | `AGENTS.md` and write tests |
 | Q-17 | obsolete native-IDF example/checker contradicts the two-Arduino-example model | 6 | OPEN | Stage-06 removal; Stage-07 package/docs verification |
-| Q-18 | no concise synchronous multi-instance/hot-plug examples and RTOS guidance exist | 6 | OPEN | two wire instances, explicit recover/serial comparison, one-owner guidance, no RTOS framework |
-| Q-19 | docs lack simple topology, serialization, hot-plug, and firmware responsibility guidance | 7 | OPEN | README/MIGRATION/package docs |
+| Q-18 | no concise synchronous multi-instance/hot-plug examples and RTOS guidance exist | 6 | OPEN | optional-polarity detect or 1,000 ms probe/recover poll, serial comparison, one owner, no RTOS framework |
+| Q-19 | docs lack simple topology, serialization, hot-plug, and firmware responsibility guidance | 7 | OPEN | exact detect/no-detect behavior in README/MIGRATION/package docs |
 
 ## Closure rule
 

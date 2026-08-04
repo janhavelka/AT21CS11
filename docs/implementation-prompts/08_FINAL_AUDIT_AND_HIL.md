@@ -66,6 +66,11 @@ Verify from current production paths and independent tests:
 - independent Buses share no mutable state;
 - startup and shutdown order match the shared contract;
 - absent-at-boot keeps binding and later explicit `recover()` succeeds;
+- optional detect disabled/high/low configuration matches the public defaults;
+  a detect sample is Bus-wide, one-shot, and never substitutes for protocol
+  identity;
+- the example-only debounce and 1,000 ms no-detect probe/recovery cadence are
+  bounded, wrap-safe, single-action, and absent from core;
 - `probe()` remains liveness-only;
 - one firmware task/loop can safely serialize multiple synchronous wire
   instances;
@@ -90,6 +95,8 @@ For each physical run record:
 
 - immutable candidate commit and firmware hash;
 - board/module revision and framework/toolchain versions;
+- exact `AT21CS_EXAMPLE_*` build-time override values;
+- configured Driver `offlineThreshold` values;
 - exact ordered EEPROM part and device marking;
 - SI/O pin, pull-up voltage/resistance, wiring topology, and presence-pin use;
 - supply voltage and ambient/device temperature actually observed;
@@ -110,11 +117,14 @@ Use the smallest available matrix that covers every advertised capability:
 | HIL-01 | ESP32-S2 Arduino, one AT21CS11 at High Speed: startup, identity, random read, page write if authorized, and write-high waveform |
 | HIL-02 | ESP32-S3 Arduino, one AT21CS01 at High and Standard Speed: startup, identity, random read, speed change, page write if authorized, and waveforms |
 | HIL-03 | two differently addressed devices sharing one SI/O wire: independent Driver identity, shared Reset generation, and Bus-wide write hold |
-| HIL-04 | two independent SI/O wires, both address zero: serialized calls, failure/hot-plug on A, continued operation on B, and independent shutdown |
+| HIL-04 | two independent SI/O wires, both address zero: serialized calls, no-detect polling hot-plug on A, continued operation on B, and independent shutdown |
+| HIL-05 | optional externally biased detect input: configured polarity, stable absence without SI/O recovery traffic, debounce, attachment recovery, and serial comparison |
 
 If a row cannot run, record `HIL_PENDING`; do not substitute a host test. A
 release may describe software support while clearly stating which physical rows
 remain unqualified, but it must not claim those rows as production-qualified.
+An unavailable HIL-05 setup does not reopen or block completed software work;
+it limits only the physical detect-input qualification claim.
 
 ## Required waveform observations
 
@@ -139,17 +149,42 @@ extends a datasheet limit beyond the tested conditions.
 
 ## Functional hot-plug sequence
 
-For the independent-wire row:
+For HIL-04 with `presencePin == -1`:
 
 1. Start A and B and read both serial numbers.
 2. Remove or power down A using the approved setup.
-3. Confirm A reports the exact absence/failure while B still reads correctly.
-4. Confirm no automatic retry or hidden background traffic occurs.
-5. Reattach/power A and call `recover()` explicitly.
-6. Read A serial again and let the harness compare it with the previous value.
-7. Confirm B state and diagnostics changed only for B calls.
+3. Confirm the next 1,000 ms A poll performs one `probe()`, reports its exact
+   result, and drives production state according to Driver policy. Record any
+   additional bounded polls until the configured failure threshold reaches
+   `OFFLINE`. If the threshold is zero, record that state-triggered automatic
+   recovery is disabled. Confirm B still reads correctly.
+4. Confirm later A polls perform at most one `recover()` attempt per 1,000 ms
+   while uninitialized/offline, with no catch-up burst. Also confirm the library
+   produces no traffic when the owner does not call it.
+5. Reattach/power A and observe one scheduled `recover()` attempt.
+6. Read A serial again and compare it with the previous value.
+7. Confirm B state and diagnostics changed only for B calls and B is not starved
+   by repeated A failures.
 8. Shut down A in Driver -> Bus -> Backend order and confirm B remains usable;
    then shut down B.
+
+For HIL-05, use a documented stable external detect signal. Test the actual
+wired active level and then the opposite `presenceActiveHigh` configuration
+with the driven level inverted; do not leave the GPIO floating. Changing
+polarity requires the ordered Driver -> Bus -> Backend teardown followed by a
+fresh begin/bind/initialize sequence, or a separate recorded firmware run;
+`Esp32Transport` is never reconfigured while initialized. Confirm:
+
+1. logical absence is debounced and causes no SI/O recovery attempt;
+2. logical attachment is debounced before one recovery attempt;
+3. a failed recovery while logical present is spaced by 1,000 ms;
+4. logical presence alone never counts as chip/address identity;
+5. recovery success is followed by serial comparison;
+6. changing only A's detect signal does not alter independent Bus B.
+
+If the available fixture cannot safely drive both logical polarities, record the
+unrun polarity as `HIL_PENDING`; host polarity tests remain software evidence,
+not substitute physical evidence.
 
 For the shared-wire row, remember that recovery Reset is Bus-wide. Verify the
 other Driver observes the shared generation change and resynchronizes without a
@@ -192,7 +227,8 @@ publishing, or uploading.
 - Independent software audit is complete and reproducible.
 - The library remains a simple synchronous component suitable for an external
   firmware task.
-- Explicit hot-plug recovery works without internal tasking or retries.
+- Detect-driven and no-detect hot-plug recovery work without internal tasking or
+  library-owned retries.
 - HIL claims match only raw recorded evidence and clearly list pending rows.
 - No irreversible action occurred without exact authorization.
 - Registry, documentation, package, examples, and metadata agree with the final

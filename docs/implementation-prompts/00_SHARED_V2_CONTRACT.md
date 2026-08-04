@@ -13,7 +13,7 @@ identity, device state, diagnostics, and conservative mutation evidence.
 It does not implement:
 
 - an RTOS task, queue, scheduler, mutex, request/result DTO, or callback service;
-- automatic retry, reconnect, presence debounce, or hot-plug polling;
+- internal retry, reconnect, presence debounce, or hot-plug polling;
 - logging, telemetry, persistence, calibration, connector policy, or machine
   control;
 - a native ESP-IDF integration path.
@@ -139,23 +139,51 @@ Initialization failure caused by an absent device retains a valid Bus/Driver
 binding and the address claim. Firmware does not need to reconstruct objects or
 resupply configuration when the device is attached later.
 
-Hot-plug recovery is explicit:
+The optional ESP32 detect input has this exact contract:
 
-1. Firmware observes a connector hint or reaches its own bounded retry event.
-2. Firmware calls `Driver::recover()` once.
-3. `recover()` performs the required Reset/Discovery and initialization.
-4. On success, firmware may call `readSerialNumber()` and compare the returned
-   bytes with its application-owned previous identity before reusing associated
-   application data.
+- `Esp32TransportConfig::presencePin` defaults to `-1`; exactly `-1` disables
+  detection. Any enabled pin must be a valid input GPIO distinct from `sioPin`.
+- `presenceActiveHigh` defaults to `true`. When true, high means present; when
+  false, low means present. The Backend applies this mapping.
+- The Backend configures the enabled pin as a plain input with both internal
+  pulls disabled. Board hardware/firmware owns a stable external bias.
+- `Bus::hasPresenceIndicator()` reports whether the bound Backend supplies the
+  callback. `Bus::readPresenceIndicator(bool&)` takes one bounded instantaneous
+  logical sample. With no callback it returns `UNSUPPORTED_COMMAND` without
+  device I/O. A callback fault is an error, never logical absence.
+- Presence sampling sends no SI/O frame, performs no Reset/Discovery, and does
+  not consume or clear a retained write-high hold.
 
-`probe()` is a nondestructive liveness check, not power-up recovery. An optional
-presence pin is an instantaneous diagnostic hint; it does not prove chip
-identity and is not debounced by the library.
+`Driver::initialize()` and `Driver::recover()` use an enabled detect input only
+as a preflight. Logical absence returns `NOT_PRESENT` before Reset/Discovery and
+retains Backend/Bus/Driver binding, configuration, and address claim. Logical
+presence only permits the real Reset/Discovery and identity checks; it does not
+prove that a chip or a particular address exists. With no detect input those
+methods proceed directly to the protocol checks.
 
-Ordinary operations contain no hidden Reset, Discovery, retry, or recovery.
-Failure on one independent Bus does not alter another. On a shared Bus, a
-physical Reset necessarily affects every attached Driver through the shared
-Reset generation.
+Hot-plug recovery remains explicit synchronous firmware policy:
+
+1. Firmware debounces an enabled detect input. With no detect input, it may
+   reach a bounded polling event and call `probe()` once while the Driver is
+   initialized/online.
+2. After debounced attachment, or while a no-detect Driver is
+   uninitialized/offline, firmware calls `Driver::recover()` once; no loop
+   exists inside that call.
+3. On recovery success, firmware may call `readSerialNumber()` and compare the
+   returned bytes with its application-owned previous identity before reusing
+   associated application data.
+
+`probe()` is a liveness check, not power-up recovery. With no detect input, an
+idle removal cannot be known until firmware performs an explicit operation or
+scheduled probe. A healthy instance is never periodically Reset merely to look
+for replacement.
+
+Ordinary library operations contain no hidden Reset, Discovery, retry, or
+recovery, and the library never wakes itself. Firmware may implement a bounded
+external polling schedule. Presence belongs to the Backend/Bus tuple, not an
+individual Driver. On a shared Bus one detect input cannot distinguish
+addresses, and any recovery that reaches Reset changes the shared generation,
+even when that Reset attempt fails. Separate Buses remain independent.
 
 Shutdown order is Driver(s), fallible `Bus::end()`, then Backend. Firmware must
 keep the Backend alive unless `Bus::end()` succeeds.
@@ -232,7 +260,7 @@ Core and Backend remain fixed-size, bounded, synchronous, and free of hidden
 policy. Firmware owns:
 
 - tasking, queues, mutexes, serialization, and deadlines outside a call;
-- retry/backoff and hot-plug detection cadence;
+- retry/backoff, detect-input debounce, and hot-plug polling cadence;
 - identity association, persistence, calibration schema, and replacement
   policy;
 - connector pin maps, pull-ups, level shifting, cabling, and electrical

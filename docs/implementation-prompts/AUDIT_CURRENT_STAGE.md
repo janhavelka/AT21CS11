@@ -25,8 +25,13 @@ Verify requirement by requirement:
 - synchronous externally serialized operation with no library task, queue,
   application-facing mutex, retry, logging, or product policy, while private
   bounded Backend timing-critical facilities remain allowed;
-- hot-plug through retained binding plus explicit `recover()`, with `probe()`
-  remaining liveness-only;
+- exact optional detect semantics: `-1` disabled, valid distinct input when
+  enabled, active-high/active-low mapping, no internal pulls/debounce/poller,
+  one Bus-wide sample, and callback error distinct from absence;
+- hot-plug through retained binding plus one explicit `recover()` per caller
+  event, with `probe()` remaining liveness-only;
+- Prompt-06 detect debounce and 1,000 ms no-detect probe/recovery scheduling are
+  fixed-state, wrap-safe, bounded, host-tested, and example-only;
 - two examples and RTOS guidance do not introduce an owner framework, mailbox,
   request DTO, attachment generation, or scheduler.
 

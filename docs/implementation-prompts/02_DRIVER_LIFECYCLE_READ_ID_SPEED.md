@@ -11,6 +11,9 @@ Completed and checkpointed. This file records the regression boundary.
 - Initialization absence keeps the Driver bound and recoverable.
 - `recover()` is the explicit hot-plug/power-up path and performs one
   Reset/Discovery/initialization sequence with no hidden retry.
+- When its Bus has a presence callback, `initialize()`/`recover()` use one raw
+  logical sample only as a preflight. False returns `NOT_PRESENT` before Reset;
+  true still requires the real protocol and identity checks.
 - `probe()` is liveness-only and performs no reconnect Reset.
 - Ordinary reads are address-explicit and transactional.
 - Manufacturer ID retains the raw value while part classification masks only
@@ -30,5 +33,6 @@ regressions are covered by `test/test_lifecycle.cpp`,
 ## Regression rule
 
 Hot-plug remains synchronous: firmware decides when to call `recover()` and may
-read/compare the serial afterward. Do not add polling, retry/backoff,
-attachment-generation, or RTOS policy to Driver.
+read/compare the serial afterward. Caller-owned bounded polling is allowed;
+polling, retry/backoff, attachment-generation, and RTOS policy must not enter
+Driver.

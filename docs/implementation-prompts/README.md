@@ -43,9 +43,9 @@ The hash and size, not the filename, establish authority. Never modify
 
 The library is synchronous. A call validates its complete input, performs its
 documented bounded synchronous work, and returns the exact status and result
-evidence. It creates no task, queue, scheduler, application-facing mutex, retry
-loop, persistence, logging, or product policy. A Backend may use private bounded
-critical facilities for physical timing.
+evidence. It creates no task, queue, scheduler, application-facing mutex,
+internal retry/poll loop, persistence, logging, or product policy. A Backend
+may use private bounded critical facilities for physical timing.
 
 One physical SI/O wire uses:
 
@@ -85,17 +85,32 @@ the protocol hold; firmware does not ACK-poll it.
 Hot-plug is supported without an internal task:
 
 1. Configure Backend, Bus, and Driver once.
-2. If `begin()`/`initialize()` reports absence, keep the valid bindings.
-3. Firmware decides when attachment may have occurred and calls `recover()`.
-4. A successful `recover()` performs the required Reset/Discovery and restores
-   normal Driver operation.
-5. Firmware may then read the serial number and decide whether application data
-   associated with the previous physical device is still valid.
+2. If `begin()`/`initialize()` reports absence, keep the valid bindings and
+   address claim.
+3. If a separate detect signal exists, set `presencePin >= 0` and select its
+   logical polarity with `presenceActiveHigh`. Firmware samples it through
+   `Bus::readPresenceIndicator()` and owns any debounce.
+4. If no signal exists, keep `presencePin == -1`. At each bounded polling event
+   firmware may call `probe()` once while initialized/online or `recover()` once
+   while uninitialized/offline. Prompt 06 uses a configurable 1,000 ms example
+   period.
+5. A successful `recover()` performs the required Reset/Discovery and restores
+   normal Driver operation. Firmware may then read and compare the serial.
 
-`probe()` checks liveness only; it is not reconnect after power-up. An optional
-presence input is only a hint. The library does not debounce connectors,
-schedule retries, track attachment generations, or own calibration identity.
-Failure or removal on one independent Bus must not alter another Bus.
+The detect input is one raw, externally biased, Bus-wide GPIO sample. It does
+not identify a chip or address, and logical present only permits the real
+protocol checks. `probe()` checks liveness only; it is not reconnect after
+power-up. The library never wakes itself, debounces, schedules retries, tracks
+attachment generations, or owns replacement policy.
+
+Shipped example wiring/part choices are reproducible `AT21CS_EXAMPLE_*`
+build-time overrides. Their committed detect-pin default is `-1`; no optional
+pin number is invented as a board guarantee.
+
+On a shared wire, detect and Reset are Bus-wide. One detect input cannot say
+which addressed chip is present, and a recovery that reaches Reset changes the
+shared generation. Separate Backend/Bus tuples have independent detect inputs
+and state.
 
 ## Stage sequence from the current branch
 
@@ -113,6 +128,8 @@ Failure or removal on one independent Bus must not alter another Bus.
 Do not implement an RTOS owner fixture in any stage. Do not add
 `test/consumer/firmware_owner/`, an owner task, mailbox, request/result DTOs, or
 attachment-generation machinery to core, examples, tests, or package content.
+Prompt 06 may contain a small fixed-state example polling helper; it is ordinary
+firmware code called from Arduino `loop()`, not a library service or RTOS layer.
 
 ## Checkpoints
 
