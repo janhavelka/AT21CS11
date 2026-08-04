@@ -124,3 +124,12 @@ runtime library.
 | Q-07 | `test_bounded_cli_handles_empty_crlf_and_exact_line_limit`; `test_bounded_cli_rejects_excess_arguments_without_truncation`; `test_cli_numeric_and_hex_parsers_are_strict_and_transactional` | `BoundedCli.h` fixed storage and parsers |
 | Q-08/Q-17 | `tools/check_cli_contract.py` exact layout/forbidden-artifact checks | obsolete product map, helper facades, and native-IDF example removed |
 | Q-18 | `test_hotplug_cadence_is_immediate_exact_wrap_safe_and_has_no_catchup`; `test_presence_debounce_handles_bounce_absence_attach_and_sample_errors`; `test_hotplug_action_rules_and_terminal_blocking_are_simple`; `test_serial_identity_comparison_preserves_last_good_value_on_error`; `test_example_arbiters_prevent_command_and_wire_starvation` | example-only `HotPlugPolicy`, serial comparison, and fairness selectors in `WireInstance.h` |
+
+## Stage 07 documentation, package, and release findings
+
+| Finding | Evidence | Surface under test |
+|---|---|---|
+| P-18/Q-10/Q-14/Q-19 | `tools/check_docs.py`; Doxygen with warnings as errors | public symbols, links, ownership/hot-plug/RTOS guidance, authoritative hashes, and removal of stale non-protected references |
+| Q-06 | two byte-identical `scripts/generate_version.py` runs and `--check` | `library.json` -> deterministic `Version.h` RC metadata |
+| Q-11 | `tools/check_package.py --inspect`, `--build-platform-neutral`, and `--build-arduino` | exact archive allowlist, safe unpack, checkout isolation, core consumer, and both examples on S2/S3 |
+| Q-12 | parsed `.github/workflows/ci.yml`; Stage 07 local gates | pinned separated native, sanitizer, static, docs, version, clean-package, and checkout PHY-smoke jobs |

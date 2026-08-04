@@ -23,8 +23,13 @@ include/AT21CS/       - Public API headers only
   CommandTable.h
   Status.h
   Config.h
+  Types.h
+  Transport.h
+  Bus.h
   AT21CS.h
   Version.h           - Auto-generated (do not edit)
+  platform/esp32/
+    Esp32Transport.h  - Arduino-ESP32 Backend API
 src/                  - Implementation (.cpp)
 examples/
   01_*/ 02_*/         - Interactive demos

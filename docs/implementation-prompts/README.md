@@ -121,8 +121,8 @@ and state.
 | 03 | completed | writes, Security, Lock, ROM zones, and Freeze evidence |
 | 04 | completed | Arduino ESP32-S2/S3 Backend |
 | 05 | completed | host tests and fault injection |
-| 06 | current | two bounded synchronous Arduino examples and RTOS guidance |
-| 07 | remaining | docs, clean packaging, CI, and RC metadata |
+| 06 | completed | two bounded synchronous Arduino examples and RTOS guidance |
+| 07 | completed | docs, clean packaging, CI, and RC metadata |
 | 08 | remaining | independent final audit and scoped HIL |
 
 Do not implement an RTOS owner fixture in any stage. Do not add

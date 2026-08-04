@@ -1,23 +1,42 @@
 # Contributing
 
-Thanks for contributing.
+Keep changes small, deterministic and consistent with the synchronous ownership
+model described in [README.md](README.md).
 
-## Quick Start
+Before opening a pull request, run the affected checks. The complete software
+gate is:
 
-1. Create a branch.
-2. Implement focused changes.
-3. Build examples before PR:
-   - `python -m platformio run -e ex_general_control_s3 -e ex_multi_device_s3 -e ex_general_control_s2`
-4. Update docs/changelog if behavior changed.
-5. Open PR.
+```text
+.\scripts\pio.cmd test -e native
+.\scripts\pio.cmd test -e native_sanitize
+python tools/check_cli_contract.py
+python tools/check_docs.py
+python scripts/generate_version.py --check
+python tools/check_package.py --inspect
+python tools/check_package.py --build-platform-neutral
+python tools/check_package.py --build-arduino
+.\scripts\pio.cmd run -e ex_cli_s3
+.\scripts\pio.cmd run -e ex_cli_s2
+.\scripts\pio.cmd run -e ex_multi_s3
+.\scripts\pio.cmd run -e ex_multi_s2
+```
 
-## Guidelines
+On Windows always use `scripts\pio.cmd`; it selects the existing user-managed
+PlatformIO installation. Do not install another PlatformIO Core for this
+repository.
 
-- Keep public API changes intentional and documented.
-- Preserve deterministic behavior and bounded waits.
-- Avoid heap allocation in library steady-state paths.
-- Keep protocol-level error granularity (`NACK_DEVICE_ADDRESS`, `NACK_MEMORY_ADDRESS`, `NACK_DATA`).
+Contributions must preserve these boundaries:
 
-## Commit Style
+- one external Backend and one Bus per physical SI/O wire;
+- externally serialized synchronous calls;
+- no core task, queue, scheduler, application-facing mutex, logging or retry
+  policy;
+- complete validation before device I/O;
+- fixed-size steady-state library operation;
+- exact NACK, transport and ambiguous-write evidence;
+- no native alternative framework path or v1 compatibility layer;
+- no physical or irreversible-operation success claim without recorded HIL
+  authorization and evidence.
 
-Use Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
+Do not edit `include/AT21CS/Version.h` manually. Change `library.json`, run the
+generator and verify `--check`.

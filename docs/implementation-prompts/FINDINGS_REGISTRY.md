@@ -37,7 +37,7 @@ Statuses:
 | P-15 | ESP32 Backend owns bounded timing and DFS policy | 4 | CLOSED | backend/static tests; physical margins HIL pending |
 | P-16 | destructive speed-query behavior removed | 2 | CLOSED | API/event tests |
 | P-17 | Reset/Discovery/read/post-frame timing software matches the datasheet contract | 4 | CLOSED | backend tests; waveform HIL pending |
-| P-18 | stale non-protected technical reference text | 7 | OPEN | documentation audit; protected report untouched |
+| P-18 | stale non-protected technical reference text | 7 | CLOSED | obsolete references removed; docs/hash checker passes; protected report untouched |
 | P-19 | Manufacturer-ID part classification masks only revision bits | 2 | CLOSED | all-revision tests |
 | P-20 | Discovery verifies both response and release-high | 4 | CLOSED | backend/fault tests; held-low HIL pending |
 | P-21 | fixed 10 ms write policy must not be advertised beyond qualified part/temperature conditions | 8 | HIL_PENDING | scoped HIL and honest documentation |
@@ -80,20 +80,20 @@ Statuses:
 | Q-03 | physical timing remains unqualified until raw HIL evidence exists | 8 | HIL_PENDING | Prompt-08 waveform rows |
 | Q-04 | example helpers/builds must work without repository-root includes | 6 | CLOSED | four pinned independent Arduino example builds use local common headers |
 | Q-05 | command checking must reject placeholders and missing handlers | 6 | CLOSED | fixed catalog/registration dispatcher tests and semantic CLI checker |
-| Q-06 | version generation must be deterministic | 7 | OPEN | generator `--check` and byte-identical runs |
+| Q-06 | version generation must be deterministic | 7 | CLOSED | strict RC parser, byte-stable generator, and read-only `--check` |
 | Q-07 | unsafe parser, scan, and unbounded example behavior | 6 | CLOSED | fixed 128-byte parser tests; scans/stress/raw paths removed |
 | Q-08 | product `LoadCellMap` and duplicated paging do not belong in examples | 6 | CLOSED | product helper removed; page write calls production API once |
 | Q-09 | concise two-device/two-pin example is missing | 6 | CLOSED | S2/S3 multi-example builds with independent address-zero tuples |
-| Q-10 | consumer documentation does not match current API | 7 | OPEN | docs/link/API checks |
-| Q-11 | package contents are not explicitly curated | 7 | OPEN | allowlist and unpacked consumers |
-| Q-12 | CI lacks final docs/package/example gates | 7 | OPEN | pinned separated jobs |
+| Q-10 | consumer documentation does not match current API | 7 | CLOSED | focused link/API/version/default checker and warning-clean Doxygen build |
+| Q-11 | package contents are not explicitly curated | 7 | CLOSED | exact export allowlist; safe external unpack; clean core and four Arduino builds |
+| Q-12 | CI lacks final docs/package/example gates | 7 | CLOSED | pinned separated native, static, docs, version, package, and PHY-smoke jobs |
 | Q-13 | destructive example input lacks a strong interlock | 6 | CLOSED | exact page-write confirmation/rejection tests; irreversible commands absent |
-| Q-14 | non-protected docs contain stale protocol/product claims | 7 | OPEN | documentation consistency checks |
+| Q-14 | non-protected docs contain stale protocol/product claims | 7 | CLOSED | v1/product/old-datasheet material removed and current docs check passes |
 | Q-15 | mutable/irreversible HIL needs explicit authorization and evidence | 8 | HIL_PENDING | Prompt-08 authorization records |
 | Q-16 | governing `tWR` wording now requires no-ACK-poll released-high hold | 1 | CLOSED | `AGENTS.md` and write tests |
 | Q-17 | obsolete native-IDF example/checker contradicts the two-Arduino-example model | 6 | CLOSED | native-IDF example/checker removed; exact layout check passes |
 | Q-18 | no concise synchronous multi-instance/hot-plug examples and RTOS guidance exist | 6 | CLOSED | detect debounce/no-detect polling, serial comparison, fairness tests, and one-owner guidance |
-| Q-19 | docs lack simple topology, serialization, hot-plug, and firmware responsibility guidance | 7 | OPEN | exact detect/no-detect behavior in README/MIGRATION/package docs |
+| Q-19 | docs lack simple topology, serialization, hot-plug, and firmware responsibility guidance | 7 | CLOSED | README/MIGRATION document exact ownership, detect/no-detect limits, and firmware policy |
 
 ## Closure rule
 
