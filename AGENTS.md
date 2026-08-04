@@ -49,6 +49,16 @@ Rules:
 - No logging in library code; examples may log.
 - No exceptions.
 - No `delay()` in library code except bounded protocol timing/bit windows.
+- The library is synchronous and creates no task, queue, scheduler, or
+  application-facing mutex. A Backend may use private bounded critical
+  facilities for physical timing.
+- The safe firmware default is one task or loop owning all AT21CS instances and
+  calling them sequentially. Multiple tasks may own separate physical-wire
+  instances only after that Backend's simultaneous cross-instance timing has
+  been qualified; Drivers sharing one Bus always share one owner.
+- Hot-plug is explicit: retain valid Backend/Bus/Driver bindings while a device
+  is absent, then let firmware call `recover()` after attachment. The library
+  does not poll, retry, or reconnect in the background.
 
 ## Protocol Rules (AT21CS)
 

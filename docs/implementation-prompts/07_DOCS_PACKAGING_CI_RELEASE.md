@@ -1,231 +1,137 @@
-# Prompt 07 — documentation, clean packaging, CI, and release metadata
+# Prompt 07 — documentation, clean packaging, CI, and RC metadata
 
 ## Outcome
 
-Make the completed v2 library reproducibly consumable from clean Arduino
-projects while proving that its core boundary remains framework-independent,
-synchronize all documentation/version metadata as a release candidate, and
-turn CI into a release gate.
+Make the synchronous v2 library understandable and consumable from a clean
+checkout/package. Documentation must match the current API, hot-plug behavior,
+multiple-device ownership, and external RTOS responsibility boundary.
 
-Do not claim production-ready hardware status or set stable `2.0.0` metadata
-until Prompt 08 HIL passes and the maintainer authorizes finalization.
+This stage creates a `2.0.0-rc.1` candidate only. It does not run HIL, publish a
+package, create a tag, or claim hardware qualification.
 
-Arduino through the exact PioArduino pin frozen by the shared contract is the
-only supported firmware framework in documentation, packaging, consumers, and
-CI. Keep core framework-independent, but do not install/select standalone ESP-IDF
-or retain a native-IDF build/support path. This stage may validate HIL
-evidence structure only; Prompt 08 alone runs physical HIL.
+## Baseline and owned findings
 
-## Required working method
+Stages 01-06 must be complete. This stage owns:
 
-Read all contracts, the completed implementation, current documentation,
-packaging metadata, and CI. Inspect `git status`. Preserve unrelated changes.
+- P-18 stale non-protected reference material;
+- Q-06 deterministic version generation;
+- Q-10 documentation/API consistency;
+- Q-11 curated package contents;
+- Q-12 CI coverage;
+- Q-14 stale non-protected technical claims;
+- Q-19 consumer ownership/hot-plug/RTOS responsibility documentation.
 
-Spawn subagents for:
+It verifies the Stage-06 closure of Q-17 by rejecting native-IDF artifacts and
+claims. It does not create an RTOS owner fixture.
 
-1. public API/docs/migration consistency;
-2. package archive and clean-consumer builds;
-3. deterministic version/release metadata;
-4. CI/tool pinning and build matrix.
+## Release metadata
 
-Keep one integrator for metadata and workflow files. Do not modify the technical
-content of the protected complete-driver report. Reuse the Stage 4/6 consumer
-fixtures and one checker per contract; refactor or delete stale documentation
-and build paths rather than documenting aliases or adding packaging band-aids.
-Simplify the release surface before adding gates. Follow the packet README's
-saga checkpoint policy; do not tag, release, publish, or upload.
+Set the source-of-truth version in `library.json` to `2.0.0-rc.1`. Generate
+`include/AT21CS/Version.h` deterministically from it. The generator must support
+a read-only `--check` mode and two consecutive generations must be byte-identical.
 
-## Sole owned findings
-
-Close:
-
-- P-18;
-- Q-06;
-- Q-10;
-- Q-11;
-- Q-12;
-- Q-14;
-- Q-17;
-- Q-19.
-
-Prepare, but do not falsely close, Q-03.
-
-## Version decision
-
-This stage prepares the breaking release candidate:
-
-```text
-2.0.0-rc.1
-```
-
-`library.json` remains the sole version source. Keep the changelog work under
-`[Unreleased]` or an explicitly marked `2.0.0-rc.1` heading; do not date or
-close a stable `2.0.0` release in this stage.
-
-Set `library.json.frameworks` to Arduino only and keep the ESP32 platform claim
-limited to the tested S2/S3 PioArduino environments. Framework-neutral core
-design is an architectural property, not permission to advertise an unbuilt
-framework.
-
-Synchronize:
-
-```text
-library.json
-include/AT21CS/Version.h
-CHANGELOG.md release-candidate/unreleased heading
-Doxygen project version if present
-```
-
-Remove unsupported native-IDF metadata/build artifacts rather than assigning
-them release-candidate versions. Do not silently publish stable `2.0.0` as a
-workaround for any packaging-tool limitation.
-
-## Deterministic Version.h
-
-Refactor `scripts/generate_version.py`:
-
-- input is `library.json`;
-- output contains SemVer numeric/string constants only;
-- no wall-clock time;
-- no dirty flag;
-- no maintainer checkout commit;
-- no environment-dependent absolute path;
-- write only when content differs;
-- add `--check` that performs no write and exits nonzero on mismatch.
-
-Two generation runs must be byte-identical and leave `git status` unchanged.
-
-Add:
-
-```text
-python scripts/generate_version.py --check
-python tools/check_version_consistency.py
-```
-
-Do not hand-edit `Version.h`.
+Do not set stable `2.0.0`; Prompt 08 and an explicit maintainer decision own any
+later stable finalization.
 
 ## Documentation
 
-Update:
+Update the non-protected consumer documentation that exists or is required by
+the final package, including:
 
 ```text
 README.md
 CHANGELOG.md
 CONTRIBUTING.md
 SECURITY.md
-AGENTS.md repository tree and example-count rule
+AGENTS.md repository layout if needed
 docs/MIGRATION.md
-remove or archive `docs/IDF_PORT.md` and `docs/IDF_PORT_IMPLEMENTATION.md` as
-unsupported historical material
-docs/ARCHITECTURE_SPLIT_PLAN.md or archive it as resolved
 Doxyfile
 ```
 
-Required content:
+Remove or clearly archive obsolete native-IDF and resolved migration-plan
+documents. Do not modify
+`docs/AT21CS01_AT21CS11_complete_driver_report.md`.
 
-- exact Backend -> Bus -> Driver ownership;
-- shared-wire topology: one Backend -> one Bus -> one to eight uniquely
-  addressed Drivers;
-- separate-wire topology: one complete Backend -> Bus -> Driver tuple per
-  load-cell/peripheral connector, with the same `addressBits` (normally zero)
-  valid on every independent Bus;
-- one live Driver claim per address per Bus and no mutable global device state;
-- per-Bus external serialization, with one firmware owner serializing all
-  AT21CS channels by default because simultaneous ESP32 frame execution is not
-  part of the qualified v2 contract;
-- no internal mutex/task/retry/recovery policy;
-- binding and absent-at-boot recovery;
-- `probe()` is liveness only; reconnect/power-up uses `recover()`, followed by
-  serial-number reconciliation before application calibration is reused;
-- a presence input is a connector hint, not chip identity or per-address
-  presence proof;
-- connector/pin maps, request queues/deadlines, calibration records and units,
-  expected-serial association, replacement policy, and retry/backoff remain
-  upper-firmware responsibilities;
-- each independent SI/O wire needs its own electrically qualified pull-up and
-  harness; product cable/connector/protection claims are limited to Prompt 08
-  profiles actually tested;
-- shutdown order is Driver(s) -> fallible `Bus::end()` -> Backend, independently
-  for every physical wire; reserved `UINT64_MAX` write-high poison makes
-  `Bus::end()` permanently return `CLOCK_STALLED`, so the Backend remains alive
-  and upper firmware stops that channel;
-- exact state semantics;
-- page write as bounded owner scheduling unit;
-- fixed 10 ms bus-global high-only software policy, clearly labeled as requiring
-  board/part/temperature qualification rather than a universal beyond-25 C
-  datasheet guarantee unless current vendor evidence explicitly supplies one;
-- WriteResult/MutationResult ambiguity;
-- no current-address API;
-- no Freeze-state query;
-- AT21CS11 High-Speed only;
-- exact Arduino S2/S3 support matrix actually built and an explicit statement
-  that the core interface is framework-independent while no other framework is
-  currently implemented or supported;
-- no board pin defaults in library;
-- HIL status and limitations;
-- no I2C-style address scan command; A2:A0 selection is explicit;
-- migration table from every removed v1 API to v2 equivalent.
+Documentation must explain in plain language:
 
-Verify the maintainer-updated `AGENTS.md` example rule remains:
+### Synchronous operation
 
-```text
-Keep the shipped example set minimal: one full Arduino single-device CLI and
-one concise Arduino multi-device CLI. Do not ship a native-IDF example.
-```
+- every library call completes synchronously and returns exact status/evidence;
+- the library creates no task, queue, application-facing mutex, scheduler, retry
+  loop, logger, or persistence service; private bounded Backend
+  timing-critical facilities remain allowed;
+- once a call begins, firmware cannot asynchronously cancel it;
+- a page write includes its bounded frame and fixed 10 ms released-high hold.
 
-Remove any native-IDF example, checker, component, fixture, CMake-only support
-path, or documentation claim. This closes Q-17 while preserving the Stage
-1-corrected no-ACK-poll `tWR` rule and every other governing constraint.
+### Multiple devices
 
-Correct the non-protected datasheet reference:
+- one physical wire uses one Backend and one Bus;
+- one to eight uniquely addressed Drivers may share that Bus;
+- separate pins use independent Backend/Bus/Driver tuples and may reuse address
+  zero;
+- Reset and write hold are shared only by Drivers on the same Bus;
+- independent Bus state does not leak between pins.
 
-- CRC-8/Maxim is reflected;
-- `tMRS` is absolute from falling edge;
-- Check Lock frame;
-- no opcode `1h/R` Freeze query.
+Avoid defining a public “channel.” If plain-language grouping is needed, call it
+a wire instance and show the actual Backend/Bus/Driver objects.
 
-For the similarly named checked-in PDF fingerprint recorded in this prompt
-pack, either replace it with the exact verified DS20005857I artifact or remove
-the duplicate and keep the immutable official URL/hash instructions. Never
-retain it under an authoritative-current label merely because its filename
-matches.
+### RTOS integration
 
-Never change the protected complete-driver report.
+- safe default: one firmware task/loop owns all AT21CS objects and calls them
+  sequentially;
+- Drivers sharing one Bus always share the same owner;
+- application tasks may exchange copied application-defined messages with that
+  task, but message layouts, queues, priorities, deadlines, backoff, and result
+  routing are firmware policy;
+- multiple tasks simultaneously calling separate ESP32 Backend instances are
+  not part of the current qualification;
+- no RTOS wrapper or owner framework ships with the library.
 
-Remove/qualify:
+### Hot-plug
 
-- “production-grade” before Prompt 08 passes;
-- false command parity;
-- false journal/wear-leveling claims;
-- incorrect `capacityGramsDiv10` schema;
-- nonexistent PlatformIO environments;
-- obsolete 1.x support statements;
-- stale AI implementation prompt presented as current guidance.
+- absence during initialization retains valid bindings;
+- firmware decides when to call explicit `recover()` after attachment;
+- `probe()` is liveness-only and does not replace recovery after power-up;
+- an optional presence input is a connector hint, not identity;
+- after recovery, firmware may read/compare the serial before using
+  application-owned data associated with the previous device;
+- the library does not debounce, retry automatically, track attachment
+  generations, or own calibration/replacement policy.
 
-Keep this prompt pack as implementation history but exclude it from installed
-API/Doxygen output if it is not consumer documentation.
+### Protocol and safety
+
+- no I2C-style scan or current-address API;
+- AT21CS11 is High-Speed only;
+- exact NACK phase versus transport failure;
+- fixed 10 ms Bus-wide released-high software policy with no ACK polling;
+- transactional reads and conservative `WriteResult`/`MutationResult` evidence;
+- no automatic replay of a possibly committed write;
+- irreversible operations are service/provisioning actions and are not exposed
+  by shipped examples;
+- Arduino ESP32-S2/S3 is the only supported firmware integration, while core
+  interfaces remain framework-neutral.
+
+Do not advertise a generic remote cable, load-cell harness, temperature range,
+or physical production qualification not proven by Prompt 08 evidence.
 
 ## Documentation checks
 
-Create `tools/check_docs.py` to verify:
+Provide a focused `tools/check_docs.py` that checks:
 
 - local Markdown links;
-- README API symbol list against installed headers;
-- PlatformIO environment names;
-- version references;
-- package-local referenced docs exist;
-- protected report has exact SHA-256
-  `4B39CBD8437A6DC33EF1E0764FA3A4652F57E41ADC2174F420D1897006F96255`,
-  independent of the current Git diff;
-- the authoritative DS20005857I URL, size, and SHA-256 in this prompt pack
-  match `README.md`;
-- Doxygen inputs exclude obsolete prompt/planning material.
+- documented public symbols against installed headers;
+- example and PlatformIO environment names;
+- version consistency;
+- absence of obsolete v1/native-IDF/RTOS-owner claims;
+- protected report SHA-256 without modifying it;
+- authoritative datasheet URL/hash/size consistency.
 
-Configure Doxygen warnings as errors.
+Configure Doxygen so current public inputs build without warnings treated as
+success. Exclude internal prompt/planning files from generated API docs.
 
-## Explicit package contents
+## Package contents
 
-Use `library.json` export/include settings so the archive includes only consumer
+Configure `library.json` export rules so the archive contains only consumer
 material:
 
 ```text
@@ -236,281 +142,99 @@ LICENSE
 README.md
 CHANGELOG.md
 docs/MIGRATION.md
-supported examples and required common helpers
+examples/01_basic_bringup_cli/**
+examples/02_multi_device_cli/**
+examples/common/**
 ```
 
-Exclude:
+Exclude repository control files, tests, tools, prompts/plans, root PlatformIO
+configuration, native-IDF files, captures, and temporary build output. Package
+links must resolve inside the package or point to stable repository URLs.
+
+## Clean consumers
+
+Use the packaged examples as the Arduino clean consumers. Keep or create only
+one additional clean consumer:
 
 ```text
-.git/**
-.github/**
-.pio/**
-build/**
-test/**
-tools/**
-scripts/** except when intentionally shipped
-internal audit/prompt/planning docs
-Doxyfile
-platformio.ini
-idf_component.yml
-native-IDF-only CMake/component files
-temporary captures
+test/consumer/core_only/     # platform-neutral Bus/Driver compilation
 ```
 
-If packaged README links to a document, include it or change the link to a
-stable repository URL.
+Do not create `test/consumer/firmware_owner/`. The packaged single-device and
+multi-device examples are the synchronous integration consumers.
 
-## Clean consumer fixtures
-
-Create:
-
-```text
-test/consumer/arduino/
-  platformio.ini
-  src/main.cpp
-
-test/consumer/core_only/
-  CMakeLists.txt
-  main.cpp
-
-test/consumer/phy_smoke/
-  arduino/
-
-test/consumer/firmware_owner/
-  platformio.ini
-  src/FirmwareOwnerPolicy.h
-  src/main.cpp
-```
-
-Rules:
-
-- consume a packed/unpacked library, not repository `src/**`;
-- include only installed public headers;
-- use no repository-root include path;
-- Arduino builds S2/S3;
-- core-only build proves platform-neutral Bus/Driver without ESP32 backend;
-- reuse the Stage 4 `phy_smoke` consumers rather than creating replacement PHY
-  code;
-- the generic firmware-owner fixture implements Prompt 06's exact
-  `BoardConfig`, `ChannelConfig`, `ChannelOperation`, `OwnerResultCode`,
-  `ChannelRequest`, `ChannelResult`, `CachedChannelStatus`, `OwnerState`,
-  `At21csChannel`, and `At21csOwner<MAX_CHANNELS>` contracts rather than
-  product-specific facades;
-- it statically owns two complete Backend -> Bus -> Driver tuples on distinct
-  SI/O pins, both with `addressBits=0`, plus fixed buffers/rings and one explicit
-  owner context;
-- it builds for both S2 and S3 from the unpacked archive, stays under
-  `test/consumer/` so it is neither a shipped example nor package content, and
-  contains no address scan, dynamic allocation, unsynchronized cross-task
-  snapshot read, or hidden library recovery loop;
-- its `platformio.ini` takes only `AT21CS_FIXTURE_LIB_SPEC`; reuse
-  `tools/run_firmware_owner_fixture.py` and never add a relative checkout path;
-- either add a documented standalone core CMake target, or make the core-only
-  fixture compile exactly the unpacked `src/Bus.cpp` and `src/AT21CS.cpp`;
-  never reach back into the repository checkout;
-- no clean consumer uses `framework = espidf`, provisions
-  `framework-espidf`, or treats framework independence as a native-IDF support
-  claim.
+The clean core consumer and packaged examples use only installed public headers
+and the unpacked package, with no repository-root include path or
+checkout-relative library dependency. No consumer uses `framework = espidf`.
+The existing Stage-04 `test/consumer/phy_smoke/arduino/` remains a separate
+checkout regression fixture with its existing symlink dependency; it is not a
+clean-package consumer and is not copied into the package checker.
 
 ## Package checker
 
-Create `tools/check_package.py`:
+`tools/check_package.py` must use a safe temporary directory to:
 
-1. run `pio pkg pack`;
-2. inspect explicit allowlist/denylist;
-3. unpack into a new temporary directory;
-4. build platform-neutral and Arduino consumers against that archive;
-5. build supported examples as consumers;
-6. copy the generic firmware-owner fixture into the checker's temporary root,
-   invoke `run_firmware_owner_fixture.py` with the unpacked package as
-   `--library-root`, the copied fixture as `--fixture-root`, and the repository
-   checkout as `--forbid-root`; build S2 and S3 and reject any compiler/linker
-   input that reaches the checkout;
-7. build the Stage 4 Arduino PHY smoke fixtures;
-8. reject repository-root includes;
-9. reject referenced-but-missing docs;
-10. leave repository clean.
+1. create the PlatformIO package archive;
+2. compare contents with an explicit allowlist/denylist;
+3. unpack outside the repository;
+4. build the platform-neutral consumer against the unpacked source;
+5. build both examples for S2 and S3 against the unpacked package;
+6. reject compiler/include inputs that reach back into the repository;
+7. leave the repository clean.
 
-Use safe temporary-directory APIs. Never delete a computed path without
-verifying it lies inside the created temporary root. Resolve both paths and
-require the package/fixture temporary root to be outside the repository before
-using the repository as `--forbid-root`.
+Provide separate inspect, platform-neutral build, and Arduino build modes so CI
+failures are easy to diagnose. Never install or invoke native ESP-IDF.
 
-The checker must not clone, download, install, select, or mutate a standalone
-ESP-IDF SDK or a PlatformIO `framework-espidf` package. PlatformIO may provision
-only the Arduino packages declared by the exact PioArduino pin. Give the
-checker separate modes:
+## CI
 
-```text
-python tools/check_package.py --inspect
-python tools/check_package.py --build-platform-neutral
-python tools/check_package.py --build-arduino
-```
+Use pinned, separated jobs for:
 
-`--build-arduino` builds the S2/S3 examples, firmware-owner fixture, and Stage
-04 PHY smoke consumer through PioArduino 55.03.311 with
-`framework = arduino`. `--build-platform-neutral` proves the core boundary
-without claiming another supported firmware framework.
+- native tests and strict warnings;
+- native sanitizer tests where supported;
+- static timing/IRAM/placeholder checks;
+- CLI and documentation checks;
+- deterministic version verification;
+- S2/S3 clean-package builds for both examples;
+- separate checkout builds for the existing S2/S3 physical-layer smoke
+  consumer;
+- package inspection and clean consumer builds.
 
-## PlatformIO cleanup
+CI performs no physical HIL and no irreversible mutation.
 
-Stop compiling the whole repository as application source.
+## Required validation
 
-Create explicit environments:
+Run at least:
 
 ```text
-native
-native_sanitize
-ex_cli_s2
-ex_cli_s3
-ex_multi_s2
-ex_multi_s3
-```
-
-Examples must resolve the library through normal package/library semantics.
-Remove unused Arduino/Wire test include paths.
-
-## HIL evidence infrastructure
-
-Create the release-evidence infrastructure now so CI can validate its shape
-before hardware is run:
-
-```text
-tools/check_hil_evidence.py
-docs/validation/HIL_MATRIX.md
-docs/validation/RUN_RECORD_SCHEMA.md
-docs/validation/runs/RUN_RECORD_TEMPLATE.md
-docs/validation/captures/README.md
-```
-
-Stage 7 owns only the checker, schema, empty/template records, and an
-`HIL_MATRIX.md` containing the exact HIL-01 through HIL-09 rows specified by
-Prompt 08. Stage 8 fills reviewed measurements and capture references.
-
-The checker must:
-
-- provide `--structure-only` without requiring completed hardware results;
-- provide `--require-release-matrix` for Stage 8;
-- validate required fields, explicit row IDs, relative links, SHA-256 syntax,
-  evidence-size policy, and tested-source/firmware identifiers;
-- never fabricate, normalize, or edit measurement data;
-- accept evidence-only commits after the immutable tested release-candidate
-  commit before finalization, while rejecting intervening changes to code,
-  public headers, build files, manifests, packaged docs/examples, or package
-  contents;
-- after maintainer-authorized stable finalization, accept only a parsed,
-  exact-field allowlist: the version scalar in `library.json`, generated SemVer
-  constants in `Version.h`, Doxygen project version, changelog version/date
-  heading, README qualification status, and evidence references. Reject any
-  other change even when hidden in one of those files. Record both RC and final
-  source/package digests.
-
-CI runs only `--structure-only`. Hardware absence must never be rendered as a
-green HIL result.
-
-## CI jobs
-
-Pin exact PlatformIO, Python, host compiler, clang-format, Doxygen, PioArduino
-platform/framework packages, and action commit versions in the workflow or a
-reviewed tool-version file. Do not use floating branches, moving `x` endpoints,
-unpinned container tags, or mutable major-only action tags. Create separate
-jobs:
-
-1. `static-contracts`
-   - core boundary guard;
-   - semantic CLI contracts;
-   - docs/link/API checks;
-   - exact `python tools/check_format.py` format gate;
-   - `python tools/check_no_production_placeholders.py`;
-   - `git diff --check`.
-2. `native-tests`
-   - strict warnings;
-   - normal tests;
-   - ASan/UBSan.
-3. `arduino-builds`
-   - S2/S3 single-device and multi-device examples plus the generic
-     firmware-owner fixture as clean consumers.
-4. `package-consumers`
-   - pack, inspect, and unpack once;
-   - platform-neutral and Arduino S2/S3 builds;
-   - fail if native-IDF artifacts or support claims enter the archive.
-5. `docs`
-   - Doxygen warnings fatal.
-6. `release-metadata`
-   - deterministic version;
-   - synchronized metadata;
-   - clean generated tree;
-   - archive license/README/allowlist.
-7. `hil-evidence-structure`
-   - `python tools/check_hil_evidence.py --structure-only`;
-   - never runs hardware or claims a qualified matrix.
-
-Do not make HIL a fake green cloud job. CI verifies the structure and freshness
-of maintainer-supplied HIL evidence; Prompt 08 owns actual hardware results.
-
-## Required commands
-
-```text
-python scripts/generate_version.py --check
-python tools/check_version_consistency.py
-python tools/check_docs.py
+.\scripts\pio.cmd test -e native
+.\scripts\pio.cmd test -e native_sanitize
 python tools/check_cli_contract.py
-python tools/check_format.py
-python tools/check_hil_evidence.py --structure-only
-python -m platformio test -e native
-python -m platformio test -e native_sanitize
-python -m platformio run -e ex_cli_s2 -e ex_cli_s3
-python -m platformio run -e ex_multi_s2 -e ex_multi_s3
-python tools/run_firmware_owner_fixture.py --library-root . --environment firmware_owner_s2 --environment firmware_owner_s3
+python tools/check_docs.py
+python scripts/generate_version.py --check
 python tools/check_package.py --inspect
 python tools/check_package.py --build-platform-neutral
 python tools/check_package.py --build-arduino
-python tools/check_no_production_placeholders.py
-doxygen Doxyfile
+.\scripts\pio.cmd run -e ex_cli_s3
+.\scripts\pio.cmd run -e ex_cli_s2
+.\scripts\pio.cmd run -e ex_multi_s3
+.\scripts\pio.cmd run -e ex_multi_s2
+.\scripts\pio.cmd run -d test/consumer/phy_smoke/arduino -e phy_smoke_s3
+.\scripts\pio.cmd run -d test/consumer/phy_smoke/arduino -e phy_smoke_s2
 git diff --check
 git status --short
 ```
 
-All ESP32 clean-consumer builds use the exact PioArduino 55.03.311
-`framework = arduino` environments. A missing S2/S3 Arduino environment or any
-native-IDF package/build path is a release blocker. The production-source scan
-must have no hit.
-
-## Stable finalization after Prompt 08
-
-Do not execute this subsection during the normal Stage 7 pass. After Stage 8
-passes against an immutable `2.0.0-rc.1` candidate and the maintainer explicitly
-authorizes stable finalization:
-
-1. change `library.json` from `2.0.0-rc.1` to `2.0.0`;
-2. regenerate `Version.h` and synchronize Doxygen;
-3. convert the release-candidate/unreleased changelog entry into the dated
-   stable `2.0.0` entry;
-4. update README HIL status using the reviewed evidence row IDs;
-5. rerun every required command in this prompt, the exact PioArduino Arduino
-   S2/S3 matrix, `check_hil_evidence.py --require-release-matrix`, clean package
-   consumers, documentation, and version consistency;
-6. record the final source/package digest and verify that only authorized
-   finalization fields and evidence documentation changed from the tested RC.
-
-Any production, build-surface, example, public-header change outside the exact
-generated SemVer constants, or package-content change outside the exact
-metadata/documentation allowlist invalidates the RC HIL evidence and requires a
-new release candidate plus affected HIL reruns. No tag, publication, upload, or
-release creation is automatic.
+Run any repository formatting/static commands introduced by this stage. Claim
+only successful commands actually executed.
 
 ## Exit criteria
 
-- All installed metadata reports `2.0.0-rc.1` consistently.
-- Version generation is reproducible.
-- Clean consumers build from the archive.
-- The generic firmware-owner fixture builds for S2/S3 with two independent
-  address-zero channels and no public-library product/scheduler types.
-- Package contents are intentional.
-- Documentation matches actual headers and behavior.
-- CI covers every software release gate.
-- HIL checker/schema/templates exist and `--structure-only` passes without
-  fabricating hardware success.
-- `AGENTS.md` permits exactly the two Arduino CLIs and no native-IDF example.
-- README still labels hardware qualification pending until Prompt 08 succeeds.
-- Stable `2.0.0` remains an authorized post-HIL action, not a Stage 7 outcome.
+- Public docs match current synchronous API and hot-plug behavior.
+- One-task ownership is recommended without supplying an RTOS framework.
+- Exactly two Arduino examples build for S2/S3 from the clean package.
+- No owner fixture, mailbox DTO, native-IDF artifact, v1 API, or product schema
+  is shipped or advertised.
+- Package contents are explicit and clean consumers cannot reach the checkout.
+- Version generation and CI gates are deterministic.
+- Metadata remains `2.0.0-rc.1` and hardware qualification remains clearly
+  pending Prompt 08.

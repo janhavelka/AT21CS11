@@ -1,327 +1,128 @@
 # AT21CS v2 implementation prompt pack
 
-This directory turns the production-readiness audit into a sequence of narrow,
-ordered implementation prompts. It is intentionally not a collection of
-independent suggestions. The prompts form one migration and must be executed in
-order against the same branch.
+This packet continues from the current `feature/at21cs-v2-production` branch.
+Stages 01-05 are completed history. Stages 06-08 finish examples, packaging,
+documentation, CI, and physical qualification without adding an RTOS subsystem
+to the library.
 
-## Companion AI-coder wrappers
+## Authority and conflict handling
 
-Two reusable wrappers are provided; they are working-method instructions, not
-numbered implementation stages:
+Use these sources in this order:
 
-1. Use `RUN_CURRENT_STAGE.md` with exactly one numbered prompt to implement
-   that stage.
-2. In a separate follow-up turn, use `AUDIT_CURRENT_STAGE.md` with the same
-   numbered prompt to audit and correct the completed stage.
+1. `AGENTS.md` and an explicit maintainer decision in the current conversation;
+2. the verified Microchip DS20005857I datasheet for protocol/electrical facts;
+3. `00_SHARED_V2_CONTRACT.md` for current public behavior;
+4. the one numbered prompt being executed;
+5. `FINDINGS_REGISTRY.md` for traceability.
 
-Never paste several numbered prompts together. The wrappers do not broaden a
-stage's finding ownership, authorize later-stage work, authorize HIL, or replace
-the shared contract.
+Prompts 01-05 describe completed checkpoints and are not additional frozen
+contracts for later work. A current prompt may remove stale tooling or wording
+left by a completed stage. Record that cleanup; do not stop merely because an
+older prompt predicted a different cleanup stage.
 
-## Saga branch and stage checkpoints
+Stop and ask the maintainer only when a conflict would change protocol behavior,
+the public API, electrical safety, irreversible-operation authorization, or
+would require discarding unrelated work. Resolve ordinary file ownership,
+tooling, test, documentation, and stage-boundary ambiguity in favor of the
+simpler current contract and record the decision.
 
-The maintainer authorizes all Prompts 01-08 to run on one branch:
+## Authoritative datasheet
 
-```text
-feature/at21cs-v2-production
-```
-
-Keep that branch for the entire ordered migration. A numbered stage is finished
-only after its implementation turn, separate audit/correction turn, required
-validation, finding-status updates, and final diff review are complete. Then:
-
-1. create one non-empty commit containing that stage's coherent changes;
-2. use a message beginning `stage NN:`;
-3. push the commit to `origin/feature/at21cs-v2-production` before starting the
-   next numbered prompt.
-
-Do not commit an incomplete or blocked stage merely to create a checkpoint. Do
-not combine two numbered stages in one commit. Never amend or force-push a stage
-checkpoint. Correct an already-pushed stage with a separate corrective commit
-on the same branch and rerun every affected gate.
-
-This authorization covers normal commits and pushes for the saga only. It does
-not authorize tags, releases, package publication/upload, stable `2.0.0`
-finalization, downstream-repository changes, or mutable/irreversible HIL.
-
-The target is a breaking `2.0.0` refactor. Stage 7 produces the
-`2.0.0-rc.1` release candidate; stable `2.0.0` metadata is authorized only
-after Stage 8 HIL passes and the maintainer approves finalization. The library
-is not currently used by firmware, so preserving the unsafe `1.x` API is
-explicitly out of scope.
-
-Do not mistake this target contract for a capability claim about the checked-in
-`1.3.0` implementation. The current library has unresolved protocol, lifecycle,
-timing, multi-Bus isolation, test, and hardware-qualification findings and is
-not approved for the removable multi-load-cell deployment. That deployment is
-supported only after Prompts 01–08 are implemented, all registry findings are
-closed or explicitly accepted, and the applicable HIL profiles pass.
-
-## Authoritative inputs
-
-Every implementation session must read, in this order:
-
-1. Repository `AGENTS.md`.
-2. `00_SHARED_V2_CONTRACT.md`.
-3. `FINDINGS_REGISTRY.md`.
-4. The prompt for the current stage.
-5. The current official Microchip datasheet:
-   [AT21CS01/AT21CS11 Data Sheet DS20005857I, May 2026](https://ww1.microchip.com/downloads/aemDocuments/documents/MPD/ProductDocuments/DataSheets/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf).
-
-Before relying on the datasheet, verify the downloaded file exactly:
+The authorized local file is:
 
 ```text
-size:   2247216 bytes
+docs/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf
+size: 2247216 bytes
 SHA-256: 704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5
 ```
 
-Do not substitute a search result, cached older revision, HTML error page, or
-locally extracted text for this verified source. If the exact file cannot be
-obtained and verified, stop protocol-affecting work and report the stage
-`BLOCKED`.
+The hash and size, not the filename, establish authority. Never modify
+`docs/AT21CS01_AT21CS11_complete_driver_report.md`.
 
-The maintainer explicitly authorized the checked-in 2,247,216-byte file
-`docs/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf`, with
-SHA-256
-`704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5`, as the
-authoritative DS20005857I artifact. Its content hash and size, rather than its
-filename, are the verification record.
+## Simple library model
 
-## Maintainer decision: reserved terminal deadline
+The library is synchronous. A call validates its complete input, performs its
+documented bounded synchronous work, and returns the exact status and result
+evidence. It creates no task, queue, scheduler, application-facing mutex, retry
+loop, persistence, logging, or product policy. A Backend may use private bounded
+critical facilities for physical timing.
 
-For Bus deadline state and every deadline generated by Bus, `0` means no
-retained write hold, `1..UINT64_MAX-1` are finite absolute deadlines, and
-`UINT64_MAX` is reserved exclusively as the permanent post-acceptance
-write-high poison sentinel. Checked deadline addition succeeds only when the
-mathematical sum is strictly less than `UINT64_MAX`; equality and arithmetic
-overflow both fail. Bus never passes `UINT64_MAX` to a Backend callback.
-
-Before physical I/O, equality/overflow returns `CLOCK_STALLED` without poisoning
-Bus state. After a write may have been accepted, equality/overflow stores the
-sentinel, skips the wait callback, preserves ambiguous write evidence, and
-permanently prevents protocol traffic, replacement bind, and successful
-`Bus::end()` on that Bus object. Optional input-only presence remains diagnostic
-and cannot clear the sentinel. Binding-epoch and Reset-generation terminal
-counter rules are separate and unchanged.
-
-## Maintainer-authorized ESP32 toolchain and framework
-
-Every prompt uses this one exact PioArduino platform pin for ESP32-S2/S3:
+One physical SI/O wire uses:
 
 ```text
-https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip
+one Backend -> one Bus -> one or more Drivers with unique A2:A0 addresses
 ```
 
-It supplies Arduino-ESP32 3.3.11. Every supported ESP32 build uses PlatformIO
-with that exact pin and `framework = arduino`. The core remains
-framework-independent, but no other firmware framework is implemented or
-supported in this packet. No prompt may install/select a standalone ESP-IDF
-SDK, download PlatformIO's `framework-espidf` package, invoke `idf.py`, add a
-`framework = espidf` environment, or create a native-IDF example, component,
-fixture, package, CI, or release path. Use isolated PlatformIO build/cache
-directories when the shared package cache could be mutated concurrently.
-
-## Hardware-validation placement
-
-Prompt 08 is the only physical-HIL stage. Prompts 01–07 may define software
-oracles, `HIL_ONLY` mappings, evidence schemas, and structure-only checks, but
-must not energize hardware, require physical captures/measurements, or leave a
-software-complete stage blocked solely because HIL is pending. A physical-only
-acceptance item is deferred to Prompt 08 without preventing the earlier stage's
-audit checkpoint.
-
-The repository's older extracted/reference documents are secondary aids. Where
-they conflict with DS20005857I, DS20005857I wins. In particular:
-
-- the serial-number CRC is reflected CRC-8/Maxim;
-- read sampling time `tMRS` is measured from the read-frame falling edge;
-- Check Lock uses opcode `2h` with `R/W=0` plus a `0x6X` address;
-- opcode `1h` has no documented `R/W=1` Freeze-status query.
-
-Never modify
-`docs/AT21CS01_AT21CS11_complete_driver_report.md`. It is protected by
-`AGENTS.md`.
-
-Two current `AGENTS.md` policy lines are themselves audited findings:
-
-- Q-16: its `tWR` ready-polling wording conflicts with the required continuous
-  released-high interval and is corrected exactly in Stage 1;
-- Q-17: stale native-IDF example/component instructions conflict with the
-  maintainer's Arduino-only support policy; Prompts 06–07 remove those artifacts
-  and retain exactly two Arduino examples.
-
-Those two named edits do not authorize any other weakening or rewriting of
-`AGENTS.md`.
-
-## Sibling-project comparison boundary
-
-The audit uses these sibling repositories as concrete integration references:
+Devices on different SI/O pins use independent tuples:
 
 ```text
-../MB85RC
-../PCA9555
-../TCA9548A
-../INA228
-../EE871-E2
-../TunnelMonitor-node
+pin A -> Backend A -> Bus A -> Driver A (addressBits may be 0)
+pin B -> Backend B -> Bus B -> Driver B (addressBits may also be 0)
 ```
 
-Carry forward the good firmware-facing patterns: externally supplied transport,
-validated bind/begin/recover lifecycle, deterministic `Status`, scalar cached
-diagnostics, fixed buffers, explicit owner scheduling, strict examples,
-consumer builds, and package/CI checks. `MB85RC` is the closest EEPROM/API
-comparison. `TunnelMonitor-node` is one representative firmware consumer whose
-static ownership and latency constraints inform a versioned reference profile;
-it is never authoritative for the public API, core behavior, or support matrix.
-`EE871-E2` is the concrete reference for the exact current PioArduino platform
-pin only; do not copy its board-specific memory settings or its historical
-compatibility environment.
+“Instance” or “wire instance” means such a tuple. There is no public Channel,
+owner, mailbox, request DTO, or asynchronous result API.
 
-Do not copy I2C-only behavior into this single-wire protocol: no `TwoWire`,
-address scanner, ACK-ready polling during `tWR`, current-address convenience
-read, I2C buffer assumptions, or per-device storage of effects that belong to
-the physical wire. Do not copy a sibling's asynchronous job surface merely for
-API parity; v2 remains synchronous and creates no task, queue, or lock. Each
-physical Bus requires serialized access. Independent Bus/backend pairs have
-independent state, but simultaneous ESP32 PHY execution is allowed only if the
-selected backend has been explicitly qualified for it.
+## RTOS integration
 
-## Required execution order
+The safe default is one firmware task or cooperative loop owning every AT21CS
+instance and invoking them sequentially. Application tasks may send commands to
+that firmware-owned task, but its queue, deadlines, priorities, retries, result
+routing, and shutdown policy are application code.
 
-| Order | Prompt | Sole design ownership |
-|---:|---|---|
-| 1 | `01_BUS_TRANSPORT_FOUNDATION.md` | Public v2 types, shared physical bus, frame transport, bus-global reset/write effects |
-| 2 | `02_DRIVER_LIFECYCLE_READ_ID_SPEED.md` | Driver lifecycle, state machine, health, reads, identity, speed |
-| 3 | `03_WRITES_SECURITY_ROM.md` | Page writes, write evidence, Security Lock, ROM zones, Freeze |
-| 4 | `04_ESP32_PHY_ARDUINO.md` | S2/S3 Arduino PHY software, GPIO, timing model, and atomic frames |
-| 5 | `05_HOST_TESTS_AND_FAULT_INJECTION.md` | Exhaustive host oracle, fault injection, sanitizers |
-| 6 | `06_EXAMPLES_AND_FIRMWARE_INTEGRATION.md` | Minimal safe examples and generic fixed-size firmware integration |
-| 7 | `07_DOCS_PACKAGING_CI_RELEASE.md` | Documentation, clean consumers, deterministic versioning, CI and package |
-| 8 | `08_FINAL_AUDIT_AND_HIL.md` | Independent final audit and hardware release gate |
+Separate tasks may each own one separate-wire tuple only after the selected
+Backend has qualified simultaneous cross-instance timing. The current reference
+contract does not promise concurrent timing-critical ESP32 transfers. Drivers
+sharing one Bus must always be serialized by the same firmware owner.
 
-Stages may add focused tests for the code they own. Stage 5 is the exhaustive
-coverage pass; it must not silently redesign contracts owned by earlier stages.
-If a test proves an earlier contract wrong, stop, document the contradiction,
-and fix the owning stage rather than adding an adapter.
+A synchronous page write may occupy the owner for its frame and fixed 10 ms
+released-high hold. Firmware needing bounded scheduling should use
+`writeEepromPage()` and schedule the next request after it returns. Bus enforces
+the protocol hold; firmware does not ACK-poll it.
 
-Stage 4 must not build the still-unmigrated shipped examples after Stage 1
-removes the v1 API. It creates dedicated v2 physical-layer smoke consumers
-under `test/consumer/phy_smoke/arduino/` for S2 and S3. Stage 6 alone migrates
-the shipped examples. Stage 7 reuses the Arduino smoke fixture for clean
-package verification instead of creating another implementation. No native-IDF
-smoke fixture is created or required.
+## Hot-plug contract
 
-## Mandatory working method for every prompt
+Hot-plug is supported without an internal task:
 
-Each implementation prompt repeats the following rules; they are collected here
-to make their intent explicit:
+1. Configure Backend, Bus, and Driver once.
+2. If `begin()`/`initialize()` reports absence, keep the valid bindings.
+3. Firmware decides when attachment may have occurred and calls `recover()`.
+4. A successful `recover()` performs the required Reset/Discovery and restores
+   normal Driver operation.
+5. Firmware may then read the serial number and decide whether application data
+   associated with the previous physical device is still valid.
 
-- Start by inspecting `git status` and preserve unrelated/user changes.
-- Spawn subagents for independent inspection, test design, and final review.
-  Keep one integrator responsible for shared-file edits.
-- Use subagents read-only until the integrator freezes the stage design.
-- Reuse correct implementation logic, including verified backend mechanics,
-  while refactoring as far as needed for simpler, safer, more readable code.
-- Do not retain obsolete public contracts, compatibility wrappers, migration
-  architecture, aliases, parallel paths, or a second implementation.
-- Reuse correct existing opcode, validation, CRC, page-splitting, status, and
-  example helper code instead of copying it.
-- Do not introduce dynamic allocation, exceptions, logging, hidden retries,
-  tasks, queues, mutexes, or recovery policy into library code.
-- All waits and callback contracts are bounded. All buffers are caller-owned or
-  fixed-size.
-- Add a regression test for every bug fixed in the stage.
-- Run the stage's exact verification commands and report exact results.
-- Follow the saga branch/checkpoint policy above. It authorizes stage commits
-  and pushes, but not tags, publication/upload, or irreversible hardware work.
+`probe()` checks liveness only; it is not reconnect after power-up. An optional
+presence input is only a hint. The library does not debounce connectors,
+schedule retries, track attachment generations, or own calibration identity.
+Failure or removal on one independent Bus must not alter another Bus.
 
-## Coherence invariants
+## Stage sequence from the current branch
 
-The following invariants apply across every stage:
+| Stage | State | Purpose |
+|---|---|---|
+| 01 | completed | synchronous transport and Bus foundation |
+| 02 | completed | Driver lifecycle, reads, identity, speed, and hot-plug recovery |
+| 03 | completed | writes, Security, Lock, ROM zones, and Freeze evidence |
+| 04 | completed | Arduino ESP32-S2/S3 Backend |
+| 05 | completed | host tests and fault injection |
+| 06 | current | two bounded synchronous Arduino examples and RTOS guidance |
+| 07 | remaining | docs, clean packaging, CI, and RC metadata |
+| 08 | remaining | independent final audit and scoped HIL |
 
-1. There is exactly one `AT21CS::Bus` object per physical SI/O wire.
-2. One or more `AT21CS::Driver` objects may reference that bus, one per A2:A0
-   address. Devices on different SI/O pins use different buses.
-3. `Bus` owns bus-global Reset generation, frame serialization contract, and
-   the post-write high-only deadline. `Driver` owns one device's address,
-   identity, desired speed, lifecycle, and health.
-4. Each Bus and its Drivers are non-thread-safe and require serialized access.
-   One firmware owner may serialize many Buses; separate owners are permitted
-   only when their physical backends document qualified cross-instance
-   concurrency. The library does not create a mutex.
-5. A physical Reset affects every device on the bus. A write high-only interval
-   blocks every device on the bus.
-6. All ordinary reads are random reads. The public current-address API is
-   removed.
-7. A backend executes one complete uninterrupted frame. Per-byte callbacks are
-   removed.
-8. Protocol NACK is distinct from transport failure and carries an exact phase.
-9. No command is issued while the bus write-high deadline is active.
-10. No normal Driver operation performs hidden Reset, Discovery, retry, or bus
-    recovery.
-11. The core remains independent of Arduino, ESP-IDF, FreeRTOS, ESP32 GPIO
-    headers, and board pin choices.
-12. A failed initialization retains a valid binding so explicit recovery can
-    succeed after an absent-at-boot device appears.
-13. Validation and precondition errors perform zero bus I/O and do not change
-    transport health.
-14. Every public logical operation updates health at most once.
-15. Irreversible APIs have names beginning with `permanently`, conservative
-    effect evidence, and safe example-level confirmation.
-16. There is no I2C-style address scan command. Selecting or changing A2:A0 is
-    explicit; scanning must not be simulated with destructive Reset/Discovery.
-17. The result is not called production-ready until Stage 8 HIL evidence passes.
-18. Stage 7 metadata remains `2.0.0-rc.1`. After Stage 8 passes, the maintainer
-    may authorize the stable `2.0.0` metadata/changelog update and full gate
-    rerun. Saga stage commits/pushes are authorized; tags, releases,
-    publication, and uploads are not automatic.
-19. Multiple independent SI/O wires are first-class: each wire owns a distinct
-    Backend and Bus, and state/faults on one Bus never alter another.
-20. Connector, load-cell, calibration-record, scheduler, and product retry
-    policy remain upper-firmware concerns. The library exposes raw memory,
-    chip identity, protocol state, and conservative write evidence only.
+Do not implement an RTOS owner fixture in any stage. Do not add
+`test/consumer/firmware_owner/`, an owner task, mailbox, request/result DTOs, or
+attachment-generation machinery to core, examples, tests, or package content.
 
-## Intended removable-peripheral deployment
+## Checkpoints
 
-For a machine with several independently wired load-cell bodies, instantiate
-one fixed channel context per physical connector:
+Use the branch `feature/at21cs-v2-production`. An implementation turn does not
+commit. After a separate audit turn proves a stage complete, create one
+non-empty commit whose message begins `stage NN:` and push it to the same branch.
+Do not checkpoint blocked work. Do not amend, force-push, tag, release, publish,
+or modify downstream repositories without separate authorization.
 
-```text
-connector/channel 0 -> Backend 0 -> Bus 0 -> Driver 0
-connector/channel 1 -> Backend 1 -> Bus 1 -> Driver 0
-...
-```
-
-The Driver address may usually be zero because the wires are separate. A
-shared-wire installation instead uses one Backend/Bus and one Driver per A2:A0
-address. Never share one Bus across two SI/O pins, and never create one Bus per
-address when devices actually share a wire.
-
-The simplest robust upper firmware has one EEPROM/peripheral owner task or loop
-own a fixed array of channel contexts and execute one bounded synchronous
-library call at a time. Other firmware components exchange copied commands and
-scalar results with that owner; they never retain Driver/Bus/backend pointers.
-On attachment or reconnection, the owner calls explicit `recover()`, reads the
-unique serial number, compares it with the cached attachment identity, then
-loads and validates its application-owned calibration record. The AT21CS
-library does not define that record format.
-
-## Stage completion record
-
-After each stage, append a short record to the pull request or work log:
-
-```text
-Stage:
-Commit/worktree:
-Prompt contract deviations:
-Files changed:
-Tests added:
-Commands passed:
-Commands unavailable/failed:
-Remaining release blockers:
-Reviewer findings:
-```
-
-Do not mark the overall migration complete until every finding in
-`FINDINGS_REGISTRY.md` is `CLOSED` or explicitly accepted by the maintainer.
+Prompts 01-07 do not run physical HIL. Prompt 08 alone may run physical or
+irreversible tests under its explicit authorization rules. Software completion
+and hardware qualification are reported separately; lack of hardware evidence
+must not be presented as a software failure or as hardware success.

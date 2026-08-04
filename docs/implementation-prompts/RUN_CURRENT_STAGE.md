@@ -1,71 +1,60 @@
-# AI coder prompt - implement one AT21CS stage
+# Run the current numbered stage
 
-Use this with exactly one numbered packet prompt. Follow its frozen contract
-and maintainer decisions. Follow `AGENTS.md`, except for Q-16 in Prompt 01.
-Stop for any other material contradiction.
+Use this wrapper with exactly one active numbered prompt.
 
-Implement only the current prompt's findings. Preserve completed earlier-stage
-requirements and fix regressions you introduce, but do not implement later
-stages early or change a stage's stated purpose.
+Read `AGENTS.md`, the packet `README.md`, `00_SHARED_V2_CONTRACT.md`,
+`FINDINGS_REGISTRY.md`, and the current prompt. Prompts 01-05 are completed
+history; do not reread them as competing frozen contracts unless diagnosing a
+specific regression.
 
 Before editing:
 
-- Read `AGENTS.md`, the packet `README.md`, `00_SHARED_V2_CONTRACT.md`,
-  `FINDINGS_REGISTRY.md`, the current prompt, and all earlier prompts.
-- Obtain and verify the packet's exact authoritative datasheet before making
-  protocol decisions; a matching filename is insufficient.
-- Inspect `git status`, the working tree, code, tests, examples, adapters,
-  builds, docs, and callers. Preserve unrelated changes. Never modify the
-  protected complete-driver report.
-- Do not invent hardware behavior, pins, timing evidence, APIs, releases, or
-  validation results.
+- verify the authoritative datasheet by exact size and SHA-256 when protocol
+  decisions are involved;
+- inspect `git status`, the relevant code, tests, examples, builds, packaging,
+  docs, and callers;
+- preserve unrelated changes;
+- never modify the protected complete-driver report.
 
-Maintain this architecture:
+Implement only the current stage. Preserve completed behavior and fix any
+regression introduced by the stage. Do not retain obsolete v1 APIs, parallel
+transports, compatibility wrappers, or superseded example paths.
 
-- One external Backend owns one SI/O wire and timing. Its Bus owns binding
-  epoch, Reset generation, address claims, diagnostics, and write-high deadline.
-- Each Driver owns one device's lifecycle, identity, speed, state, and health.
-  A Bus supports one to eight unique addresses; separate buses may reuse them.
-- Firmware serializes each Bus; the safe default is one firmware owner for all
-  channels. The library creates no task, queue, scheduler, or mutex.
-- Core stays synchronous, deterministic, framework- and product-neutral.
-  Firmware owns scheduling, retries, persistence, calibration, logging,
-  telemetry, machine control, and safety policy.
+Maintain the simple architecture:
 
-Prompt 06's specified static FreeRTOS fixture is allowed only under
-`test/consumer/firmware_owner/`; it must not enter core, public API, examples,
-or packaged content.
+- one external Backend and one Bus per physical SI/O wire;
+- one Driver per addressed device, with unique addresses only within that Bus;
+- separate wires use separate tuples and may reuse address zero;
+- calls are synchronous, bounded, deterministic, and externally serialized;
+- the safe default is one firmware task/loop owning all instances;
+- the library creates no task, queue, scheduler, application-facing mutex,
+  retry loop, or hot-plug poller; private bounded Backend timing-critical
+  facilities remain allowed;
+- absence retains valid bindings and firmware explicitly calls `recover()` after
+  attachment;
+- firmware owns RTOS messaging, retry/backoff, identity association,
+  persistence, logging, calibration, machine control, and safety policy.
 
-Use the contract's exact names, values, types, signatures, transitions,
-ownership, and errors. Reuse correct implementation logic, including verified
-backend mechanics, while refactoring as far as needed for simplicity,
-robustness, and readability. Retain no obsolete v1 public contract,
-compatibility wrapper, migration architecture, patch, parallel path, or
-superseded code.
+Prompt 06 adds no RTOS owner fixture, mailbox, application DTOs, or scheduling
+layer. Do not create `test/consumer/firmware_owner/` or
+`tools/run_firmware_owner_fixture.py`.
 
-Use fixed-size state, no exceptions, steady-state allocation, logging, hidden
-retry/recovery, or unbounded wait. Validate complete inputs before I/O.
-Preserve transactional outputs/configuration, whole-frame callbacks, checked
-deadlines, stale-binding behavior, per-Bus effects, and distinct validation,
-NACK, transport, and ambiguous-write results.
+Validate complete inputs before I/O. Preserve transactional outputs, exact
+NACK/transport distinctions, whole-frame callbacks, checked deadlines,
+write-effect ambiguity, and independent per-Bus state.
 
-Update code, tests, docs, builds, examples, and checks together. Tests must use
-production paths and cover each correction.
+Use subagents only when independent read-only work will materially help. Keep
+one integrator responsible for shared edits and verify every report.
 
-Spawn non-overlapping subagents for protocol, API/state, backend, integration,
-and tests where applicable. The primary agent reconciles them. Assign one a
-final read-only simplification/coverage review; verify every report.
+Stop for a genuine datasheet, public-API, electrical-safety, object-lifetime, or
+irreversible-authorization conflict. Do not stop for stale historical wording or
+ordinary tooling/stage ownership ambiguity; follow the packet hierarchy, choose
+the simpler current result, and record it.
 
-Reread the prompt, inspect the diff and callers, check every criterion, remove
-duplication, and run current checks plus affected earlier gates. Claim only
-validation performed. Prompts 01–07 do not run physical HIL and do not remain
-blocked solely because physical evidence is pending; map physical-only items to
-Prompt 08 as `HIL_ONLY`. Structure-only HIL is not hardware success. Prompt 08
-alone owns physical, mutable, and irreversible HIL under its authorization
-rules.
+Run the current gates plus affected regression gates and `git diff --check`.
+Claim only checks actually run. Prompts 01-07 perform no physical HIL.
 
-Report changed/removed files and APIs, decisions, findings closed, checks run,
-blockers, and remaining later-stage or hardware work. Do not checkpoint during
-this implementation turn: the separate audit turn owns the stage commit and
-push under the packet README policy. Do not tag, release, publish, amend
-history, force-push, or modify downstream repositories.
+Report files changed/removed, APIs affected, decisions, findings, checks,
+blockers, and deferred hardware work. Do not checkpoint during the
+implementation turn. Do not tag, release, publish, amend, force-push, or modify
+downstream repositories.

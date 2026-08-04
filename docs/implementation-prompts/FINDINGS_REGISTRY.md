@@ -1,111 +1,106 @@
-# AT21CS production-readiness finding registry
+# AT21CS v2 finding registry
 
-This is the master ownership map for the staged refactor. Each finding has one
-implementation owner. Later stages verify earlier work but must not create a
-parallel fix.
+This registry tracks outcomes; it is not a second behavioral contract. Public
+headers, the shared contract, current prompt, tests, and actual evidence decide
+whether the implementation is correct.
 
-Status at creation: all findings are `OPEN`. Only the stage in `Owner` may
-implement and close the root fix. `Downstream verification` is an independent
-acceptance gate, not shared implementation ownership.
+The current baseline is the completed Stage-05 checkpoint `fd1e4660`. Findings
+owned by Stages 01-05 are recorded closed because their root fixes and host
+verification are present at that checkpoint. Physical-only downstream evidence
+is tracked separately and does not reopen a completed software fix.
+
+Statuses:
+
+- `CLOSED`: root software requirement implemented and verified;
+- `OPEN`: work remains in its named stage;
+- `HIL_PENDING`: software exists but the physical claim is not yet qualified;
+- `OUT_OF_SCOPE`: product-specific behavior is explicitly not a library claim.
 
 ## Protocol and functional correctness
 
-| ID | Finding | Evidence in current tree | Owner | Required owner evidence | Status | Downstream verification |
-|---|---|---|---:|---|---|---|
-| P-01 | `waitReady()` drives SI/O low during `tWR`, risking EEPROM/ROM/Lock/Freeze corruption | `src/AT21CS.cpp:464` | 1 | Bus-global high-only deadline | OPEN | Stage 3 tests every write class; Stage 8 scopes the released waveform |
-| P-02 | Critical section is per byte, so preemption can create an unintended Stop between bytes | `src/platform/esp32/AT21CSEsp32Backend.cpp:243` | 1 | One frame callback and no byte callbacks | OPEN | Stage 4 physical proof; Stage 8 release/load captures |
-| P-03 | `_activateDevice()` resets/discovers before ordinary operations | `src/AT21CS.cpp:1118` | 2 | Ordinary-operation reset count remains zero | OPEN | Stage 5 event oracle |
-| P-04 | `readCurrentAddress()` resets away the pointer it needs | `src/AT21CS.cpp:519` | 2 | Public API removed; all reads are address-explicit | OPEN | Stage 5 API/symbol checks |
-| P-05 | Core commits/uses the wrong timing policy across a speed transition | `src/AT21CS.cpp:258` | 2 | Command uses current speed, cache commits after ACK, and requests 650 us post-command high | OPEN | Stage 5 trace oracle; Stage 8 waveform |
-| P-06 | Discovery emits a second host-low pulse not present in DS20005857I | `src/platform/esp32/AT21CSEsp32Backend.cpp:327` | 4 | One request pulse and correctly referenced sample instant | CLOSED | Stage 8 S2/S3 capture (`HIL_ONLY`) |
-| P-07 | Standard read sample is about 20 us; HS has no timing margin | `include/AT21CS/AT21CS.h:307`, backend `rxBit()` | 4 | Absolute-from-falling-edge sample targets | CLOSED | Stage 8 S2/S3 HS/Standard captures (`HIL_ONLY`) |
-| P-08 | `writeSecurityUser()` narrows `size_t` before range validation | `src/AT21CS.cpp:701` | 3 | `SIZE_MAX` and `0x10000` return before any I/O | OPEN | Stage 5 boundary oracle |
-| P-09 | AT21CS11 Standard request touches the bus and damages health before rejection | `src/AT21CS.cpp:971` | 2 | Known AT21CS11 rejects before transport/health activity | OPEN | Stage 5 zero-I/O oracle |
-| P-10 | Transport `bool` ACK/raw byte cannot represent timeout, line-stuck, or I/O failure | `include/AT21CS/Transport.h:64` | 1 | Typed result with distinct `NACK`, `TIMEOUT`, `LINE_STUCK`, `IO_ERROR` | OPEN | Stage 5 fault matrix |
-| P-11 | Discovery failures are collapsed to generic absence | `src/AT21CS.cpp:221` | 2 | Exact transport result and detail survive initialization | OPEN | Stage 5 lifecycle/fault matrix |
-| P-12 | Check Lock sends opcode `2h` with `R/W=1` and omits `0x60` | `src/AT21CS.cpp:744` | 3 | Exact `2h/W -> 0x60` trace with ACK/NACK on memory address | OPEN | Stage 5 trace oracle; Stage 8 sacrificial verification |
-| P-13 | Freeze status invents an undocumented opcode `1h/R` query | `src/AT21CS.cpp:901` | 3 | Public query removed; no `1h/R` frame remains | OPEN | Stage 5 symbol/trace oracle |
-| P-14 | CRC tests calculate their expectation with the function under test | `test/test_basic.cpp` | 5 | Independent CRC-8/Maxim vectors | CLOSED | Stage 8 serial-number reads |
-| P-15 | Arbitrary delay callbacks and cached CPU frequency can invalidate bit timing | ESP32 backend delay path | 4 | Timing owned by backend; no user delay inside bit slots; explicit DFS policy | CLOSED | Stage 8 CPU/DFS/load captures (`HIL_ONLY`) |
-| P-16 | Speed-query APIs reset/set the state before querying it | `src/AT21CS.cpp:948` | 2 | Destructive query APIs removed; cached speed plus explicit recovery | OPEN | Stage 5 event oracle |
-| P-17 | Physical Reset, Discovery, Standard sampling, and post-frame timing do not meet the current datasheet contract | current timing tables/backend waveform | 4 | Universal 600 us Reset, one-pulse Discovery, absolute read sample, qualified post-frame high | CLOSED | Stage 8 timing matrix (`HIL_ONLY`) |
-| P-18 | Non-protected local reference documents stale CRC/timing/Lock/Freeze behavior | local datasheet reference | 7 | Reference corrected against verified DS20005857I without touching protected report | OPEN | Stage 8 documentation audit |
-| P-19 | Exact 24-bit Manufacturer-ID equality rejects otherwise valid future silicon revisions in D2:D0 | exact `0x00D200`/`0x00D380` comparisons | 2 | Mask only D2:D0 for part classification; retain raw ID and revision | OPEN | Stage 5 tests revisions 0..7 for both parts |
-| P-20 | A low-only Discovery sample can report a held-low or missing-pull-up line as a present device | Reset/Discovery backend | 4 | Separate 4 us presence sample and 25 us release-high check with `DISCOVERY_RELEASE` diagnostics | CLOSED | Stage 5 malformed/fault oracle; Stage 8 held-low capture (`HIL_ONLY`) |
-| P-21 | The datasheet's 5 ms `tWR` maximum is stated at 25 C, so a fixed wider-temperature production claim is unsupported without qualification | DS20005857I Table 3-3 | 8 | Qualify the 10 ms policy at exact released part/electrical/temperature profiles or block/narrow the claim | OPEN | Reviewed HIL-07/HIL-08 evidence and release documentation |
-| P-22 | A removable load-cell harness can violate SI/O voltage/rise-time assumptions through cable, connector, protection, level shifting, pull-up placement, and accumulated capacitance | Intended remote load-cell deployment is outside the current direct-board electrical profile | 8 | Qualify an exact released harness profile, including one controller-side pull-up per independent wire and disconnected-idle behavior, or explicitly exclude that profile | OPEN | Reviewed HIL-09 evidence and product integration documentation |
+| ID | Finding/outcome | Owner | Status | Evidence or remaining gate |
+|---|---|---:|---|---|
+| P-01 | post-write `tWR` uses a Bus-wide released-high hold, never ACK polling | 1 | CLOSED | Bus/write fault tests; waveform HIL pending |
+| P-02 | one whole-frame callback prevents an unintended inter-byte Stop | 1 | CLOSED | Bus/backend frame tests; waveform HIL pending |
+| P-03 | ordinary operations perform no hidden Reset/Discovery | 2 | CLOSED | lifecycle/event oracle |
+| P-04 | unsafe current-address API removed; reads are address-explicit | 2 | CLOSED | public symbol/read tests |
+| P-05 | speed transition uses current timing and commits state only after evidence | 2 | CLOSED | speed/frame tests |
+| P-06 | Discovery has one documented request pulse | 4 | CLOSED | backend tests; waveform HIL pending |
+| P-07 | read sampling follows absolute datasheet timing | 4 | CLOSED | backend tests; waveform HIL pending |
+| P-08 | Security ranges validate full `size_t` values before I/O | 3 | CLOSED | boundary tests including `SIZE_MAX` |
+| P-09 | AT21CS11 Standard request fails before I/O/health change | 2 | CLOSED | zero-I/O speed tests |
+| P-10 | typed transport distinguishes NACK, timeout, line-stuck, stalled clock, and I/O error | 1 | CLOSED | fault matrix |
+| P-11 | initialization preserves exact absence/transport failure | 2 | CLOSED | lifecycle/fault tests |
+| P-12 | Check Lock uses documented `2h/W + 0x6X` framing | 3 | CLOSED | trace tests |
+| P-13 | invented `1h/R` Freeze query removed | 3 | CLOSED | symbol/trace tests |
+| P-14 | CRC expectations use independent CRC-8/Maxim vectors | 5 | CLOSED | host vectors |
+| P-15 | ESP32 Backend owns bounded timing and DFS policy | 4 | CLOSED | backend/static tests; physical margins HIL pending |
+| P-16 | destructive speed-query behavior removed | 2 | CLOSED | API/event tests |
+| P-17 | Reset/Discovery/read/post-frame timing software matches the datasheet contract | 4 | CLOSED | backend tests; waveform HIL pending |
+| P-18 | stale non-protected technical reference text | 7 | OPEN | documentation audit; protected report untouched |
+| P-19 | Manufacturer-ID part classification masks only revision bits | 2 | CLOSED | all-revision tests |
+| P-20 | Discovery verifies both response and release-high | 4 | CLOSED | backend/fault tests; held-low HIL pending |
+| P-21 | fixed 10 ms write policy must not be advertised beyond qualified part/temperature conditions | 8 | HIL_PENDING | scoped HIL and honest documentation |
+| P-22 | generic remote cable/load-cell harness behavior is not a library guarantee | 8 | OUT_OF_SCOPE | only explicitly recorded electrical setups may be qualified |
 
-## Architecture, lifecycle, and diagnostic correctness
+## Architecture, lifecycle, and diagnostics
 
-| ID | Finding | Evidence | Owner | Required owner evidence | Status | Downstream verification |
-|---|---|---|---:|---|---|---|
-| A-01 | Physical bus effects are stored per Driver, so two addressed devices can violate one another's write/reset constraints | Current class layout | 1 | Shared non-copyable `Bus` | OPEN | Stage 5 multi-device oracle; Stage 8 two-device HIL |
-| A-02 | Failed `begin()` erases diagnostics and cannot later recover without the original config | `src/AT21CS.cpp:122` | 2 | Binding survives initialization failure; later `recover()` succeeds | OPEN | Stage 5 lifecycle oracle; Stage 8 reconnect HIL |
-| A-03 | `begin()` does not unwind/retain backend ownership coherently | `src/AT21CS.cpp:100` | 1 | Backend externally owned; bind/end bus-silent; no double lifecycle | OPEN | Stage 5 lifecycle oracle |
-| A-04 | `begin(driver.getConfig())` destroys its aliased input | `src/AT21CS.cpp:100`, public `getConfig()` | 2 | `getConfig()` removed; replacement validated before mutation | OPEN | Stage 5 API oracle |
-| A-05 | Write failures do not expose partial/indeterminate effects | All multi-page and irreversible writes | 3 | `WriteResult`/`MutationResult` populated at every failure phase | OPEN | Stage 5 failure-phase oracle |
-| A-06 | Driver is copyable despite hardware state and non-owning pointers | `include/AT21CS/AT21CS.h` | 1 | Compile-time non-copyable/non-movable Bus, Driver, backend | OPEN | Stage 5 compile-time contract |
-| A-07 | Default-constructed Status is indeterminate; `inProgress()` is dead | `include/AT21CS/Status.h:29` | 1 | Deterministic defaults; dead method removed | OPEN | Stage 5 status oracle |
-| A-08 | State guards and `isOnline()` permit or report transient states incorrectly | public state helpers and `_checkInitialized()` | 2 | Central transition/admission helpers | OPEN | Stage 5 table-driven state oracle |
-| A-09 | Failed recovery can promote OFFLINE to DEGRADED | `src/AT21CS.cpp:351` | 2 | Explicit recovery outcome mapping | OPEN | Stage 5 lifecycle oracle |
-| A-10 | `tick()` and `_lastTickMs` have no behavior | `src/AT21CS.cpp:284` | 2 | Removed | OPEN | Stage 5 symbol/API check |
-| A-11 | Composite operations record helper success before returning semantic failure | serial/part detection | 2 | Raw helpers untracked; one final logical result tracked | OPEN | Stage 5 health oracle |
-| A-12 | Settings snapshots expose callback/context pointers through copied Config | current `SettingsSnapshot` | 1 | Scalar-only snapshots | OPEN | Stage 5 public contract test |
-| A-13 | Hidden discovery retries impose product policy and repeated destructive resets | `Config::discoveryRetries` | 2 | Field removed; one attempt per explicit API | OPEN | Stage 5 event-count oracle |
-| A-14 | Bus has no shared Reset generation or physical-mode knowledge | Multi-device protocol behavior | 1 | Bus generation and successful-Reset HS flag | OPEN | Stage 5 multi-device oracle; Stage 8 two-device HIL |
-| A-15 | Health counters wrap and latest failure is cleared by success | current health helpers | 2 | Saturating counters; separate `lastStatus` and persistent `lastError` | OPEN | Stage 5 saturation/health oracle |
-| A-16 | Driver does not resynchronize safely after another device resets the shared Bus | Multi-device protocol behavior | 2 | Lazy generation adoption/Standard restoration with no reset loop | OPEN | Stage 5 multi-device oracle; Stage 8 two-device HIL |
-| A-17 | A backend can claim nominal success with short data, missing ACK evidence, or no completed Stop unless Bus validates returned evidence | target whole-frame callback boundary | 1 | Exact legal result shapes; malformed results map to `IO_ERROR` while raw evidence is retained | OPEN | Stage 5 malformed-result matrix |
-| A-18 | Rebinding/ending a physical Bus can strand existing Drivers or erase a retained write-high deadline | target shared-Bus lifecycle | 1 | Monotonic binding epoch; stale-Driver rejection; fallible hold-preserving `Bus::end()` | OPEN | Stage 5 rebind/end/epoch oracle; Stage 6 owner shutdown fixture |
-| A-19 | Absolute-deadline addition can overflow or collide with the reserved terminal sentinel, and a stalled monotonic clock can leave an ostensibly bounded wait unbounded | current/target timing loops | 1 | Strict checked deadline arithmetic, reserved `UINT64_MAX` poison, and fail-closed post-acceptance equality/overflow | OPEN | Stage 4 independent wait guard; Stage 5 `UINT64_MAX`/stalled-clock tests |
-| A-20 | Failure while sampling a write data-byte ACK can leave a fully delivered byte possibly accepted even when the proven ACKed-byte count is zero | target whole-frame result contract | 1 | Explicit `currentWriteByteMayBeAccepted` evidence, fail-closed high hold, and no replay | OPEN | Stage 3 effect mapping; Stage 4 backend emission; Stage 5 every-index fault matrix |
-| A-21 | Multiple physical SI/O wires have no explicit per-instance isolation contract, so mutable backend/Bus state could leak resets, write holds, timing, diagnostics, or callbacks across load-cell channels | Target removable multi-channel deployment; current tree has no two-independent-Bus oracle | 1 | Two complete Transport -> Bus -> Driver tuples, both at address zero, remain isolated under interleaved reset/write-hold/fault/rebind/shutdown operations and contain no mutable global device state | OPEN | Stage 4 backend-instance checks; Stage 5 independent-Bus oracle; Stage 8 HIL-09 |
-| A-22 | Two live Drivers can alias one address on the same Bus and then carry divergent cached device speed/generation/health state | Checked-in `Driver` has no shared Bus or address-claim ownership guard | 1 | Transactional eight-bit per-Bus address claim mask; duplicate claim fails before I/O; same address on different Buses remains valid | OPEN | Stage 2 lifecycle use; Stage 5 claim/rebind/end oracle; Stage 8 final ownership audit |
+| ID | Finding/outcome | Owner | Status | Evidence or remaining gate |
+|---|---|---:|---|---|
+| A-01 | Bus, not Driver, owns Reset/write-hold effects shared by one wire | 1 | CLOSED | shared-Bus tests |
+| A-02 | failed initialization retains binding for later recovery | 2 | CLOSED | absent-at-boot hot-plug test |
+| A-03 | Backend is externally owned with explicit lifecycle | 1 | CLOSED | bind/end tests |
+| A-04 | replacement config is validated before mutation | 2 | CLOSED | transactional bind tests |
+| A-05 | writes expose committed-prefix and indeterminate effects | 3 | CLOSED | write fault matrix |
+| A-06 | Backend, Bus, and Driver are noncopyable/nonmovable | 1 | CLOSED | compile-time tests |
+| A-07 | Status defaults are deterministic and dead API is removed | 1 | CLOSED | contract tests |
+| A-08 | lifecycle/state admission is explicit | 2 | CLOSED | table-driven state tests |
+| A-09 | failed OFFLINE recovery remains OFFLINE | 2 | CLOSED | recovery tests |
+| A-10 | dead `tick()` behavior removed | 2 | CLOSED | symbol checks |
+| A-11 | composite calls record one final health result | 2 | CLOSED | health tests |
+| A-12 | snapshots contain scalar state, not callback pointers | 1 | CLOSED | public contract tests |
+| A-13 | hidden discovery retry policy removed | 2 | CLOSED | event-count tests |
+| A-14 | Bus owns shared Reset generation and physical speed knowledge | 1 | CLOSED | multi-device tests |
+| A-15 | counters saturate and persistent last error survives success | 2 | CLOSED | saturation/health tests |
+| A-16 | Drivers resynchronize after another Driver resets their shared Bus | 2 | CLOSED | shared-generation tests |
+| A-17 | Bus validates complete callback evidence before accepting success | 1 | CLOSED | malformed-result tests |
+| A-18 | rebind/end preserves retained hold and stale Drivers fail safely | 1 | CLOSED | epoch/rebind/end tests; Stage 6 separately demonstrates shutdown |
+| A-19 | deadline addition is checked and stalled clocks fail closed | 1 | CLOSED | boundary/stalled-clock tests |
+| A-20 | uncertain write-byte acceptance is represented without replay | 1 | CLOSED | every-index fault tests |
+| A-21 | independent physical-wire instances share no mutable state | 1 | CLOSED | backend and two-Bus isolation tests; HIL-04 pending |
+| A-22 | duplicate live address claims fail within one Bus; separate Buses may reuse the address | 1 | CLOSED | claim/multi-Bus tests |
 
-## Build, examples, packaging, and release quality
+## Examples, packaging, and release quality
 
-| ID | Finding | Evidence | Owner | Required owner evidence | Status | Downstream verification |
-|---|---|---|---:|---|---|---|
-| Q-01 | Repository advertises an unwanted, unmaintained native ESP-IDF support path instead of the maintainer-selected Arduino/PioArduino matrix | ESP32 build metadata, fixtures, and docs | 4 | Stage 4 defines/builds only S2/S3 `framework = arduino` through exact PioArduino 55.03.311; removes `espidf` framework metadata, native-IDF fixture/component, and IDF-only root build path | CLOSED | Stage 7 package/CI deny native-IDF artifacts and stale docs/checkers; Stage 8 release audit |
-| Q-02 | Native tests cover only 25 cases and encode unsafe behavior | `test/test_basic.cpp` | 5 | Public-API matrix and event/timing oracle | CLOSED | Stage 7 CI; Stage 8 independent test review |
-| Q-03 | Hardware timing is unvalidated despite production claims | README and platform docs | 8 | Explicit HIL rows and raw capture hashes | OPEN | Maintainer review before stable finalization |
-| Q-04 | Example helpers use repository-root includes and do not compile as consumers | `examples/common/Log.h:13` | 6 | Local includes and independent example builds | OPEN | Stage 7 packaged consumer builds |
-| Q-05 | Example command-contract checks accept placeholders/no-ops | Arduino CLI checker and examples | 6 | Semantic manifest/handler checks for both supported Arduino CLIs | OPEN | Stage 7 static-contract CI |
-| Q-06 | Version generation is stale and non-reproducible | generated `Version.h`, script | 7 | Deterministic `--check`; two runs byte-identical | OPEN | Stage 8 full-gate rerun |
-| Q-07 | CLI parsing is unbounded/accepts invalid values; scan loses binding; destructive commands lack confirmation | examples/common and CLI | 6 | Bounded strict parser; address scan removed; exact confirmation gates | OPEN | Stage 7 semantic/package checks |
-| Q-08 | Load-cell helper duplicates paging and falsely claims journaling/wear leveling | `LoadCellMap.h` | 6 | Helper removed or replaced with honest, tested serialization design | OPEN | Stage 7 docs/package checks |
-| Q-09 | Required multi-device example is absent | examples tree vs `AGENTS.md` | 6 | Small shared-code multi-device CLI | OPEN | Stage 7 S2/S3 package builds |
-| Q-10 | README, contributing, security, plans, and Doxygen inputs disagree with code | documentation tree | 7 | Link/API/version/doc checks | OPEN | Stage 8 final audit |
-| Q-11 | Package contents are uncurated and omit referenced docs | `pio pkg pack` result | 7 | Explicit archive allowlist and unpacked builds | OPEN | Stage 8 clean-consumer rerun |
-| Q-12 | CI omits clean consumers, sanitizers, docs, formatting, version, and package gates | workflow | 7 | Pinned, separated Arduino/core CI jobs | OPEN | Stage 8 full-gate audit |
-| Q-13 | Example commands can invoke destructive/irreversible operations without a strong interlock | current example behavior | 6 | Exact confirmation tokens and automated rejection-path tests | OPEN | Stage 7 semantic checks; Stage 8 HIL authorization audit |
-| Q-14 | Non-protected docs repeat false load-cell/CRC/timing/command claims | README and docs tree | 7 | Corrected docs and automated consistency checks | OPEN | Stage 8 documentation audit |
-| Q-15 | HIL could destroy non-sacrificial parts or claim success without raw evidence | no current HIL gate | 8 | Mutable/sacrificial procedures, explicit matrix, captures and hashes | OPEN | Maintainer evidence review before stable finalization |
-| Q-16 | `AGENTS.md` says to ready-poll during `tWR`, contradicting its continuous-high requirement and the safe fixed high-only Bus policy | `AGENTS.md` Protocol Rules | 1 | Replace only that line with the exact no-ACK-poll 10 ms Bus policy | OPEN | Stage 3 trace tests; Stage 7 docs audit; Stage 8 waveform |
-| Q-17 | Native-IDF example/component instructions contradict the maintainer-selected Arduino-only support policy and two-example repository model | `AGENTS.md`, prompts, and current tree | 7 | Exactly two shipped Arduino CLIs; native-IDF example, checker, component, fixture, metadata, and support claims removed | OPEN | Stage 8 example-count and framework-boundary audit |
-| Q-18 | No generic upper-firmware reference proves fixed-size ownership, bounded requests, hot-plug recovery, identity replacement, and independent failure handling for several separate SI/O channels | No multi-channel firmware-owner consumer fixture | 6 | S2/S3 fixture with one owner, fixed DTO/rings, two independent address-zero channels, explicit recovery/backoff/serial reconciliation, and no product types in the library | OPEN | Stage 7 packaged consumer builds; Stage 8 integration audit and HIL-09 |
-| Q-19 | Consumer documentation does not define the two valid topologies or divide library responsibility from connector, scheduling, identity-association, calibration-schema, and harness policy | Current docs predate the general removable-peripheral deployment contract | 7 | Document shared-wire and separate-wire object graphs, serialization/concurrency limit, recovery/identity flow, per-channel shutdown, and application/electrical responsibility boundaries | OPEN | Stage 8 documentation and package audit |
+| ID | Finding/outcome | Owner | Status | Evidence or remaining gate |
+|---|---|---:|---|---|
+| Q-01 | supported framework is Arduino S2/S3 only | 4 | CLOSED | pinned Stage-04 builds; package verification is tracked by Q-11/Q-12 |
+| Q-02 | host suite covers production paths and injected faults | 5 | CLOSED | native and sanitizer suites |
+| Q-03 | physical timing remains unqualified until raw HIL evidence exists | 8 | HIL_PENDING | Prompt-08 waveform rows |
+| Q-04 | example helpers/builds must work without repository-root includes | 6 | OPEN | two independent example builds |
+| Q-05 | command checking must reject placeholders and missing handlers | 6 | OPEN | semantic manifest/handler checker |
+| Q-06 | version generation must be deterministic | 7 | OPEN | generator `--check` and byte-identical runs |
+| Q-07 | unsafe parser, scan, and unbounded example behavior | 6 | OPEN | bounded parser tests; scan removed |
+| Q-08 | product `LoadCellMap` and duplicated paging do not belong in examples | 6 | OPEN | obsolete helper removed |
+| Q-09 | concise two-device/two-pin example is missing | 6 | OPEN | S2/S3 multi-example builds |
+| Q-10 | consumer documentation does not match current API | 7 | OPEN | docs/link/API checks |
+| Q-11 | package contents are not explicitly curated | 7 | OPEN | allowlist and unpacked consumers |
+| Q-12 | CI lacks final docs/package/example gates | 7 | OPEN | pinned separated jobs |
+| Q-13 | destructive example input lacks a strong interlock | 6 | OPEN | exact page-write confirmation and rejection tests; irreversible commands absent |
+| Q-14 | non-protected docs contain stale protocol/product claims | 7 | OPEN | documentation consistency checks |
+| Q-15 | mutable/irreversible HIL needs explicit authorization and evidence | 8 | HIL_PENDING | Prompt-08 authorization records |
+| Q-16 | governing `tWR` wording now requires no-ACK-poll released-high hold | 1 | CLOSED | `AGENTS.md` and write tests |
+| Q-17 | obsolete native-IDF example/checker contradicts the two-Arduino-example model | 6 | OPEN | Stage-06 removal; Stage-07 package/docs verification |
+| Q-18 | no concise synchronous multi-instance/hot-plug examples and RTOS guidance exist | 6 | OPEN | two wire instances, explicit recover/serial comparison, one-owner guidance, no RTOS framework |
+| Q-19 | docs lack simple topology, serialization, hot-plug, and firmware responsibility guidance | 7 | OPEN | README/MIGRATION/package docs |
 
 ## Closure rule
 
-A software/root finding is closed when:
+A software finding closes when the root behavior is implemented, a named test or
+supported build verifies it, current documentation does not contradict it, and
+no obsolete path preserves the defect. A later stage may update stale registry
+bookkeeping when evidence is already present; that is not a reason to duplicate
+the implementation or block unrelated work.
 
-1. its owning stage implements the root fix;
-2. a named regression test, static check, or supported-framework build proves
-   it;
-3. downstream public documentation matches the final behavior; and
-4. every named downstream software verification belonging to the current or an
-   already-completed stage passes;
-5. no compatibility path retains the defective behavior; and
-6. its registry `Status` is changed from `OPEN` to `CLOSED`, or to
-   `ACCEPTED_RISK` only with an explicit maintainer record.
-
-Passing the old 25-test suite or the token-only CLI checker is not closure
-evidence.
-
-Deferred physical verification does not keep a software-complete owner stage
-open or blocked. Record it as `HIL_ONLY` for Prompt 08. Findings whose root
-requirement is itself physical qualification (P-21, P-22, Q-03, and Q-15)
-remain `OPEN` until Prompt 08; later HIL acceptance is still required for a
-production-qualified claim but does not reopen a correctly implemented earlier
-software finding.
+Physical evidence qualifies only the exact recorded setup. `HIL_PENDING` is an
+honest limitation, not software failure and not hardware success.

@@ -1,72 +1,52 @@
-# AI coder prompt - audit one completed AT21CS stage
+# Audit the current numbered stage
 
-Use this in a new turn with the same numbered prompt. Audit and correct that
-stage; do not begin the next one.
+Use this wrapper in a new turn with the same active numbered prompt. Audit and
+correct that stage; do not begin the next one.
 
-Reread `AGENTS.md`, packet `README.md`, `00_SHARED_V2_CONTRACT.md`,
-`FINDINGS_REGISTRY.md`, the current and earlier prompts. Follow `AGENTS.md`,
-except for Q-16 in Prompt 01. Treat maintainer decisions as authoritative.
-Never modify the protected complete-driver report.
+Read `AGENTS.md`, the packet `README.md`, `00_SHARED_V2_CONTRACT.md`,
+`FINDINGS_REGISTRY.md`, and the current prompt. Earlier numbered prompts are
+completed history, consulted only when tracing a suspected regression.
 
-Audit current findings and completed-stage regressions. Record later work
-without implementing it. Use only the packet's verified datasheet for protocol
-conclusions.
+Inspect `git status`, the full stage diff, production paths, Backend/Bus/Driver,
+fake transport, callers, examples, tests, builds, packaging, documentation, and
+finding evidence. Preserve unrelated changes and never modify the protected
+complete-driver report.
 
-Inspect `git status`, the diff, production paths, Backend/Bus/Driver and fake
-transport, callers, examples, fixtures, adapters, tests, fault injection,
-builds, packaging, docs, and findings. Preserve unrelated changes.
+Verify requirement by requirement:
 
-Spawn read-only subagents for protocol, API/state, backend/integration, tests,
-and simplification where applicable. Require line evidence; verify every report.
+- the exact current public declarations and documented defaults;
+- datasheet-correct framing, address construction, ACK/NACK phases, MSb order,
+  CRC, Reset/Discovery, reads, writes, speed changes, Lock, ROM zones, and
+  Freeze;
+- validation before I/O, bounded deadlines/waits, transactional outputs, and
+  conservative write/mutation evidence;
+- one Backend/Bus per wire, unique addresses within a Bus, address reuse across
+  separate Buses, and no cross-instance state leakage;
+- synchronous externally serialized operation with no library task, queue,
+  application-facing mutex, retry, logging, or product policy, while private
+  bounded Backend timing-critical facilities remain allowed;
+- hot-plug through retained binding plus explicit `recover()`, with `probe()`
+  remaining liveness-only;
+- two examples and RTOS guidance do not introduce an owner framework, mailbox,
+  request DTO, attachment generation, or scheduler.
 
-Build a requirement-by-requirement checklist and verify:
+Trace success, invalid input/state, NACK phases, transport faults, timeouts,
+cleanup failures, boundaries, ambiguous writes, rebind/recovery, hot-plug, and
+shutdown where applicable. Tests must exercise production paths and independent
+expected values.
 
-- Exact files, names, values, types/defaults, constants, signatures,
-  visibility, transitions, deletions, and registry evidence.
-- Datasheet-correct framing, addresses, ACK/NACK phases, MSb order, CRC,
-  opcodes, read termination, Discovery, speed changes, Reset, write-high
-  behavior, and irreversible boundaries.
-- Whole-frame callbacks; deadlines; overflow and stalled-clock handling; stale
-  descriptors; post-end inactivity; bounded GPIO, critical, and power behavior.
-- One Bus per wire; unique addresses per Bus; independent wires; correct
-  claims, epochs, Reset generations, write deadlines, diagnostics, and external
-  per-Bus serialization.
-- Correct operation admission, lifecycle, rebind/reconnect, speeds,
-  FAULT/OFFLINE, health, result tracking, and saturating counters.
-- Validation before I/O, including `SIZE_MAX`; transactional outputs/config;
-  committed-prefix and accepted-byte evidence; partial/indeterminate writes;
-  verification; no replay of ambiguous mutation.
-- Security Lock, ROM-zone, and Freeze behavior, with no invented commands,
-  status queries, v1 shims, duplicate transports, dead methods, or obsolete
-  symbols.
+Fix every current-stage defect and completed-stage regression without adding
+later-stage work. Simplify duplicated code and remove obsolete paths.
 
-Confirm core is general, synchronous, deterministic, product-neutral,
-fixed-size, and free of tasks, queues, mutexes, logging, persistence, retries,
-calibration, telemetry, control, and safety policy. Prompt 06's fixture/DTOs
-stay under `test/consumer/firmware_owner/`; they must not leak or be packaged.
+Stop only for a material protocol, public-API, electrical-safety,
+object-lifetime, or irreversible-authorization contradiction. Resolve stale
+historical wording and ordinary tooling ownership through the packet hierarchy
+and document the decision.
 
-Trace production code through success, invalid input/state, NACK phases,
-transport error, timeout, cleanup error, boundaries, partial mutation, rebind,
-recovery, and shutdown where applicable. Tests must call production logic and
-use independent expected values.
+Rerun current and affected earlier gates plus `git diff --check`. Physical HIL
+is exclusive to Prompt 08. If and only if software criteria are complete, create
+a non-empty `stage NN:` checkpoint commit and push it according to the packet
+README. Do not tag, publish, amend, force-push, or modify downstream repositories.
 
-Fix every current-stage defect and earlier-stage regression. Reuse correct
-implementation logic, including verified backend mechanics, while refactoring
-as far as needed for simplicity, robustness, and readability. Retain no
-obsolete public contract, compatibility wrapper, migration architecture,
-parallel path, or local patch. Do not add later-stage functionality.
-
-Reread the prompt, inspect the corrected diff/callers, verify every criterion
-and finding, simplify, and rerun current checks plus affected earlier gates,
-including `git diff --check`. Claim only validation performed. Structure-only
-HIL is not hardware evidence; mutable or irreversible HIL needs Prompt 08
-authorization.
-
-Report findings, corrections, refactoring, removed APIs, requirements verified,
-checks run, blockers, and remaining later-stage or hardware work. Prompts 01–07
-do not run physical HIL and are not blocked solely by deferred physical
-evidence; record such work as `HIL_ONLY` for Prompt 08. If and only if the
-stage's software criteria are complete, create its non-empty `stage NN:`
-checkpoint commit and push it using the packet README policy. Do not checkpoint
-a genuinely blocked software stage. Do not tag, release, publish, amend history,
-force-push, or modify downstream repositories.
+Report findings, corrections, removed APIs/artifacts, requirements verified,
+checks run, blockers, and deferred hardware work.

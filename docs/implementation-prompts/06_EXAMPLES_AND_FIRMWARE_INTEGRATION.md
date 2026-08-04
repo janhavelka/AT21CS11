@@ -1,60 +1,41 @@
-# Prompt 06 — safe examples and generic firmware integration
+# Prompt 06 — safe synchronous examples and RTOS integration guidance
 
 ## Outcome
 
-Replace the oversized/unsafe example surface with minimal examples that
-demonstrate the final Bus/Driver ownership model, bounded parsing, exact error
-reporting, safe irreversible-operation interlocks, and both supported physical
-topologies. The primary firmware fixture is a generic fixed-size
-multi-channel owner for independently wired removable peripherals.
+Replace the obsolete example surface with exactly two small Arduino examples
+that use the current synchronous API:
 
-This stage does not add application-specific features to the library.
+1. one complete single-device CLI;
+2. one concise two-device/two-pin CLI.
 
-Arduino through the exact PioArduino pin frozen by the shared contract is the
-only current firmware framework. Keep core framework-independent, but do not
-install/select standalone ESP-IDF or add native-IDF examples, components,
-fixtures, or build gates. Do not run physical HIL in this stage; Prompt 08 alone
-owns physical qualification.
+Demonstrate explicit hot-plug recovery and the ownership pattern suitable for a
+firmware-owned RTOS task. Do not implement that task, its queue, or an
+asynchronous wrapper in this repository.
 
-## Required working method
+## Baseline and scope
 
-Read all contracts and completed Stages 1–5. Inspect sibling example patterns
-in `../MB85RC`, `../PCA9555`, `../TCA9548A`, and `../INA228`; inspect
-`../TunnelMonitor-node` owner-operation budgets, static construction, error
-propagation, and shutdown rules as one reference profile, not as public API
-authority. Use the README comparison boundary to reject I2C-only behavior.
-Preserve unrelated changes.
+Stages 01-05 are completed. Read `AGENTS.md`, the packet README, the shared
+contract, the registry, and this prompt. Inspect current public headers and
+tests before editing. Use the verified datasheet only if a protocol question is
+encountered.
 
-Spawn subagents for:
+This stage owns:
 
-1. bounded CLI/parser and destructive-command review;
-2. separate-wire and shared-wire ownership review;
-3. Arduino S2/S3 example/build-boundary review;
-4. generic firmware-owner, hot-plug, and cross-task DTO review.
+- Q-04 example include/build cleanup;
+- Q-05 meaningful command checking;
+- Q-07 bounded parsing and removal of unsafe scan behavior;
+- Q-08 removal of the product-specific `LoadCellMap` and duplicated paging;
+- Q-09 the missing multi-device example;
+- Q-13 safe destructive-operation handling;
+- Q-17 removal of stale native-IDF example/checker artifacts;
+- Q-18 simple synchronous multi-instance and RTOS integration guidance.
 
-Keep one integrator for common example helpers. Reuse helpers; do not copy the
-single-device dispatcher into the multi-device example. Refactor and delete
-obsolete example infrastructure rather than wrapping it; keep the final
-examples smaller than the current set and add no compatibility band-aid. Do not
-perform actual irreversible operations during automated tests. Do not modify
-the protected report. Follow the packet README's saga checkpoint policy; do not
-tag, release, publish, or upload.
-
-## Sole owned findings
-
-Close:
-
-- Q-04 example half;
-- Q-05;
-- Q-07;
-- Q-08 implementation half;
-- Q-09;
-- Q-13 example interlocks;
-- Q-18 generic multi-channel firmware integration.
+It does not change Backend/Bus/Driver protocol behavior or public API. It does
+not implement Prompt 07 packaging/CI or Prompt 08 HIL.
 
 ## Final example layout
 
-Keep:
+Keep exactly:
 
 ```text
 examples/
@@ -67,719 +48,220 @@ examples/
     BoundedCli.h
     CommandContract.h
     StatusText.h
-    ExampleTransport.h
+    WireInstance.h
 ```
 
-Remove obsolete/raw/duplicated helpers, including `LoadCellMap.h` unless the
-maintainer explicitly chooses to keep and fully test an honest fixed-record
-example. Do not retain a false journal/wear-leveling claim.
+All common includes are local, such as `#include "BoardConfig.h"`. Remove every
+other current example/helper, including `LoadCellMap.h`, raw-PHY helpers,
+placeholder abstractions, and `examples/espidf_basic/`.
 
-All includes inside `examples/common` are local, for example:
+Remove the obsolete `tools/check_idf_example_contract.py`. Rewrite
+`tools/check_cli_contract.py` for the two supported Arduino examples. Prompt 07
+will verify that final documentation and package contents contain no native-IDF
+claim.
 
-```cpp
-#include "BoardConfig.h"
-```
+## Bounded CLI
 
-Never use repository-root-qualified `examples/common/...` includes.
+`BoundedCli.h` provides fixed character storage, in-place tokenization, and
+strict unsigned/hex parsing. It must:
 
-## Shared bounded CLI
-
-Implement in `BoundedCli.h` with fixed storage:
-
-```cpp
-static constexpr size_t CLI_LINE_CAPACITY = 128;
-static constexpr size_t CLI_MAX_ARGS = 8;
-
-struct ParsedCommand {
-  size_t argc = 0;
-  char* argv[CLI_MAX_ARGS] = {};
-};
-```
-
-No Arduino `String`, `std::string`, heap allocation, unbounded line growth, or
-recursive parser.
-
-Parsing helpers:
-
-```cpp
-bool parseUint32(const char* text, uint32_t& value);
-bool parseUint8(const char* text, uint8_t& value);
-bool parseFiniteFloat(const char* text, float& value);
-```
-
-Rules:
-
-- clear `errno`;
+- use no Arduino `String`, `std::string`, heap allocation, recursion, or
+  unbounded line growth;
+- define fixed line and argument limits;
+- reject rather than truncate an overlong line or excess argument;
+- discard an overlong line through its newline and report it once;
 - require complete token consumption;
-- reject leading minus for unsigned;
-- reject overflow/underflow;
-- reject NaN and Infinity;
-- leave output unchanged on failure;
-- overlong line is discarded until newline and reported once.
+- clear and check `errno` where standard conversion functions are used;
+- reject a leading minus, overflow, empty tokens, and trailing text;
+- leave caller outputs unchanged when parsing fails;
+- process at most the fixed line capacity per Arduino poll, allowing overlong
+  discard to continue across later polls rather than monopolizing `loop()`.
 
-Add host tests for parser behavior.
+Do not retain floating-point parsing merely because the old load-cell example
+used it. The EEPROM examples do not need it.
 
-## Command contract
+Add native tests that include the real header and cover empty input, CR/LF,
+exact buffer boundaries, overlong discard, maximum argument count, excess
+arguments, zero, maximum accepted values, overflow, minus, and trailing text.
 
-Define:
+## Command contract and safety
 
-```cpp
-enum class CommandRisk : uint8_t {
-  READ_ONLY = 0,
-  MUTATING,
-  DESTRUCTIVE,
-  IRREVERSIBLE
-};
+`CommandContract.h` contains one authoritative fixed command-spec catalog for
+name, usage, and risk. Each example has one registration table selecting its
+catalog subset. Every registration references exactly one catalog entry and one
+handler; no selected command lacks a handler and no handler lacks a catalog
+entry. The two examples need not select the same subset.
 
-struct CommandSpec {
-  const char* name;
-  CommandRisk risk;
-  const char* usage;
-  const char* confirmation;
-};
-```
+The full CLI may contain only these classes of command:
 
-One repo-local manifest is authoritative for both Arduino CLI command names and
-risk classes. The two examples reuse the contract/helpers without copying the
-full dispatcher.
+- inspection: `help`, `status`, `presence`, `probe`, `manufacturer`, `serial`;
+- bounded reads: EEPROM, Security, Security Lock state, and ROM-zone state;
+- lifecycle/configuration: `recover`, supported speed selection, and `shutdown`;
+- one bounded EEPROM page-write command.
 
-Required risk/confirmation examples:
+The multi-device CLI uses a concise subset with an explicit instance selector.
+
+Do not expose stress, full erase, raw PHY, address scan, arbitrary chip command,
+Security write, permanent Security Lock, permanent ROM-zone enable, or ROM
+Freeze in either shipped example. The irreversible public APIs remain available
+for separately authorized service software, but a general interactive example
+must not make them easy to invoke.
+
+Freeze this simple EEPROM page-write syntax:
 
 ```text
-write/stress/full erase:
-  DESTRUCTIVE
-  CONFIRM_EEPROM_OVERWRITE
-
-permanentlyLockSecurity:
-  IRREVERSIBLE
-  CONFIRM_PERMANENT_SECURITY_LOCK
-
-permanentlyEnableRomZone <n>:
-  IRREVERSIBLE
-  CONFIRM_PERMANENT_ROM_ZONE
-
-permanentlyFreezeRomZones:
-  IRREVERSIBLE
-  CONFIRM_PERMANENT_ROM_FREEZE
+write-page <address> <2..16 hexadecimal digits> CONFIRM_EEPROM_OVERWRITE
 ```
 
-The exact final argument must equal the confirmation string. A prefix,
-case-insensitive match, missing argument, or extra token fails with zero Driver
-I/O.
+Each byte is one hex pair, so length is derived as one to eight bytes. Reject
+odd-length data, non-hex characters, EEPROM range overflow, page crossing,
+missing/prefixed/differently cased confirmation, and extra input before Driver
+I/O. Print the exact `Status` and full `WriteResult`, including ambiguous
+effects.
 
-Automated example tests must compile irreversible handlers but invoke only their
-rejection/dry-run paths.
+`check_cli_contract.py` verifies the exact file layout, catalog uniqueness,
+registration completeness, risks, usage, confirmation, and forbidden obsolete
+tokens. Native tests include the real dispatcher with fake action counters to
+prove every registered safe handler is meaningful and malformed/destructive
+rejection performs zero action calls. Automated tests never perform real
+destructive or irreversible hardware operations.
+
+## Example-only wire instance
+
+`WireInstance.h` is a small example-only aggregate/helper around:
+
+```cpp
+AT21CS::Esp32Transport backend;
+AT21CS::Bus bus;
+AT21CS::Driver driver;
+```
+
+It may centralize start, cached serial comparison, and ordered shutdown for the
+examples. It is not a compatibility facade or public library API. It creates no
+task, queue, mutex, scheduler, or retry loop.
+
+Start order is Backend -> Bus -> Driver. An absent Driver is not a reason to
+destroy a successfully started Backend/Bus or discard its Driver binding.
+
+Shutdown order is Driver -> fallible `Bus::end()` -> Backend. If Bus end fails,
+keep that Backend alive and report the exact failure.
 
 ## Single-device CLI
 
-Demonstrate:
+Use one statically owned wire instance and an explicit expected part. Show:
 
-- explicit backend begin;
-- Bus bind;
-- Driver begin with exact expected part;
-- cached snapshot/status;
-- raw Manufacturer ID, masked part classification, and silicon revision;
-- known/unknown speed state;
-- Bus-level presence indicator versus Driver protocol probe;
-- serial/manufacturer reads;
-- bounded EEPROM read/page write;
-- Security/ROM reads;
-- explicit recover;
-- conservative WriteResult/MutationResult printing.
-- ordered shutdown that keeps Backend alive until fallible `Bus::end()` returns
-  OK.
+- Backend/Bus/Driver startup and exact startup status;
+- initialized/offline/hot-plug state through copied snapshots;
+- raw Manufacturer ID, detected part, revision, and known/unknown speed;
+- optional presence indication clearly distinguished from protocol `probe()`;
+- serial and bounded EEPROM/Security/ROM reads into fixed caller buffers;
+- one bounded confirmed EEPROM page write with exact effect evidence;
+- explicit `recover()` after an absent-at-boot or reattached device;
+- serial read/comparison after successful recovery;
+- ordered shutdown.
 
-Remove:
-
-- duplicated raw PHY commands or raw bit implementation;
-- redundant `waitReady()` after synchronous writes;
-- hidden address masking;
-- placeholder/no-op commands;
-- load-cell application schema;
-- unbounded stress loops.
-- address scanning. Reset/Discovery is Bus-wide and a temporary Driver scan
-  would repeatedly reset every configured device. Examples instantiate only
-  explicit configured addresses and use `probe()`/`recover()` on those objects.
-
-Every stress command requires:
-
-- explicit finite iteration count with a hard maximum;
-- explicit affected range;
-- destructive confirmation;
-- stop on first failure;
-- final readback summary.
+If `begin()` reports absence as `NOT_PRESENT` or an identity-phase
+`NACK_DEVICE_ADDRESS`, leave the bound CLI usable so a later `recover` command
+can succeed. Do not reconstruct the objects, mask an address silently, or hide
+a retry.
 
 ## Multi-device CLI
 
-Demonstrate the intended removable-peripheral topology with:
+Use two statically owned independent instances:
 
 ```text
-SI/O pin A -> Backend A -> Bus A -> Driver A, addressBits 0
-SI/O pin B -> Backend B -> Bus B -> Driver B, addressBits 0
+configured pin A -> Backend A -> Bus A -> Driver A, addressBits 0
+configured pin B -> Backend B -> Bus B -> Driver B, addressBits 0
 ```
 
-Use two distinct board-configured SI/O pins. Reusing address zero is deliberate
-and proves that addresses are scoped to a Bus. The less common topology with
-multiple A2:A0 devices sharing one wire remains fully supported and is proved
-by the shared contract and Prompt 05 tests. A firmware owner may mix channel
-cardinalities: every physical wire is exactly one Backend/Bus channel, and that
-channel may contain one to eight uniquely addressed Drivers. Never share a Bus
-across pins or create a Bus per address on a shared wire. This concise CLI
-itself remains scoped to two separate one-device wires.
+Configure an explicit expected part for both Drivers; do not rely on
+`PartType::UNKNOWN` in production-oriented examples.
 
-Show:
+Use the existing example pin choices unless the board configuration already
+defines better values; do not invent an electrical qualification claim.
 
-- independent snapshots/health;
-- a Reset, retained write hold, rebind, absence, or shutdown on A does not
-  change B;
-- channel selection without reconstructing global state;
-- explicit `recover()` after simulated attachment/power-up;
-- serial-number comparison after recovery;
-- no copied Driver objects;
-- serialized access from one loop/owner;
-- independent Driver -> Bus -> Backend shutdown for each channel. The code path
-  must keep A's Backend alive if A Bus end fails and leave B usable; do not
-  inject that fault in the CLI. Prompt 05's host oracle proves it.
+One Arduino `loop()` dispatches one complete synchronous command at a time. Show:
 
-Reuse common parser/command/status helpers. Keep this example concise; do not
-copy the full single-device command set.
+- explicit A/B selection without copying or reconstructing objects;
+- independent status and serial identity;
+- `recover A` or `recover B` after attachment;
+- a missing/failing A does not alter B state;
+- independent ordered shutdown;
+- address zero legitimately reused because the physical wires are separate.
 
-## Framework support boundary
+Document the shared-wire alternative in a short code comment: one Backend and
+one Bus with a fixed set of uniquely addressed Drivers. Do not create a Bus per
+address on the same wire.
 
-Ship only the two Arduino examples above and build them only with the exact
-PioArduino `framework = arduino` environments. Remove any native-IDF example,
-contract checker, compatibility facade, component scaffold, or duplicated
-command implementation. Framework independence is proved by the core boundary
-and host tests; this stage does not implement another firmware framework.
+## RTOS integration guidance
 
-Every command claimed by either Arduino CLI must be implemented meaningfully.
-Specifically, no placeholder `raw`, `chip`, unused `verbose`, or CRC-only
-“selftest” may satisfy the command contract. Invalid arguments must produce a
-visible error and zero Driver I/O.
+The example comments and Stage-07 documentation must state:
 
-## Generic fixed-size firmware-owner fixture
+- library calls are synchronous and objects are not thread-safe;
+- the safe default is one firmware task/loop owning all AT21CS wire instances
+  and calling them sequentially;
+- application tasks may send copied application-defined messages to that task;
+- the library defines no mailbox, request ID, deadline, result dispatcher,
+  automatic recovery, backoff, or attachment-generation scheme;
+- multiple tasks owning separate wire instances are outside the current ESP32
+  concurrency qualification unless the Backend is later tested and documented
+  for simultaneous calls;
+- Drivers sharing a Bus always share one owner;
+- firmware calls `recover()` explicitly after attachment and may compare the
+  serial before reusing application-owned data;
+- `writeEepromPage()` is the preferred scheduling unit when a firmware task
+  needs one bounded page write.
 
-Create under:
+Do not create:
 
 ```text
 test/consumer/firmware_owner/
-  platformio.ini
-  src/FirmwareOwnerPolicy.h
-  src/main.cpp
-
 tools/run_firmware_owner_fixture.py
+FirmwareOwnerPolicy.h
+At21csOwner
+ChannelRequest / ChannelResult / CachedChannelStatus
 ```
 
-`platformio.ini` must have no checkout-relative library path. Declare exactly
-one dependency using:
+## Builds and tests
 
-```ini
-lib_deps =
-  ${sysenv.AT21CS_FIXTURE_LIB_SPEC}
-```
-
-`run_firmware_owner_fixture.py` accepts required `--library-root`, optional
-`--fixture-root` (default `test/consumer/firmware_owner`), and one or more
-`--environment`. It resolves the library root, requires its `library.json`,
-constructs `AT21CS-under-test=<Path.as_uri()>` (a PlatformIO `file://` local
-package), sets `AT21CS_FIXTURE_LIB_SPEC` only in the child process, and invokes
-`python -m platformio run -v`. It accepts repeatable `--forbid-root`; any
-compiler/linker input or include path under a forbidden root fails the run.
-There is no fallback dependency, repository `lib_extra_dirs`, or hardcoded
-`../../../` path.
-
-This is compile/test consumer code, never public library API. Use these exact
-fixture constants:
-
-```cpp
-static constexpr size_t MAX_CHANNELS = 4;
-static constexpr size_t OWNER_DATA_BYTES = 8;
-static constexpr size_t REQUEST_QUEUE_DEPTH = 8;
-static constexpr size_t RESULT_QUEUE_DEPTH = 8;
-static constexpr size_t MAX_OUTSTANDING_REQUESTS = 8;
-
-static constexpr uint64_t PRESENCE_DEBOUNCE_US = 50000;
-static constexpr uint64_t RECOVERY_INITIAL_BACKOFF_US = 100000;
-static constexpr uint64_t RECOVERY_MAX_BACKOFF_US = 5000000;
-
-static constexpr uint64_t SINGLE_FRAME_BUDGET_US = 10000;
-static constexpr uint64_t PAGE_WRITE_BUDGET_US = 24000;
-static constexpr uint64_t RECOVERY_AND_IDENTITY_BUDGET_US = 52000;
-
-static_assert(MAX_OUTSTANDING_REQUESTS <= RESULT_QUEUE_DEPTH);
-```
-
-The combined recovery budget covers an optional 9 ms presence callback, the
-5 ms Reset callback deadline, up to three 9 ms frames for Manufacturer ID,
-AT21CS01 Standard-speed restoration, and serial read, plus fixed owner
-overhead. Do not reduce it from observed typical timing.
-
-The page budget covers Prompt 04's 22 ms maximum fault-path fresh page call plus
-2 ms for the exact owner admission/result-construction phase. Measure the full
-second-admission-check-through-phase-return path in Prompt 08 firmware-owner
-HIL and fail that release row if it exceeds 24 ms; do not consume the margin
-with logging or callbacks.
-
-Define only firmware-local DTOs and owner errors:
-
-```cpp
-struct BoardConfig {
-  uint64_t sioOutputCapableMask = 0;
-  uint64_t inputCapableMask = 0;
-  uint64_t reservedPinMask = 0;
-};
-
-struct ChannelConfig {
-  bool enabled = false;
-  int sioPin = -1;
-  int presencePin = -1;
-  bool presenceActiveHigh = true;
-  uint8_t addressBits = 0;
-  AT21CS::PartType expectedPart = AT21CS::PartType::UNKNOWN;
-  AT21CS::SpeedMode startupSpeed = AT21CS::SpeedMode::HIGH_SPEED;
-  uint8_t offlineThreshold = 1;
-};
-
-enum class ChannelOperation : uint8_t {
-  READ_EEPROM_CHUNK = 0,
-  WRITE_EEPROM_PAGE,
-  READ_SERIAL,
-  READ_MANUFACTURER,
-  PROBE,
-  RECOVER
-};
-
-enum class OwnerResultCode : uint8_t {
-  OK = 0,
-  INVALID_REQUEST,
-  DUPLICATE_REQUEST_ID,
-  REQUEST_QUEUE_FULL,
-  OUTSTANDING_LIMIT,
-  DEADLINE_EXPIRED,
-  DEADLINE_TOO_SHORT,
-  IDENTITY_NOT_READY,
-  CHANNEL_ABSENT,
-  STOPPING,
-  CLOCK_OVERFLOW,
-  GENERATION_EXHAUSTED,
-  LIBRARY_ERROR,
-  INTERNAL_ERROR
-};
-
-struct ChannelRequest {
-  uint32_t requestId = 0;
-  uint8_t channelIndex = 0;
-  ChannelOperation operation = ChannelOperation::READ_EEPROM_CHUNK;
-  uint8_t address = 0;
-  uint8_t length = 0;
-  uint8_t data[OWNER_DATA_BYTES] = {};
-  uint64_t expectedAttachmentGeneration = 0;
-  uint64_t notAfterUs = 0;
-};
-
-struct ChannelResult {
-  uint32_t requestId = 0;
-  uint8_t channelIndex = 0;
-  OwnerResultCode ownerCode = OwnerResultCode::OK;
-  bool libraryInvoked = false;
-  AT21CS::Err libraryCode = AT21CS::Err::OK;
-  int32_t libraryDetail = 0;
-  uint8_t length = 0;
-  uint8_t data[OWNER_DATA_BYTES] = {};
-  AT21CS::WriteEffect writeEffect =
-      AT21CS::WriteEffect::NOT_ATTEMPTED;
-  size_t bytesCommitted = 0;
-  size_t bytesAccepted = 0;
-  uint64_t attachmentGeneration = 0;
-  uint64_t replacementGeneration = 0;
-};
-
-struct CachedChannelStatus {
-  bool backendStarted = false;
-  bool busBound = false;
-  bool driverBound = false;
-  bool initialized = false;
-  AT21CS::DriverState state = AT21CS::DriverState::UNINIT;
-  bool physicalPresenceKnown = false;
-  bool physicalPresent = false;
-  bool serialEverConfirmed = false;
-  bool identityValid = false;
-  uint8_t serial[8] = {};
-  uint64_t attachmentGeneration = 0;
-  uint64_t replacementGeneration = 0;
-  AT21CS::PartType part = AT21CS::PartType::UNKNOWN;
-  uint32_t manufacturerId = 0;
-  uint8_t siliconRevision = 0;
-  bool speedKnown = false;
-  AT21CS::SpeedMode activeSpeed = AT21CS::SpeedMode::HIGH_SPEED;
-  AT21CS::Err lastCode = AT21CS::Err::OK;
-  int32_t lastDetail = 0;
-  uint64_t bindingEpoch = 0;
-  uint64_t resetGeneration = 0;
-  uint64_t writeHighUntilUs = 0;
-  uint64_t nextRecoveryUs = 0;
-  uint8_t recoveryAttempts = 0;  // saturating
-};
-```
-
-`writeHighUntilUs` preserves the Bus snapshot encoding: `0` is inactive,
-`1..UINT64_MAX-1` is a finite deadline, and `UINT64_MAX` is permanent Bus
-poison. The owner never treats poison as a future scheduling timestamp.
-
-Define the fixture owner surface exactly:
-
-```cpp
-enum class OwnerState : uint8_t {
-  UNCONFIGURED = 0,
-  CONFIGURED,
-  RUNNING,
-  STOPPING,
-  STOPPED,
-  FAULT
-};
-
-template <size_t ChannelCount>
-class At21csOwner {
- public:
-  OwnerResultCode configure(
-      const BoardConfig& board,
-      const ChannelConfig (&channels)[ChannelCount]);
-  OwnerResultCode start();
-
-  // Cross-task-safe, task-context-only producer API.
-  OwnerResultCode submit(
-      const ChannelRequest& request,
-      uint64_t nowUs);
-
-  // Called by exactly one designated result-dispatcher task.
-  bool receive(ChannelResult& result);
-
-  // Cross-task-safe read-only publication API.
-  bool readPublishedStatus(
-      uint8_t channelIndex,
-      CachedChannelStatus& status);
-
-  // Called only by the single AT21CS owner task/loop.
-  void serviceOnce(uint64_t nowUs);
-  OwnerResultCode stopChannel(uint8_t channelIndex);
-  void stopAll();
-  bool channelStopped(uint8_t channelIndex) const;
-  bool allStopped() const;
-  OwnerState state() const;
-};
-
-using FirmwareAt21csOwner = At21csOwner<MAX_CHANNELS>;
-```
-
-Add total fixture-local `toString(OwnerResultCode)` and
-`toString(OwnerState)` switches with an `"UNKNOWN"` fallback; do not expose
-them from the AT21CS namespace.
-
-`At21csChannel` owns one `ChannelConfig`, `Esp32Transport`, `Bus`, `Driver`,
-and `CachedChannelStatus`. `At21csOwner<MAX_CHANNELS>` default-owns a fixed
-array of these single-device/separate-wire channels. This exact fixture is
-deliberately scoped to the common one-chip-per-removable-connector case. The
-library's shared-wire and mixed-topology support is covered by the shared
-contract, multi-device CLI description, and Prompt 05 oracle; do not distort
-this fixture into a second general library.
-
-The owner also owns an exact statically allocated FreeRTOS mailbox:
-
-- request and result queues are created with `xQueueCreateStatic()` using
-  `REQUEST_QUEUE_DEPTH`/`RESULT_QUEUE_DEPTH` and fixed byte storage;
-- no queue, semaphore, mutex, or storage is heap-created;
-- a fixed `uint32_t _outstandingRequestIds[MAX_OUTSTANDING_REQUESTS]` and one
-  private `portMUX_TYPE` protect admission metadata;
-- `submit()` is safe for multiple producer tasks. Exactly one designated
-  result-dispatcher task calls destructive FIFO `receive()` and routes results
-  by `requestId`; no other task may consume that queue.
-  `readPublishedStatus()` is safe for multiple reader tasks. All three are
-  task-context-only; no ISR entry point exists;
-- accepting a request first reserves one free outstanding-ID/result slot.
-  `submit()` rejects zero/duplicate IDs, a full request queue, or no result
-  reservation. If queue insertion fails, it rolls back the ID reservation;
-- `receive()` removes the matching outstanding ID only after copying the
-  terminal result to the caller. Thus queued + executing + completed-unread
-  requests never exceed result capacity;
-- the owner retains one fixed pending-result slot and performs no next Driver
-  operation until that result is queued. No accepted request/result is dropped,
-  overwritten, or converted into logging;
-- the owner publishes a scalar `CachedChannelStatus[MAX_CHANNELS]` copy under
-  the same short critical section after each channel transition/operation.
-  Other tasks call only `readPublishedStatus()`; `copyStatus()` and direct live
-  snapshot/cache access remain owner-context-only;
-- replacement notification is the monotonic `attachmentGeneration` and
-  `replacementGeneration` in published status, so a skipped intermediate poll
-  cannot clear or lose the event.
-
-Neither class/mailbox is added to `include/AT21CS/`.
-
-Owner rules:
-
-1. `configure()` is allowed only from `UNCONFIGURED` or fully `STOPPED`;
-   `start()` is allowed only from `CONFIGURED`; neither silently restarts a
-   channel. `configure()` validates/copies the complete channel table before hardware:
-   every pin is 0..63 before shifting; every SI/O is allowed by
-   `sioOutputCapableMask`; every enabled presence pin is allowed by
-   `inputCapableMask`; `reservedPinMask` rejects board strap/flash/PSRAM/other
-   owned pins; enabled SI/O pins are distinct; enabled presence pins are
-   distinct and collide with no enabled SI/O; address is 0..7; `expectedPart`
-   is explicitly AT21CS01 or AT21CS11, never UNKNOWN; enum values are valid;
-   Standard Speed is accepted only with AT21CS01; and at least one channel is
-   enabled. It performs zero hardware I/O and preserves the prior
-   configuration on failure.
-2. Each enabled channel starts Backend -> Bus -> Driver independently. Address
-   zero may be reused on every separate Bus. Failure/absence on one channel
-   does not abort initialization of the others. After each successful Driver
-   initialize, reconcile the serial before marking that channel identity-valid.
-   `start()` returns `OK` after attempting every enabled channel and entering
-   `RUNNING`, even when individual channels are absent/offline; their exact
-   failures are published per channel.
-3. Only the owner context calls library methods or reads live library
-   snapshots. Cross-task producers/consumers use only the exact mailbox APIs
-   above; an unsynchronized concurrent cache read is forbidden.
-4. Runtime requests are limited to the six `ChannelOperation` values above.
-   Irreversible Lock/ROM/Freeze and bulk erase/stress are excluded from the
-   ordinary runtime queue and belong to separately authorized service tools.
-5. `submit()` returns an immediate `OwnerResultCode`; `OK` means accepted and
-   guarantees exactly one later `ChannelResult`. An immediately rejected
-   submission returns no result and performs no library call. If an accepted
-   request later fails owner admission/service checks, its result sets
-   `libraryInvoked=false`, `libraryCode=OK`, and exact `ownerCode`. A Driver
-   call sets `libraryInvoked=true`. Use `LIBRARY_ERROR` only when the returned
-   AT21CS `Status` itself fails, preserving exact
-   `libraryCode/libraryDetail`. If the AT21CS call succeeds but a later owner
-   reconciliation step fails (for example generation exhaustion), retain the
-   exact owner code with `libraryInvoked=true` and `libraryCode=OK`. Never label
-   an owner deadline/queue/identity error as a transport error.
-6. A page write uses only `writeEepromPage()`. A read turn transfers at most
-   eight bytes. Exact `Status` plus `WriteResult` evidence is copied into the
-   result; ambiguous writes are never replayed.
-7. If channel A has a finite retained `writeHighUntilUs`, the scheduler may
-   defer A to keep the next request's latency bounded and continue servicing B.
-   Bus A remains responsible for protocol enforcement; the optimization is not
-   a correctness dependency. `UINT64_MAX` is permanent poison: publish the exact
-   failure, reject further A work, keep A's Backend alive when `Bus::end()`
-   fails, and continue servicing independent channels.
-
-Submission validation precedence is fixed: owner/channel stopping state,
-request ID/channel/enum/shape, deadline, duplicate ID, outstanding-result
-capacity, then request-queue capacity. `stopChannel()` returns
-`INVALID_REQUEST` for an invalid/disabled index and is idempotent `OK` for an
-already stopping/stopped channel. `stopAll()` is idempotent.
-
-Implement and reuse these exact fixture-private helpers:
-
-```cpp
-uint64_t operationBudgetUs(ChannelOperation operation);
-OwnerResultCode validateRequestShape(const ChannelRequest& request);
-OwnerResultCode admitDeadline(
-    const ChannelRequest& request,
-    uint64_t nowUs);
-bool checkedAddUs(uint64_t baseUs, uint64_t deltaUs, uint64_t& resultUs);
-bool advanceGeneration(uint64_t& generation);
-uint64_t nextRecoveryDelayUs(uint8_t recoveryAttempts);
-```
-
-`operationBudgetUs()` maps read chunk, serial, Manufacturer ID, and probe to
-`SINGLE_FRAME_BUDGET_US`; page write to `PAGE_WRITE_BUDGET_US`; and recover to
-`RECOVERY_AND_IDENTITY_BUDGET_US`. `admitDeadline()` rejects
-`notAfterUs==0`, tests `nowUs >= notAfterUs` before subtraction, then compares
-`notAfterUs-nowUs` with the operation budget. Repeat this test immediately
-before Driver I/O because a valid request may expire in the queue. A started
-synchronous library call cannot be cancelled.
-
-`notAfterUs` is the latest allowed completion time for the request's
-synchronous library/recovery-and-identity phase. Each budget is measured from
-the second admission check through return from that phase and includes its
-fixed owner-side work. It does not promise that the already-built terminal
-result has been consumed—or even queued under result backpressure—by that
-timestamp. Result publication may occur later, but no later hardware call is
-started while a terminal result is pending.
-
-Request shapes are exact:
-
-| Operation | Input contract | Success result |
-|---|---|---|
-| `READ_EEPROM_CHUNK` | address 0..127; length 1..8; range inside 128 bytes; input data all zero; nonzero `expectedAttachmentGeneration` exactly matches the channel | `length` requested bytes |
-| `WRITE_EEPROM_PAGE` | address 0..127; length 1..8; range inside 128 bytes and one physical 8-byte page; data used; nonzero expected generation exactly matches | zero data length plus exact write evidence |
-| `READ_SERIAL` | address/length/expected generation/data all zero | eight validated serial bytes |
-| `READ_MANUFACTURER` | address/length/expected generation/data all zero | three big-endian Manufacturer-ID bytes |
-| `PROBE` | address/length/expected generation/data all zero | zero data length |
-| `RECOVER` | address/length/expected generation/data all zero | recovery plus serial reconciliation; eight serial bytes |
-
-An EEPROM request received while `identityValid=false`, or whose expected
-attachment generation is stale, returns `IDENTITY_NOT_READY` with zero library
-I/O. An absent presence hint returns `CHANNEL_ABSENT`. The owner processes at
-most one queued request or one automatic recovery action per `serviceOnce()`,
-round-robin across channels.
-
-Hot-plug policy is explicit upper-firmware behavior:
-
-1. A configured presence pin is a real debounced connector/module input, never
-   inferred from idle SI/O. On debounced false, set `identityValid=false` while
-   retaining `serialEverConfirmed`, the last confirmed serial bytes, and both
-   generations for later comparison. While false, schedule no protocol call.
-   Apply the same identity invalidation after library `NOT_PRESENT`, or after a
-   lifecycle Manufacturer-ID `NACK_DEVICE_ADDRESS` that leaves the Driver
-   `OFFLINE`; both are definite absence for the owner.
-2. On debounced rising presence, invoke explicit `recover()`. Automatic
-   recovery is eligible only for an enabled, Backend-started, Bus-bound,
-   Driver-bound, neither-stopping-nor-stopped channel with
-   `identityValid=false`, no terminal clock/generation failure, no currently
-   debounced-false presence indication, and Driver state `UNINIT`, `READY`,
-   `DEGRADED`, or `OFFLINE` (the library's recover-admitted set). `FAULT` and
-   transient states are never auto-recovered. A Backend/Bus/Driver setup
-   failure, `FAULT`, `CLOCK_OVERFLOW`, or `GENERATION_EXHAUSTED` is published as
-   a terminal channel/configuration problem and requires the explicit
-   stop-all/reconfigure lifecycle. Without a presence pin, automatic recovery
-   covers bound uninitialized/`OFFLINE` channels after definite absence or
-   recovery failure. A healthy `READY`/`DEGRADED`, identity-valid channel is
-   never periodically reset/recovered. A successful recovery cancels the
-   backoff, sets
-   `recoveryAttempts=0`, and clears `nextRecoveryUs`. Use 100 ms initial
-   exponential backoff capped at 5 s. Perform at most one automatic recovery
-   action per owner service turn, round-robin across enabled channels.
-   `probe()` is not reconnect because power-up requires Discovery. Compute
-   backoff by repeated capped doubling, never by an unchecked shift. Use
-   `checkedAddUs()` for `nextRecoveryUs`; on overflow publish
-   `CLOCK_OVERFLOW`. Reject explicit/automatic RECOVER on that channel until
-   the terminal stop-all/reconfigure/start lifecycle supplies a valid clock
-   epoch.
-3. Retain Backend/Bus/Driver bindings while temporarily absent. Do not rebuild
-   objects or hide retry inside the library.
-4. A RECOVER operation is not successful at the owner layer until Driver
-   recovery and a CRC-checked eight-byte serial read both succeed. Until then,
-   `identityValid=false` and EEPROM requests are rejected.
-5. On each successfully reconciled initialize/recover, advance
-   `attachmentGeneration` with `advanceGeneration()` before admitting EEPROM
-   work. The first confirmed identity sets `serialEverConfirmed=true` and does
-   not count as replacement. A later different serial additionally advances
-   `replacementGeneration`. A later same serial still advances attachment
-   generation, invalidating requests queued before a disconnect. Neither
-   generation wraps; exhaustion returns `GENERATION_EXHAUSTED`, leaves identity
-   invalid, and stops that channel.
-6. A direct `READ_SERIAL` normally leaves generations unchanged. If it observes
-   a different valid serial without a preceding recorded attachment boundary,
-   treat that as an implicit replacement: advance both generations and publish
-   the new identity before returning.
-7. Every EEPROM request carries the generation observed by its caller. This
-   prevents an old queued calibration read/write from running against a newly
-   attached cell. Calibration schema/version/units/CRC/generation,
-   expected-serial policy, and association with a load-cell channel remain
-   application-owned. The fixture never silently reuses old calibration and
-   never writes automatically on attachment.
-
-Shutdown has two distinct owner-context operations:
-
-- `stopChannel(A)` rejects new A requests and publishes `STOPPING` terminal
-  results for already queued A requests, but continues ordinary operation on B.
-  It is terminal for A in the current configured owner lifetime; there is no
-  `startChannel()`. Re-enabling A requires completing `stopAll()`, then a new
-  `configure()`/`start()` lifecycle.
-- `stopAll()` atomically closes all external admission, publishes `STOPPING`
-  terminal results for all queued requests, and performs no further normal
-  channel operation.
-
-For either path, service teardown incrementally per channel: call Driver end
-once to release its claim; call fallible Bus end on later owner turns as needed;
-keep Backend initialized/released until Bus end succeeds; then call Backend
-end. A teardown failure on A does not prevent teardown progress on B during
-`stopAll()`, while channel-only `stopChannel(A)` deliberately leaves B
-operational. `allStopped()` is true only after every enabled Backend ended.
-
-Test the exact fixture with two enabled channels on distinct SI/O pins, both
-using `addressBits=0`; do not add a Driver array to this fixture. Its adjacent
-documentation must show the legal shared-wire/mixed-topology extension as a
-different upper-firmware container: one physical-wire channel owns one
-Backend/Bus and a fixed array of one to eight uniquely claimed Drivers. Never
-create Backend/Bus per address on that wire.
-
-Do not add firmware-product, load-cell, connector, scheduler, queue,
-calibration-record, or reference-consumer types to AT21CS public/core code. The
-fixture consumes the adapter qualified by Prompt 04. Prompt 07 owns packed
-clean-consumer construction.
-
-Keep the DTOs, constants, and pure validation/deadline/identity helpers in
-`src/FirmwareOwnerPolicy.h`; it remains fixture-private and contains no
-Arduino/FreeRTOS include. `main.cpp` owns the ESP32/FreeRTOS mailbox and
-hardware objects. Add native policy tests that include this exact header rather
-than copying its implementation:
-
-1. every operation's exact valid and invalid shape, including page crossing;
-2. deadline equality is expired, one microsecond below each budget is too
-   short, exact budget is admitted, and subtraction/addition never wraps;
-3. recovery delay sequence is 100 ms, 200 ms, 400 ms ... capped at 5 s, with
-   saturating attempts and explicit clock-overflow behavior;
-4. request ID zero/duplicate/full/outstanding-limit behavior; an ID remains
-   reserved until its result is received;
-5. every accepted request yields exactly one result even when result delivery
-   is temporarily blocked; no next Driver call occurs while a result is
-   pending;
-6. owner errors have `libraryInvoked=false`; injected Driver errors preserve
-   exact library code/detail and conservative write evidence;
-7. known absence retains the serial but invalidates identity; first identity is
-   not replacement; same-chip reconnect advances only attachment generation;
-   changed chip advances both; stale-generation EEPROM requests perform zero
-   library calls; generation exhaustion fails closed;
-8. `stopChannel(A)` drains/rejects A while B remains operable;
-   `stopAll()` rejects all new work and independently completes both teardowns;
-9. two address-zero channels have independent cached state, library fakes, and
-   teardown progress.
-
-## Semantic command checker
-
-Replace token-only checks with a checker that verifies:
-
-- each manifest command has one registered handler;
-- usage/risk/confirmation match;
-- no handler is a placeholder/no-op;
-- invalid input tests prove zero Driver calls;
-- irreversible handlers require exact confirmation;
-- both Arduino CLIs claim only commands they implement with the stated risk and
-  confirmation behavior.
-
-A deliberate no-op replacement must make the checker/test fail.
-
-## Required tests/builds
-
-Host:
+Update root `platformio.ini` to provide exactly these example environments:
 
 ```text
-python -m platformio test -e native
+ex_cli_s3
+ex_cli_s2
+ex_multi_s3
+ex_multi_s2
+```
+
+All use the exact pinned PioArduino platform and `framework = arduino`.
+
+Run:
+
+```text
+.\scripts\pio.cmd test -e native
 python tools/check_cli_contract.py
-```
-
-Arduino:
-
-```text
-python -m platformio run -e ex_cli_s3 -e ex_cli_s2
-python -m platformio run -e ex_multi_s3 -e ex_multi_s2
-python tools/run_firmware_owner_fixture.py --library-root . --environment firmware_owner_s3 --environment firmware_owner_s2
-```
-
-The `firmware_owner_s2` and `firmware_owner_s3` environments must compile the
-generic two-channel owner fixture described above, with both Drivers configured
-for `addressBits=0` on distinct SI/O pins. Both environments use the exact
-PioArduino pin with `framework = arduino`; no native-IDF build is required.
-
-Also run:
-
-```text
+.\scripts\pio.cmd run -e ex_cli_s3
+.\scripts\pio.cmd run -e ex_cli_s2
+.\scripts\pio.cmd run -e ex_multi_s3
+.\scripts\pio.cmd run -e ex_multi_s2
 git diff --check
 git status --short
 ```
 
+Also run affected static/backend gates if shared headers or build filters change.
+No physical HIL is performed in this stage.
+
 ## Exit criteria
 
-- Exactly one full Arduino CLI and one concise Arduino multi-device CLI exist.
-- No native-IDF example, fixture, checker, component, or build claim remains.
-- Parsing and command storage are bounded.
-- Invalid/destructive input cannot silently mutate hardware.
-- Irreversible commands require explicit confirmation.
-- No raw PHY or paging implementation is duplicated in examples.
-- Generic upper firmware can consume the library unchanged with either
-  separate-wire channels or shared-wire addressed devices.
-- Cross-task publication is synchronized, and one failed/absent/recovering
-  channel cannot alter another channel's state, write hold, identity, or
-  shutdown progress.
+- Exactly two shipped Arduino examples exist and both use production paths.
+- Parsing and command storage are fixed-size and bounded.
+- Invalid input produces a visible error and zero Driver I/O.
+- The only shipped destructive command is a bounded page write protected by the
+  exact confirmation token.
+- No irreversible, stress, scan, raw-PHY, placeholder, product-schema, native-IDF,
+  or duplicated paging implementation remains in examples.
+- Two separate address-zero instances and explicit hot-plug recovery are clear.
+- RTOS guidance recommends one external synchronous owner without supplying an
+  owner framework.
+- No task, queue, mailbox, scheduler, retry, or application DTO has entered the
+  library, public API, or example surface.
