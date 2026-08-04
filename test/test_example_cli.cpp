@@ -137,6 +137,8 @@ void test_bounded_cli_rejects_excess_arguments_without_truncation() {
 
 void test_cli_numeric_and_hex_parsers_are_strict_and_transactional() {
   uint32_t value = 77;
+  TEST_ASSERT_FALSE(parseDecimal("", UINT32_MAX, value));
+  TEST_ASSERT_EQUAL_UINT32(77, value);
   TEST_ASSERT_TRUE(parseDecimal("0", UINT32_MAX, value));
   TEST_ASSERT_EQUAL_UINT32(0, value);
   TEST_ASSERT_TRUE(parseDecimal("4294967295", UINT32_MAX, value));
@@ -157,6 +159,8 @@ void test_cli_numeric_and_hex_parsers_are_strict_and_transactional() {
   uint8_t bytes[8] = {0xA5, 0xA5, 0xA5, 0xA5,
                       0xA5, 0xA5, 0xA5, 0xA5};
   size_t length = 6;
+  TEST_ASSERT_FALSE(parseHexBytes("", bytes, sizeof(bytes), length));
+  TEST_ASSERT_EQUAL_UINT32(6, length);
   TEST_ASSERT_TRUE(parseHexBytes("00aF10", bytes, sizeof(bytes), length));
   TEST_ASSERT_EQUAL_UINT32(3, length);
   const uint8_t expected[] = {0x00, 0xAF, 0x10};
@@ -249,8 +253,45 @@ void test_command_dispatch_checks_name_arity_and_confirmation_before_action() {
                         static_cast<int>(result.code));
   TEST_ASSERT_EQUAL_UINT32(0, calls.write);
 
+  const char* missingConfirmation[] = {"write-page", "0", "AA"};
+  arguments = {};
+  arguments.count = 3;
+  for (size_t index = 0; index < arguments.count; ++index) {
+    arguments.values[index] = missingConfirmation[index];
+  }
+  result = dispatch(TEST_COMMANDS, 3, arguments, &calls);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(DispatchCode::WRONG_ARITY),
+                        static_cast<int>(result.code));
+  TEST_ASSERT_EQUAL_UINT32(0, calls.write);
+
+  const char* prefixedConfirmation[] = {
+      "write-page", "0", "AA", "xCONFIRM_EEPROM_OVERWRITE"};
+  arguments = {};
+  arguments.count = 4;
+  for (size_t index = 0; index < arguments.count; ++index) {
+    arguments.values[index] = prefixedConfirmation[index];
+  }
+  result = dispatch(TEST_COMMANDS, 3, arguments, &calls);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(DispatchCode::CONFIRMATION_REQUIRED),
+                        static_cast<int>(result.code));
+  TEST_ASSERT_EQUAL_UINT32(0, calls.write);
+
+  const char* extraConfirmation[] = {
+      "write-page", "0", "AA", EEPROM_CONFIRMATION, "extra"};
+  arguments = {};
+  arguments.count = 5;
+  for (size_t index = 0; index < arguments.count; ++index) {
+    arguments.values[index] = extraConfirmation[index];
+  }
+  result = dispatch(TEST_COMMANDS, 3, arguments, &calls);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(DispatchCode::WRONG_ARITY),
+                        static_cast<int>(result.code));
+  TEST_ASSERT_EQUAL_UINT32(0, calls.write);
+
   const char* malformedWrite[] = {"write-page", "7", "AABB",
                                   EEPROM_CONFIRMATION};
+  arguments = {};
+  arguments.count = 4;
   for (size_t index = 0; index < arguments.count; ++index) {
     arguments.values[index] = malformedWrite[index];
   }

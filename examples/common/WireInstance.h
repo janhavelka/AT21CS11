@@ -184,6 +184,9 @@ class HotPlugPolicy {
     _pollTime.mark(nowMs);
     _lastAction = AutomaticAction::PROBE;
     _lastStatus = status;
+    if (!status.ok()) {
+      _identityCurrent = false;
+    }
     if (terminal(status, stateAfter)) {
       _automaticBlocked = true;
     }
@@ -196,6 +199,10 @@ class HotPlugPolicy {
     _pollTime.mark(nowMs);
     _lastAction = AutomaticAction::RECOVER;
     _lastStatus = status;
+    // Recovery may reset or replace the addressed device. Preserve the last
+    // known bytes for comparison, but do not call them current until the
+    // separately scheduled serial read succeeds.
+    _identityCurrent = false;
     if (status.ok()) {
       _automaticBlocked = false;
       _recoveryPending = false;

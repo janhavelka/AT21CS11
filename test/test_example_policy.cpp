@@ -208,6 +208,27 @@ void test_serial_identity_comparison_preserves_last_good_value_on_error() {
   TEST_ASSERT_TRUE(policy.identityKnown());
   TEST_ASSERT_TRUE(policy.identityCurrent());
 
+  policy.noteProbe(100, AT21CS::Status::Error(AT21CS::Err::IO_ERROR),
+                   AT21CS::DriverState::DEGRADED);
+  TEST_ASSERT_TRUE(policy.identityKnown());
+  TEST_ASSERT_FALSE(policy.identityCurrent());
+
+  observation = policy.noteSerial(AT21CS::Status::Ok(), first);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(IdentityChange::SAME_DEVICE),
+                        static_cast<int>(observation.change));
+  TEST_ASSERT_TRUE(policy.identityCurrent());
+
+  policy.noteRecovery(200, AT21CS::Status::Ok(),
+                      AT21CS::DriverState::READY, true);
+  TEST_ASSERT_TRUE(policy.identityKnown());
+  TEST_ASSERT_FALSE(policy.identityCurrent());
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(first.bytes, policy.identity(),
+                                AT21CS::cmd::SECURITY_SERIAL_SIZE);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(AutomaticAction::READ_SERIAL),
+      static_cast<int>(policy.nextAction(200, false, true, true,
+                                         AT21CS::DriverState::READY, 20, 1000)));
+
   observation = policy.noteSerial(AT21CS::Status::Ok(), first);
   TEST_ASSERT_EQUAL_INT(static_cast<int>(IdentityChange::SAME_DEVICE),
                         static_cast<int>(observation.change));
