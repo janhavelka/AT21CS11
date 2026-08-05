@@ -225,7 +225,7 @@ void test_random_read_address_phases_map_independently() {
       static_cast<uint8_t>(protocolDetailPhase(status.detail)));
 }
 
-void test_read_scratch_commits_only_complete_frames() {
+void test_multi_frame_reads_are_whole_call_transactional() {
   ScriptedTransport fake;
   Bus bus;
   bindBus(bus, fake);
@@ -252,9 +252,34 @@ void test_read_scratch_commits_only_complete_frames() {
   const Status status = driver.readEeprom(0, output, sizeof(output));
   assertStatus(Err::TRANSPORT_TIMEOUT, status);
   TEST_ASSERT_EQUAL_INT32(2001, status.detail);
-  TEST_ASSERT_EQUAL_UINT8_ARRAY(first, output, sizeof(first));
-  for (size_t index = 8; index < sizeof(output); ++index) {
+  for (size_t index = 0; index < sizeof(output); ++index) {
     TEST_ASSERT_EQUAL_HEX8(0xA5u, output[index]);
+  }
+
+  const uint8_t securityFirst[8] = {
+      0x80u, 0x81u, 0x82u, 0x83u, 0x84u, 0x85u, 0x86u, 0x87u};
+  TEST_ASSERT_TRUE(fake.queueTransfer(expectedReadOk(
+      expected::SECURITY_OPCODE, 0u, securityFirst, sizeof(securityFirst))));
+  TransferScript securityFailed = randomReadFailure(
+      TransportCode::LINE_STUCK, TransferPhase::DATA_READ, 2002, 3u);
+  securityFailed.expected = expectedRandomRead(
+      expected::SECURITY_OPCODE, 8u, 8u);
+  securityFailed.rxLength = 8u;
+  for (uint8_t& byte : securityFailed.rxData) {
+    byte = 0xDDu;
+  }
+  TEST_ASSERT_TRUE(fake.queueTransfer(securityFailed));
+
+  uint8_t securityOutput[16];
+  for (uint8_t& byte : securityOutput) {
+    byte = 0x5Au;
+  }
+  const Status securityStatus =
+      driver.readSecurity(0u, securityOutput, sizeof(securityOutput));
+  assertStatus(Err::LINE_STUCK, securityStatus);
+  TEST_ASSERT_EQUAL_INT32(2002, securityStatus.detail);
+  for (uint8_t byte : securityOutput) {
+    TEST_ASSERT_EQUAL_HEX8(0x5Au, byte);
   }
 }
 

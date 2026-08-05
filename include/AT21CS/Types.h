@@ -38,9 +38,13 @@ enum class WriteEffect : uint8_t {
 };
 
 enum class MutationEffect : uint8_t {
+  /// No accepted mutation payload was established. Status remains authoritative.
   NOT_ATTEMPTED = 0,
+  /// The device may have committed the mutation; never replay automatically.
   MAY_HAVE_COMMITTED,
+  /// The command was accepted but the permanent state was not verified.
   ACCEPTED,
+  /// The requested permanent state was observed.
   VERIFIED
 };
 

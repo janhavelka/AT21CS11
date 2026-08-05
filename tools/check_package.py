@@ -29,6 +29,8 @@ ROOT_FILES = {
     "README.md",
     "CHANGELOG.md",
     "docs/MIGRATION.md",
+    "docs/IRREVERSIBLE_OPERATIONS.md",
+    "docs/HARDWARE_VALIDATION.md",
 }
 ALLOWED_PREFIXES = (
     "include/AT21CS/",
@@ -303,7 +305,7 @@ def reject_checkout_text(package: Path) -> None:
 
 
 def create_and_extract(temp: Path) -> Path:
-    archive = temp / "AT21CS01_AT21CS11-2.0.0-rc.1.tar.gz"
+    archive = temp / "AT21CS01_AT21CS11-2.0.0.tar.gz"
     run(pio_command("pkg", "pack", str(ROOT), "--output", str(archive)), ROOT)
     if not archive.is_file():
         raise CheckFailure("PlatformIO did not create the requested archive")

@@ -1,6 +1,6 @@
 {
   "name": "AT21CS01_AT21CS11",
-  "version": "2.0.0-rc.1",
+  "version": "2.0.0",
   "description": "Arduino/PlatformIO driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs on ESP32-S2/S3.",
   "keywords": [
     "microchip",
@@ -47,6 +47,8 @@
       "README.md",
       "CHANGELOG.md",
       "docs/MIGRATION.md",
+      "docs/IRREVERSIBLE_OPERATIONS.md",
+      "docs/HARDWARE_VALIDATION.md",
       "examples/01_basic_bringup_cli/**",
       "examples/02_multi_device_cli/**",
       "examples/common/**"

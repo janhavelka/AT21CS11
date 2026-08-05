@@ -78,6 +78,18 @@ Rules:
   10 ms Bus write-high interval; do not ACK-poll before that deadline.
 - AT21CS11 is High-Speed only; Standard Speed requests must fail cleanly.
 
+## Irreversible Provisioning
+
+- Keep `permanentlyLockSecurity()`, `permanentlyEnableRomZone()`, and
+  `permanentlyFreezeRomZones()` out of ordinary runtime command paths.
+- Security Lock protects only Security-user bytes. ROM-zone enable protects one
+  32-byte EEPROM zone. ROM Freeze locks only the current zone configuration;
+  an unenabled zone remains writable forever after Freeze.
+- Provisioning must verify device identity and data first, enable and verify the
+  complete desired zone map, and Freeze only with explicit authorization.
+- Never automatically replay `MAY_HAVE_COMMITTED` or accepted-but-unverified
+  mutation evidence. See `docs/IRREVERSIBLE_OPERATIONS.md`.
+
 ## Driver State Model
 
 Use explicit state machine in code and docs:

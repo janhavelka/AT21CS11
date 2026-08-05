@@ -37,6 +37,3 @@ wifi_credentials.h
 *.tmp
 *.bak
 *.log
-
-# Auto-generated files
-include/YourLibrary/Version.h

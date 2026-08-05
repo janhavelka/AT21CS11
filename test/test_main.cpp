@@ -66,7 +66,7 @@ void test_manufacturer_revisions_and_part_mismatch_are_exact();
 void test_probe_is_nondestructive_tracked_and_offline_sticky_on_failure();
 void test_read_boundaries_validate_complete_size_t_ranges();
 void test_random_read_address_phases_map_independently();
-void test_read_scratch_commits_only_complete_frames();
+void test_multi_frame_reads_are_whole_call_transactional();
 void test_serial_crc_product_and_diagnostics_are_independent();
 void test_scalar_outputs_initialize_before_all_failures();
 void test_composite_operations_update_health_once();
@@ -202,7 +202,7 @@ int main() {
   RUN_TEST(test_probe_is_nondestructive_tracked_and_offline_sticky_on_failure);
   RUN_TEST(test_read_boundaries_validate_complete_size_t_ranges);
   RUN_TEST(test_random_read_address_phases_map_independently);
-  RUN_TEST(test_read_scratch_commits_only_complete_frames);
+  RUN_TEST(test_multi_frame_reads_are_whole_call_transactional);
   RUN_TEST(test_serial_crc_product_and_diagnostics_are_independent);
   RUN_TEST(test_scalar_outputs_initialize_before_all_failures);
   RUN_TEST(test_composite_operations_update_health_once);

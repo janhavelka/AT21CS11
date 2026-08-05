@@ -11,6 +11,6 @@ inline constexpr uint16_t VERSION_MAJOR = 2;
 inline constexpr uint16_t VERSION_MINOR = 0;
 inline constexpr uint16_t VERSION_PATCH = 0;
 inline constexpr uint32_t VERSION_CODE = 20000;
-inline constexpr const char* VERSION = "2.0.0-rc.1";
+inline constexpr const char* VERSION = "2.0.0";
 
 }  // namespace AT21CS

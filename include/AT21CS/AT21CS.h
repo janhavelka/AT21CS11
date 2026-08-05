@@ -27,13 +27,23 @@ struct SerialNumberInfo {
 };
 
 struct WriteResult {
+  /// Bytes from the start of the requested range proven fully committed.
   size_t bytesCommitted = 0;
+  /// Data bytes accepted in the final attempted page frame.
   size_t lastPageBytesAccepted = 0;
+  /// Conservative effect of the final attempted page.
   WriteEffect lastPageEffect = WriteEffect::NOT_ATTEMPTED;
 };
 
+/// Evidence returned by a one-way Security/ROM configuration operation.
+///
+/// @warning A successful provisioning step requires both `Status::ok()` and
+/// `effect == MutationEffect::VERIFIED`. Never automatically replay
+/// `MAY_HAVE_COMMITTED` or `ACCEPTED` evidence after a failed Status.
 struct MutationResult {
+  /// Strongest conservative evidence established by the call.
   MutationEffect effect = MutationEffect::NOT_ATTEMPTED;
+  /// The precheck observed the requested permanent state before programming.
   bool alreadyApplied = false;
 };
 
@@ -109,23 +119,52 @@ class Driver {
                      size_t length,
                      WriteResult& result);
 
+  /// Reads a range within the 32-byte Security register transactionally.
   Status readSecurity(uint8_t address, uint8_t* data, size_t length);
+  /// Writes one page within Security-user bytes 0x10..0x1F.
   Status writeSecurityUserPage(uint8_t address,
                                const uint8_t* data,
                                size_t length,
                                WriteResult& result);
+  /// Writes a bounded range within Security-user bytes 0x10..0x1F.
   Status writeSecurityUser(uint8_t address,
                            const uint8_t* data,
                            size_t length,
                            WriteResult& result);
+  /// Reports whether the Security register has been permanently locked.
   Status readSecurityLockState(bool& locked);
+  /// Permanently prevents future Security-user writes.
+  ///
+  /// The method prechecks Lock state, sends the documented Lock command only
+  /// when needed, then verifies the state. Lock affects Security bytes
+  /// 0x10..0x1F; it does not protect main EEPROM.
+  ///
+  /// @warning This operation cannot be undone. Write and read-verify all
+  /// Security-user data first. Do not automatically retry ambiguous evidence.
   Status permanentlyLockSecurity(MutationResult& result);
 
   Status readSerialNumber(SerialNumberInfo& serial);
   Status readManufacturerId(uint32_t& manufacturerId);
 
+  /// Reads one ROM-zone bit; zone 0..3 maps to EEPROM 0x00..0x7F in 32-byte
+  /// increments. `enabled == true` means that zone is permanently read-only.
   Status readRomZoneState(uint8_t zoneIndex, bool& enabled);
+  /// Permanently makes one 32-byte EEPROM zone read-only.
+  ///
+  /// Zone 0 is 0x00..0x1F, zone 1 is 0x20..0x3F, zone 2 is
+  /// 0x40..0x5F, and zone 3 is 0x60..0x7F.
+  ///
+  /// @warning Program and read-verify the zone first. This cannot be undone.
   Status permanentlyEnableRomZone(uint8_t zoneIndex, MutationResult& result);
+  /// Permanently locks the current four ROM-zone configuration bits.
+  ///
+  /// This freezes configuration, not EEPROM data. Enabled zones remain
+  /// read-only. Disabled zones remain writable forever and can never later be
+  /// made ROM. The call observes state first and mutates when not yet frozen;
+  /// it is not a read-only query for an unknown device.
+  ///
+  /// @warning Verify the final four-zone map and obtain explicit authorization
+  /// before calling. Do not automatically retry ambiguous evidence.
   Status permanentlyFreezeRomZones(MutationResult& result);
 
   Status setSpeedMode(SpeedMode mode);
@@ -163,6 +202,11 @@ class Driver {
                         uint8_t address,
                         uint8_t* data,
                         size_t length);
+  Status _readRandomRangeRaw(uint8_t opcode,
+                             uint8_t address,
+                             size_t capacity,
+                             uint8_t* data,
+                             size_t length);
   Status _readDirectRaw(uint8_t opcode, uint8_t* data, size_t length);
   Status _writePageRaw(uint8_t opcode,
                        uint8_t address,

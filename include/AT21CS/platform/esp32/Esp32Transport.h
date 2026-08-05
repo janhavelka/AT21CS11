@@ -29,9 +29,16 @@ class TestAccess;
 }
 #endif
 
+/// Pin configuration for one physical SI/O wire and its optional detect input.
 struct Esp32TransportConfig {
+  /// Required SI/O GPIO. The library has no board-specific default.
   int sioPin = -1;
+  /// Optional raw Bus-wide detect GPIO; exactly -1 disables it.
+  ///
+  /// An enabled pin must be a valid input distinct from `sioPin`. The Backend
+  /// disables internal pulls, so board hardware must provide a stable bias.
   int presencePin = -1;
+  /// Logical detect polarity; ignored when `presencePin == -1`.
   bool presenceActiveHigh = true;
 };
 

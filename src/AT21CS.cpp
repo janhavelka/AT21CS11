@@ -333,21 +333,8 @@ Status Driver::readEeprom(uint8_t address, uint8_t* data, size_t length) {
     return status;
   }
 
-  size_t offset = 0;
-  while (offset < length) {
-    const size_t remaining = length - offset;
-    const size_t chunk = remaining < Bus::MAX_FRAME_DATA_BYTES
-                             ? remaining
-                             : Bus::MAX_FRAME_DATA_BYTES;
-    status = _readRandomRaw(
-        cmd::OPCODE_EEPROM,
-        static_cast<uint8_t>(static_cast<size_t>(address) + offset),
-        data + offset, chunk);
-    if (!status.ok()) {
-      break;
-    }
-    offset += chunk;
-  }
+  status = _readRandomRangeRaw(
+      cmd::OPCODE_EEPROM, address, cmd::EEPROM_SIZE, data, length);
 
   _finishOperation(status, OperationKind::NORMAL_IO, entryState);
   return status;
@@ -373,21 +360,8 @@ Status Driver::readSecurity(uint8_t address, uint8_t* data, size_t length) {
     return status;
   }
 
-  size_t offset = 0;
-  while (offset < length) {
-    const size_t remaining = length - offset;
-    const size_t chunk = remaining < Bus::MAX_FRAME_DATA_BYTES
-                             ? remaining
-                             : Bus::MAX_FRAME_DATA_BYTES;
-    status = _readRandomRaw(
-        cmd::OPCODE_SECURITY,
-        static_cast<uint8_t>(static_cast<size_t>(address) + offset),
-        data + offset, chunk);
-    if (!status.ok()) {
-      break;
-    }
-    offset += chunk;
-  }
+  status = _readRandomRangeRaw(
+      cmd::OPCODE_SECURITY, address, cmd::SECURITY_SIZE, data, length);
 
   _finishOperation(status, OperationKind::NORMAL_IO, entryState);
   return status;
@@ -711,6 +685,8 @@ Status Driver::permanentlyFreezeRomZones(MutationResult& result) {
     return Status::Ok();
   }
 
+  // DS20005857I defines 0x55/0xAA as the only permanent Freeze payload.
+  // Freeze locks the current ROM-zone configuration, not EEPROM contents.
   const uint8_t freezeData = cmd::FREEZE_ROM_DATA;
   SingleWireTransfer transfer{};
   transfer.speed = _activeSpeed;
@@ -1106,6 +1082,36 @@ Status Driver::_readRandomRaw(uint8_t opcode,
   return status;
 }
 
+Status Driver::_readRandomRangeRaw(uint8_t opcode,
+                                   uint8_t address,
+                                   size_t capacity,
+                                   uint8_t* data,
+                                   size_t length) {
+  const size_t start = static_cast<size_t>(address);
+  if (data == nullptr || length == 0 || capacity == 0 ||
+      capacity > cmd::EEPROM_SIZE || !rangeFits(start, length, capacity)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  uint8_t scratch[cmd::EEPROM_SIZE] = {};
+  size_t offset = 0;
+  while (offset < length) {
+    const size_t remaining = length - offset;
+    const size_t chunk = remaining < Bus::MAX_FRAME_DATA_BYTES
+                             ? remaining
+                             : Bus::MAX_FRAME_DATA_BYTES;
+    const Status status = _readRandomRaw(
+        opcode, static_cast<uint8_t>(start + offset), scratch + offset, chunk);
+    if (!status.ok()) {
+      return status;
+    }
+    offset += chunk;
+  }
+
+  std::memcpy(data, scratch, length);
+  return Status::Ok();
+}
+
 Status Driver::_readDirectRaw(uint8_t opcode,
                               uint8_t* data,
                               size_t length) {
@@ -1225,6 +1231,8 @@ Status Driver::_readSecurityLockStateRaw(bool& locked) {
 
   TransferResult result{};
   const Status status = _bus->_execute(transfer, result);
+  // The documented Check Lock sequence is 2h/W plus address 0x6X. A NACK on
+  // that address means locked; there is no separate status register read.
   if (status.code == Err::NACK_MEMORY_ADDRESS &&
       protocolDetailPhase(status.detail) == ProtocolPhase::MEMORY_ADDRESS) {
     locked = true;
@@ -1267,6 +1275,8 @@ Status Driver::_observeFreezeStateRaw(bool& frozen) {
                                             : Bus::STANDARD_SPEED_HTSS_US;
 
   TransferResult result{};
+  // DS20005857I observes Freeze with the 1h/W device-address response: ACK
+  // means unfrozen and NACK means frozen. There is no documented 1h/R query.
   Status status = _bus->_execute(transfer, result);
   if (status.ok()) {
     return status;
@@ -1277,6 +1287,8 @@ Status Driver::_observeFreezeStateRaw(bool& frozen) {
     return status;
   }
 
+  // A device-address NACK can also mean absence/wrong address. Confirm that
+  // the same identified part is alive before interpreting it as frozen.
   uint32_t manufacturerId = 0;
   status = _readManufacturerIdRaw(manufacturerId);
   if (!status.ok()) {

@@ -4,9 +4,18 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
-- Physical qualification and final audit remain pending.
-- Known RC limitation A-23: a failed multi-frame read may expose an earlier
-  completed prefix; callers must ignore read buffers unless status is OK.
+## [2.0.0] - 2026-08-05
+
+- Made multi-frame EEPROM and Security reads whole-call transactional: a later
+  frame failure leaves the caller buffer unchanged.
+- Added explicit permanent Security Lock, ROM-zone and ROM Freeze provisioning
+  guidance to public/Doxygen documentation and installed API comments.
+- Passed an authorized 85-check destructive functional HIL run on one
+  ESP32-S2/AT21CS11 setup. Waveform/electrical and other physical topologies
+  remain unqualified and are not claimed.
+- Removed completed implementation prompts, superseded stage records, raw HIL
+  transcripts and the consumed one-shot destructive fixture; retained a concise
+  hardware-validation record.
 
 ## [2.0.0-rc.1] - 2026-08-04
 

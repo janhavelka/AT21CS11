@@ -50,7 +50,12 @@ class Bus {
   Status end();
 
   bool isBound() const;
+  /// True only when the bound Backend provides the optional raw detect sample.
   bool hasPresenceIndicator() const;
+  /// Takes one bounded logical Bus-wide detect sample without SI/O traffic.
+  ///
+  /// Returns `UNSUPPORTED_COMMAND` when detection is disabled. A callback
+  /// error is returned as an error, never converted to logical absence.
   Status readPresenceIndicator(bool& present);
   uint64_t generation() const;
   BusSnapshot snapshot() const;

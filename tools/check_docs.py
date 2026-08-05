@@ -10,12 +10,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from urllib.parse import unquote
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "2.0.0-rc.1"
+VERSION = "2.0.0"
 DATASHEET = ROOT / "docs" / "AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf"
 DATASHEET_SIZE = 2247216
 DATASHEET_SHA256 = "704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5"
@@ -33,11 +33,15 @@ CONSUMER_DOCS = (
     ROOT / "CONTRIBUTING.md",
     ROOT / "SECURITY.md",
     ROOT / "docs" / "MIGRATION.md",
+    ROOT / "docs" / "IRREVERSIBLE_OPERATIONS.md",
+    ROOT / "docs" / "HARDWARE_VALIDATION.md",
 )
 PACKAGED_DOCS = {
     ROOT / "README.md",
     ROOT / "CHANGELOG.md",
     ROOT / "docs" / "MIGRATION.md",
+    ROOT / "docs" / "IRREVERSIBLE_OPERATIONS.md",
+    ROOT / "docs" / "HARDWARE_VALIDATION.md",
 }
 PACKAGE_ROOT_FILES = {
     "library.json",
@@ -45,6 +49,8 @@ PACKAGE_ROOT_FILES = {
     "README.md",
     "CHANGELOG.md",
     "docs/MIGRATION.md",
+    "docs/IRREVERSIBLE_OPERATIONS.md",
+    "docs/HARDWARE_VALIDATION.md",
 }
 PACKAGE_PREFIXES = (
     "include/AT21CS/",
@@ -118,6 +124,9 @@ OBSOLETE_PATHS = (
     "test/consumer/firmware_owner",
     "tools/check_idf_example_contract.py",
     "tools/run_firmware_owner_fixture.py",
+    "docs/implementation-prompts",
+    "docs/validation",
+    "test/hil/destructive",
 )
 
 LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -186,6 +195,62 @@ def check_public_symbols(failures: list[str]) -> None:
             failures.append(f"obsolete active documentation token: {forbidden}")
 
 
+def check_safety_guidance(failures: list[str]) -> None:
+    guide_path = ROOT / "docs" / "IRREVERSIBLE_OPERATIONS.md"
+    header_path = ROOT / "include" / "AT21CS" / "AT21CS.h"
+    if not guide_path.is_file():
+        failures.append("irreversible-operation guide is missing")
+        return
+
+    guide = guide_path.read_text(encoding="utf-8")
+    normalized_guide = re.sub(r"\s+", " ", guide)
+    header = header_path.read_text(encoding="utf-8")
+    for expected in (
+        "Security-user bytes `0x10..0x1F`",
+        "0 | `0x00..0x1F`",
+        "1 | `0x20..0x3F`",
+        "2 | `0x40..0x5F`",
+        "3 | `0x60..0x7F`",
+        "It does not freeze EEPROM data",
+        "can never later be converted to ROM",
+        "Do not call `permanentlyFreezeRomZones()` merely to inspect",
+        "Never automatically replay",
+        "MutationEffect::VERIFIED",
+    ):
+        if expected not in normalized_guide:
+            failures.append(f"irreversible guidance missing: {expected}")
+
+    for expected in (
+        "Lock affects Security bytes",
+        "Permanently makes one 32-byte EEPROM zone read-only",
+        "This freezes configuration, not EEPROM data",
+        "it is not a read-only query",
+        "Do not automatically retry ambiguous evidence",
+    ):
+        if expected not in header:
+            failures.append(f"public irreversible API warning missing: {expected}")
+
+    esp32_header = (
+        ROOT / "include" / "AT21CS" / "platform" / "esp32" / "Esp32Transport.h"
+    ).read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    normalized_readme = re.sub(r"\s+", " ", readme)
+    for expected in (
+        "exactly -1 disables it",
+        "disables internal pulls",
+        "ignored when `presencePin == -1`",
+    ):
+        if expected not in esp32_header:
+            failures.append(f"public presence-pin contract missing: {expected}")
+    for expected in (
+        "For a fixed, non-hot-plugged device",
+        "no polling is required",
+        "Do not call `Bus::readPresenceIndicator()` when detection is disabled",
+    ):
+        if expected not in normalized_readme:
+            failures.append(f"no-detect guidance missing: {expected}")
+
+
 def check_examples(failures: list[str]) -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     platformio = (ROOT / "platformio.ini").read_text(encoding="utf-8")
@@ -230,7 +295,7 @@ def check_examples(failures: list[str]) -> None:
 def check_versions(failures: list[str]) -> None:
     manifest = json.loads((ROOT / "library.json").read_text(encoding="utf-8"))
     if manifest.get("version") != VERSION:
-        failures.append("library.json version is not 2.0.0-rc.1")
+        failures.append(f"library.json version is not {VERSION}")
     version_header = (ROOT / "include" / "AT21CS" / "Version.h").read_text(encoding="utf-8")
     for expected in (
         "VERSION_MAJOR = 2;",
@@ -246,6 +311,12 @@ def check_versions(failures: list[str]) -> None:
         failures.append("Doxyfile version mismatch")
     if "WARN_AS_ERROR          = YES" not in doxyfile:
         failures.append("Doxygen warnings are not fatal")
+    for document in (
+        "docs/IRREVERSIBLE_OPERATIONS.md",
+        "docs/HARDWARE_VALIDATION.md",
+    ):
+        if document not in doxyfile:
+            failures.append(f"Doxygen input missing: {document}")
     attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
     for expected in (
         "include/AT21CS/Version.h text eol=lf",
@@ -253,10 +324,6 @@ def check_versions(failures: list[str]) -> None:
     ):
         if expected not in attributes:
             failures.append(f"deterministic line-ending rule missing: {expected}")
-    if "docs/implementation-prompts" in re.search(
-        r"^INPUT\s*=.*$", doxyfile, flags=re.MULTILINE
-    ).group(0):
-        failures.append("Doxygen inputs include internal prompts")
     for document in (ROOT / "README.md", ROOT / "CHANGELOG.md", ROOT / "SECURITY.md"):
         if VERSION not in document.read_text(encoding="utf-8"):
             failures.append(f"version missing from {document.relative_to(ROOT)}")
@@ -281,13 +348,9 @@ def check_artifacts(failures: list[str]) -> None:
         failures.append("protected complete-driver report hash mismatch")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    packet = (ROOT / "docs" / "implementation-prompts" / "README.md").read_text(encoding="utf-8")
     for expected in (DATASHEET_URL, str(DATASHEET_SIZE), DATASHEET_SHA256):
         if expected not in readme:
             failures.append(f"README authoritative datasheet record mismatch: {expected}")
-    for expected in (str(DATASHEET_SIZE), DATASHEET_SHA256):
-        if expected not in packet:
-            failures.append(f"packet authoritative datasheet record mismatch: {expected}")
 
 
 def check_doxygen(failures: list[str]) -> None:
@@ -316,6 +379,7 @@ def main() -> int:
     try:
         check_links(failures)
         check_public_symbols(failures)
+        check_safety_guidance(failures)
         check_examples(failures)
         check_versions(failures)
         check_artifacts(failures)

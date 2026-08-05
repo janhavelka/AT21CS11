@@ -1,9 +1,12 @@
 # AT21CS01 / AT21CS11 synchronous driver
 
 `AT21CS01_AT21CS11` is a fixed-state C++ driver for the Microchip AT21CS01 and
-AT21CS11 1-Kbit single-wire EEPROMs. Version `2.0.0-rc.1` is a release
-candidate: its software gates are exercised on the host and on pinned
-ESP32-S2/S3 Arduino builds, but physical qualification remains pending.
+AT21CS11 1-Kbit single-wire EEPROMs. Version `2.0.0` is the stable,
+API-breaking synchronous release. Its software gates run on the host and pinned
+ESP32-S2/S3 Arduino builds. One destructive functional run passed on an
+ESP32-S2 with an AT21CS11; waveform/electrical qualification and other physical
+topologies are not claimed. See
+[hardware validation](docs/HARDWARE_VALIDATION.md).
 
 The core API is framework-neutral. The shipped hardware Backend supports
 Arduino on ESP32-S2 and ESP32-S3 through PioArduino
@@ -161,7 +164,12 @@ detect input cannot distinguish their addresses.
 
 ### No detect input
 
-At each bounded polling event firmware may make exactly one liveness action:
+For a fixed, non-hot-plugged device, leave `presencePin == -1` and no polling is
+required. Do not call `Bus::readPresenceIndicator()` when detection is
+disabled; it returns `UNSUPPORTED_COMMAND`.
+
+If hot-plug support is required without a separate detect signal, firmware may
+perform one liveness action at each bounded polling event:
 
 - call `Driver::probe()` while initialized in `READY` or `DEGRADED`;
 - call `Driver::recover()` while uninitialized or `OFFLINE`.
@@ -204,14 +212,9 @@ protocol phase and byte index where applicable. Callers should branch on the
 returned status instead of guessing from Driver state.
 
 Reads are address-explicit random reads; there is no current-address operation
-and no I2C-style scan. A successful output is valid only when its `Status` is
-OK. Each completed transport frame is copied transactionally.
-
-Known RC limitation A-23: for `readEeprom()` or `readSecurity()` requests longer
-than one eight-byte frame, a later-frame failure can leave an earlier completed
-prefix in the caller buffer. Treat the entire buffer as invalid whenever the
-call fails. The shipped examples display read data only on success. The final
-audit owns removal of this limitation without changing the public API.
+and no I2C-style scan. `readEeprom()` and `readSecurity()` collect every bounded
+frame in fixed-size scratch storage and update the caller buffer only after the
+whole request succeeds. On any failure, the caller buffer remains unchanged.
 
 `WriteResult` records a proven committed prefix, the last page's accepted-byte
 evidence and whether that page may have committed. `MutationResult` similarly
@@ -220,13 +223,33 @@ outcomes. Firmware must never automatically replay a possibly committed
 mutation.
 
 AT21CS11 supports High-Speed only; a Standard-Speed request fails before device
-I/O. Security Lock, ROM-zone enable and ROM Freeze are irreversible
-service/provisioning actions. The shipped examples do not expose them.
+I/O.
+
+## Permanent Security and ROM protection
+
+Security Lock, ROM-zone enable and ROM Freeze are irreversible provisioning
+actions. The shipped examples deliberately do not expose them.
+
+| Operation | Permanent result |
+|---|---|
+| `permanentlyLockSecurity()` | Locks Security-user bytes `0x10..0x1F`; it does not protect main EEPROM. |
+| `permanentlyEnableRomZone(0..3)` | Makes one 32-byte EEPROM zone permanently read-only. Zones map in order to `0x00..0x1F`, `0x20..0x3F`, `0x40..0x5F`, and `0x60..0x7F`. |
+| `permanentlyFreezeRomZones()` | Locks the current four-zone configuration. It does not freeze EEPROM data: disabled zones stay writable forever and can never later become ROM. |
+
+The safe order is: verify the exact chip identity, write and read back all data,
+Lock Security if required, enable and verify every desired ROM zone, reread the
+complete four-zone map, and only then Freeze with explicit authorization. A
+permanent step is confirmed only when `Status::ok()` is true and
+`MutationResult::effect` is `VERIFIED`. Never automatically retry
+`MAY_HAVE_COMMITTED` or accepted-but-unverified evidence; quarantine the device
+for deliberate inspection.
+
+See [the irreversible-operation guide](docs/IRREVERSIBLE_OPERATIONS.md) for the
+zone map, exact method behavior, provisioning sequence and result handling.
 
 The fixed 10 ms hold is the library's conservative software policy, not a claim
 that every voltage, temperature, pull-up, board or waveform has been physically
-qualified. Physical timing and electrical qualification belong to the final
-HIL gate.
+qualified.
 
 ## Examples and configuration
 
@@ -262,8 +285,8 @@ python scripts/generate_version.py
 python scripts/generate_version.py --check
 ```
 
-The package export contains only public headers, sources, metadata, migration
-notes and the two examples. The principal local gates are:
+The package export contains only public headers, sources, metadata, current
+consumer documentation and the two examples. The principal local gates are:
 
 ```text
 .\scripts\pio.cmd test -e native
@@ -275,7 +298,9 @@ python tools/check_package.py --build-platform-neutral
 python tools/check_package.py --build-arduino
 ```
 
-See [migration notes](docs/MIGRATION.md), [changelog](CHANGELOG.md), the
+See [migration notes](docs/MIGRATION.md),
+[irreversible-operation guidance](docs/IRREVERSIBLE_OPERATIONS.md),
+[hardware validation](docs/HARDWARE_VALIDATION.md), [changelog](CHANGELOG.md), the
 [contribution guide](https://github.com/janhavelka/AT21CS11/blob/main/CONTRIBUTING.md)
 and [security policy](https://github.com/janhavelka/AT21CS11/blob/main/SECURITY.md).
 

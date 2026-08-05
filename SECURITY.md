@@ -1,7 +1,8 @@
 # Security policy
 
-Version `2.0.0-rc.1` is a release candidate under active qualification. This
-stage does not publish a stable release or make a hardware-safety claim.
+Version `2.0.0` is the current stable release. Its documented functional HIL
+scope does not constitute a general electrical, timing or hardware-safety
+qualification; see `docs/HARDWARE_VALIDATION.md` for the exact evidence.
 
 Please report vulnerabilities privately to `info@thymos.cz`; do not open a
 public issue for an undisclosed vulnerability.

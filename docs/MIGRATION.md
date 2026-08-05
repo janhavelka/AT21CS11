@@ -60,29 +60,18 @@ and any retry/backoff.
 
 ## Hot-plug
 
-An initialization absence retains valid bindings and the address claim.
-
-- With a detect signal, set `Esp32TransportConfig::presencePin` and
-  `presenceActiveHigh`, debounce `Bus::readPresenceIndicator()` in firmware and
-  call `Driver::recover()` after stable attachment.
-- Without a detect signal, leave `presencePin == -1`. At each bounded polling
-  event, call `probe()` once while initialized/online or `recover()` once while
-  uninitialized/offline. The shipped examples use 1,000 ms.
-
-The detect signal is a raw Bus-wide hint, not identity. The library creates no
-poller. After recovery, compare `Driver::readSerialNumber()` with
-application-owned identity before restoring data associated with the old
-device.
+An initialization absence retains valid bindings and the address claim. Leave
+`presencePin == -1` for a fixed device or when no detect signal exists. Polling
+is optional firmware policy and is needed only when the application wants to
+detect hot-plug without a separate signal. See the README's hot-plug section
+for detect polarity, debounce and explicit `probe()`/`recover()` guidance.
 
 ## RTOS applications
 
 Use one firmware task or cooperative loop as the default owner of every AT21CS
-object. Drivers sharing a Bus must share the same owner. Application messages,
-queues, deadlines and result routing remain application code; the library
-ships no asynchronous wrapper.
-
-Do not assume separate ESP32 Backends can be called simultaneously from
-multiple tasks. That timing arrangement is outside current qualification.
+object. Drivers sharing a Bus must share the same owner. The README describes
+the supported synchronous ownership model; the library ships no asynchronous
+wrapper.
 
 ## Status and mutation handling
 
@@ -91,15 +80,14 @@ transport failures distinct. Do not infer success from state alone.
 
 Page and range writes take `WriteResult`; irreversible APIs take
 `MutationResult`. If evidence says an operation may have committed, do not
-replay it automatically.
+replay it automatically. Before using Security Lock, ROM-zone enable or ROM
+Freeze, follow [the irreversible-operation guide](IRREVERSIBLE_OPERATIONS.md).
 
-RC limitation A-23 applies to reads longer than one eight-byte frame: a later
-frame failure may leave an earlier completed prefix in the output buffer. Treat
-every failed read buffer as invalid until the final-audit fix lands.
+EEPROM and Security reads are whole-call transactional. They use fixed-size
+scratch storage and leave the caller buffer unchanged if any frame fails.
 
 ## Supported integration
 
 The shipped adapter supports Arduino on ESP32-S2/S3 using the pinned PioArduino
-platform. Core headers remain framework-neutral so a future Backend can be
-implemented without changing Bus or Driver, but no other adapter is currently
+platform. Core headers remain framework-neutral; no other adapter is currently
 implemented, packaged or qualified.
