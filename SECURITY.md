@@ -1,19 +1,18 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+Version `2.0.0` is the current stable release. Its documented functional HIL
+scope does not constitute a general electrical, timing or hardware-safety
+qualification; see `docs/HARDWARE_VALIDATION.md` for the exact evidence.
 
-| Version | Supported |
-| ------- | --------- |
-| 1.0.x   | yes       |
+Please report vulnerabilities privately to `info@thymos.cz`; do not open a
+public issue for an undisclosed vulnerability.
 
-## Reporting a Vulnerability
+Include, when available:
 
-Please do not open a public issue for security reports.
+- affected version and target;
+- a minimal reproduction;
+- expected and observed behavior;
+- impact and any suggested mitigation.
 
-Email: `info@thymos.cz`
-
-Include:
-- Vulnerability description
-- Reproduction steps
-- Impact assessment
-- Suggested mitigation (optional)
+Never include production credentials, customer data or irreversible-device
+authorization material in a report.

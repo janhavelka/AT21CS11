@@ -1,0 +1,3 @@
+# Keep the generated header byte-stable on every supported host.
+include/AT21CS/Version.h text eol=lf
+scripts/generate_version.py text eol=lf

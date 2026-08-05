@@ -1,320 +1,309 @@
-# AT21CS01 / AT21CS11 Driver (ESP32, Arduino, ESP-IDF)
+# AT21CS01 / AT21CS11 synchronous driver
 
-Production-grade single-wire EEPROM driver for Microchip **AT21CS01** and **AT21CS11**.
+`AT21CS01_AT21CS11` is a fixed-state C++ driver for the Microchip AT21CS01 and
+AT21CS11 1-Kbit single-wire EEPROMs. Version `2.0.0` is the stable,
+API-breaking synchronous release. Its software gates run on the host and pinned
+ESP32-S2/S3 Arduino builds. One destructive functional run passed on an
+ESP32-S2 with an AT21CS11; waveform/electrical qualification and other physical
+topologies are not claimed. See
+[hardware validation](docs/HARDWARE_VALIDATION.md).
 
-Copyright (c) 2026 Jan Havelka, Thymos Solution s.r.o (www.thymos.cz, info@thymos.cz)
+The core API is framework-neutral. The shipped hardware Backend supports
+Arduino on ESP32-S2 and ESP32-S3 through PioArduino
+`platform-espressif32` 55.03.311 (Arduino-ESP32 3.3.11). No second firmware
+framework is shipped or supported.
 
-## Features
+The authoritative protocol source is Microchip DS20005857I:
 
-- Timing-accurate single-wire PHY with explicit ACK/NACK slot handling.
-- Reset + discovery handshake support.
-- EEPROM operations: current/random/sequential reads, byte/page writes, ready polling.
-- Security register operations: reads, user-area writes, lock/check lock.
-- Factory serial number read with CRC-8 (`poly 0x31`).
-- Manufacturer ID read and automatic part detection.
-- ROM zone set/read and ROM-zone freeze commands.
-- Speed mode APIs (Standard Speed rejected on AT21CS11).
-- Explicit driver state machine and health counters.
+- [AT21CS01/AT21CS11 datasheet](https://ww1.microchip.com/downloads/aemDocuments/documents/MPD/ProductDocuments/DataSheets/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf)
+- verified local size: `2247216` bytes
+- verified local SHA-256:
+  `704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5`
 
-## Install (PlatformIO)
+## Operating model
 
-```ini
-lib_deps =
-  https://github.com/janhavelka/AT21CS11.git
+Every library call is synchronous: it validates its complete input, performs
+bounded work and returns a `Status` plus any documented result evidence. Once a
+call starts, firmware cannot asynchronously cancel it.
+
+The library creates no task, queue, scheduler, application-facing mutex, retry
+loop, hot-plug poller, logger or persistence service. The ESP32 Backend uses
+private bounded timing-critical facilities only to preserve physical bit
+timing. Firmware owns serialization, scheduling, retries, backoff, identity
+association, logging, persistence and safety policy.
+
+A page write consists of one bounded frame followed by the Bus-owned fixed
+10 ms released-high software hold. The Bus does not ACK-poll. Firmware that
+needs predictable scheduling should prefer `Driver::writeEepromPage()` over a
+multi-page write and schedule other work after the call returns.
+
+## Object ownership
+
+One physical SI/O wire has exactly one Backend and one Bus. One to eight
+Drivers with unique three-bit addresses may share that Bus:
+
+```text
+SI/O pin -> Esp32Transport -> Bus -> Driver address 0
+                                -> Driver address 1
 ```
 
-## ESP-IDF Component
+Two physical pins use two independent tuples and may both use address zero:
 
-The driver core can also build as an ESP-IDF component. The application still
-owns board wiring and the single-wire bus pins through `Config`; the library
-does not create global GPIO policy beyond the configured SI/O and optional
-presence pins.
-
-- Root `CMakeLists.txt` registers the framework-neutral protocol source plus
-  the private built-in ESP32 compatibility backend source and exports `include/`.
-- ESP-IDF-only compile definitions are private to the component target; public
-  headers do not require ESP-IDF, FreeRTOS, or SoC GPIO headers.
-- Release-candidate backend policy: the ESP32 compatibility backend remains
-  enabled by default for this major version so existing `Config::sioPin`
-  examples keep building. Transport-only ESP-IDF consumers can set
-  `AT21CS_ENABLE_ESP32_COMPAT_BACKEND=OFF` at CMake configure time to avoid
-  the ESP32 GPIO/timer/FreeRTOS component dependencies; in that mode
-  `Config::transport` is required.
-- `idf_component.yml` targets ESP32-S2/S3 with ESP-IDF `>=6.0.1`.
-- `examples/espidf_basic` is a native IDF CLI with fixed command buffers and no
-  Arduino CLI source inclusion.
-- `tools/check_idf_example_contract.py` validates that the ESP-IDF entry point
-  stays native and keeps the required command contract and IDF components.
-
-Build from the example directory with a configured ESP-IDF shell:
-
-```sh
-idf.py set-target esp32s3
-idf.py build
+```text
+pin A -> Backend A -> Bus A -> Driver A (address 0)
+pin B -> Backend B -> Bus B -> Driver B (address 0)
 ```
 
-## Quick Start
+Reset generation, address claims and the 10 ms write hold are shared only by
+Drivers on the same Bus. State never leaks between independent Buses. A tuple
+may be called a *wire instance* in application documentation; there is no
+public channel abstraction.
+
+Objects are externally owned, non-copyable and non-movable. Start them in this
+order and shut them down in reverse order:
+
+1. `Esp32Transport::begin()`
+2. `Bus::bind()`
+3. `Driver::begin()` or `Driver::bind()` followed by `Driver::initialize()`
+4. `Driver::end()`
+5. successful `Bus::end()`
+6. `Esp32Transport::end()`
+
+Keep the Backend alive if `Bus::end()` fails, then retry the Bus shutdown
+explicitly.
+
+## Public API at a glance
+
+- Backend lifecycle: `Esp32Transport::begin()`, `Esp32Transport::end()`,
+  `Esp32Transport::isInitialized()` and `Esp32Transport::descriptor()`.
+- Bus lifecycle/diagnostics: `Bus::bind()`, `Bus::end()`,
+  `Bus::hasPresenceIndicator()`, `Bus::readPresenceIndicator()`,
+  `Bus::generation()` and `Bus::snapshot()`.
+- Driver lifecycle: `Driver::bind()`, `Driver::initialize()`,
+  `Driver::begin()`, `Driver::recover()`, `Driver::end()` and
+  `Driver::probe()`.
+- EEPROM: `Driver::readEeprom()`, `Driver::writeEepromPage()` and
+  `Driver::writeEeprom()`.
+- Security: `Driver::readSecurity()`, `Driver::writeSecurityUserPage()`,
+  `Driver::writeSecurityUser()`, `Driver::readSecurityLockState()` and
+  `Driver::permanentlyLockSecurity()`.
+- Identity and speed: `Driver::readSerialNumber()`,
+  `Driver::readManufacturerId()` and `Driver::setSpeedMode()`.
+- ROM protection: `Driver::readRomZoneState()`,
+  `Driver::permanentlyEnableRomZone()` and
+  `Driver::permanentlyFreezeRomZones()`.
+- Cached inspection: `Driver::isBound()`, `Driver::isInitialized()`,
+  `Driver::isOnline()`, `Driver::state()`, `Driver::lastStatus()`,
+  `Driver::lastError()` and `Driver::snapshot()`.
+
+See the installed headers under `include/AT21CS/` for exact signatures and
+value types.
+
+## Minimal Arduino setup
 
 ```cpp
 #include <Arduino.h>
 #include "AT21CS/AT21CS.h"
+#include "AT21CS/platform/esp32/Esp32Transport.h"
 
-AT21CS::Driver dev;
+AT21CS::Esp32Transport backend;
+AT21CS::Bus bus;
+AT21CS::Driver device;
 
 void setup() {
-  Serial.begin(115200);
+  AT21CS::Esp32TransportConfig backendConfig{};
+  backendConfig.sioPin = 6;
+  backendConfig.presencePin = -1;
 
-  AT21CS::Config cfg;
-  cfg.sioPin = 8;
-  cfg.presencePin = 7;      // optional, set -1 if not used; authoritative when set
-  cfg.addressBits = 0;      // A2:A0
+  AT21CS::Status status = backend.begin(backendConfig);
+  if (!status.ok()) return;
 
-  AT21CS::Status st = dev.begin(cfg);
-  if (!st.ok()) {
-    Serial.printf("begin failed: %s\n", st.msg);
+  AT21CS::BusConfig busConfig{};
+  busConfig.transport = backend.descriptor();
+  status = bus.bind(busConfig);
+  if (!status.ok()) {
+    backend.end();
     return;
   }
 
-  uint8_t value = 0;
-  st = dev.readEeprom(0x00, &value, 1);
-  Serial.printf("status=%u value=0x%02X\n", static_cast<unsigned>(st.code), value);
+  AT21CS::Config deviceConfig{};
+  deviceConfig.addressBits = 0;
+  deviceConfig.expectedPart = AT21CS::PartType::AT21CS11;
+  status = device.begin(bus, deviceConfig);
 }
 
 void loop() {
-  dev.tick(millis());
+  // Call synchronous operations here. Firmware decides the cadence.
 }
 ```
 
-## API Summary
+The pin in this snippet is an application choice, not a library default or a
+board guarantee.
 
-### Lifecycle
-- `Status begin(const Config& config)`
-- `void tick(uint32_t nowMs)`
-- `void end()`
+## Hot-plug behavior
 
-### Backend Boundary
-- `AT21CS/Transport.h` defines the framework-neutral `SingleWireTransport`
-  contract for explicit single-wire backends.
-- Existing sketches can keep using `Config::sioPin` and `presencePin`; setting
-  `Config::transport` opts into an injected backend with byte-level timing
-  primitives.
-- `Config::sioPin`, `presencePin`, and `presenceActiveHigh` are retained for
-  this major version as compatibility backend config only. Leave them unset
-  when `Config::transport` is provided; mixed transport-plus-pin config is
-  rejected by `begin()` with `INVALID_CONFIG`. Injected backends expose
-  presence through `SingleWireTransport::presencePresent`.
-- The compatibility pin-based backend is implemented in a private platform
-  source. Public headers and the core protocol source do not include Arduino,
-  ESP-IDF, FreeRTOS, or ESP32 GPIO/timing headers.
-- For this release candidate the compatibility backend is still the default
-  ESP-IDF component path. It can be disabled with the CMake cache option
-  `AT21CS_ENABLE_ESP32_COMPAT_BACKEND=OFF` only for applications that provide
-  a complete `SingleWireTransport`.
-- Injected transports must provide `writeByteReadAck`, `readByteSendAck`,
-  `resetAndDiscover`, `releaseLine`, and a microsecond wait source. The backend
-  owns any critical sections, interrupt masking, fast GPIO access, and timing
-  calibration needed to meet AT21CS timing at the SI/O pin.
+An absent device does not destroy valid Backend, Bus or Driver bindings. Later
+recovery can reuse the same objects and device configuration.
 
-### Presence / Recovery
-- `Status probe()`
-- `Status resetAndDiscover()`
-- `Status isPresent(bool& present)`
-- `Status recover()`
+### Optional detect input
 
-### EEPROM / Security
-- `Status readCurrentAddress(uint8_t& value)`
-- `Status readEeprom(uint8_t address, uint8_t* data, size_t len)`
-- `Status writeEepromByte(uint8_t address, uint8_t value)`
-- `Status writeEepromPage(uint8_t address, const uint8_t* data, size_t len)`
-- `Status readSecurity(uint8_t address, uint8_t* data, size_t len)`
-- `Status writeSecurityUserByte(uint8_t address, uint8_t value)`
-- `Status writeSecurityUserPage(uint8_t address, const uint8_t* data, size_t len)`
-- `Status lockSecurityRegister()`
-- `Status isSecurityLocked(bool& locked)`
-- `Status waitReady(uint32_t timeoutMs)`
+`Esp32TransportConfig::presencePin == -1` disables detection. An enabled valid
+GPIO must differ from SI/O. `presenceActiveHigh` selects whether high or low
+means logically present. The Backend configures this as a plain input with no
+internal pull; board hardware must provide a stable external bias.
 
-### IDs / Zones / Speed
-- `Status readSerialNumber(SerialNumberInfo& serial)`
-- `Status readManufacturerId(uint32_t& manufacturerId)`
-- `Status detectPart(PartType& part)`
-- `Status readRomZoneRegister(uint8_t zoneIndex, uint8_t& value)`
-- `Status isZoneRom(uint8_t zoneIndex, bool& isRom)`
-- `Status setZoneRom(uint8_t zoneIndex)`
-- `Status freezeRomZones()`
-- `Status areRomZonesFrozen(bool& frozen)`
-- `Status setHighSpeed()` / `Status isHighSpeed(bool& enabled)`
-- `Status setStandardSpeed()` / `Status isStandardSpeed(bool& enabled)`
+`Bus::readPresenceIndicator()` takes one bounded raw logical Bus-wide sample.
+When disabled it returns `UNSUPPORTED_COMMAND`; logical false means absent;
+callback faults remain errors rather than being converted to absence. The
+sample is a connector/Bus hint, not proof of a chip or address.
 
-### State / Health
-- `DriverState state() const`
-- `DriverState driverState() const`
-- `bool isOnline() const`
-- `bool isInitialized() const`
-- `const Config& getConfig() const`
-- `SettingsSnapshot getSettings() const`
-- `Status getSettings(SettingsSnapshot& out) const`
-- `Status lastError() const`
-- `uint8_t consecutiveFailures() const`
-- `uint32_t totalFailures() const`
-- `uint32_t totalSuccess() const`
+Firmware should debounce the input and call `Driver::recover()` once after a
+stable attachment. The examples sample every 20 ms and require 100 ms of
+stability. A recovery Reset affects every Driver sharing the Bus, and a single
+detect input cannot distinguish their addresses.
 
-Validation and precondition errors are returned before protocol I/O and do not update health counters. `probe()` is diagnostic-only: it performs raw discovery and restores the previous state without changing health counters.
-`Config::offlineThreshold = 0` is normalized to one failed operation. Failed
-`begin()` calls reset stale runtime state, `end()` clears cached configuration,
-and normal operations while `OFFLINE` return `INVALID_STATE`; `probe()` and
-`recover()` remain the explicit paths for diagnostics and recovery. AT21CS
-operations are synchronous, so `Status::inProgress()` always returns `false`.
+### No detect input
 
-## Write-Ready Behavior (Current and Future)
+For a fixed, non-hot-plugged device, leave `presencePin == -1` and no polling is
+required. Do not call `Bus::readPresenceIndicator()` when detection is
+disabled; it returns `UNSUPPORTED_COMMAND`.
 
-- Current design: write APIs are synchronous and block while waiting for internal write completion (`waitReady()` polling).
-- Default timeout: `Config::writeTimeoutMs = 25` (valid range `1..250 ms`).
-- `waitReady()` is bounded by both the configured millisecond timeout and a finite stalled-clock poll guard.
-- Practical effect: the caller task can be blocked for up to the configured timeout on write operations.
-- Future redesign target: non-blocking write flow driven by `tick()` (start-write + poll status API), so no blocking loop in the write call path.
+If hot-plug support is required without a separate detect signal, firmware may
+perform one liveness action at each bounded polling event:
 
-## Example Use: Load Cell Data Layout
+- call `Driver::probe()` while initialized in `READY` or `DEGRADED`;
+- call `Driver::recover()` while uninitialized or `OFFLINE`.
 
-This is a practical layout for a production load-cell module where some fields must be immutable and some must change over time.
+The examples use a configurable 1,000 ms default. `probe()` checks liveness; it
+does not replace Reset/Discovery recovery after power-up. Transport failures
+may leave a Driver `DEGRADED` until its configured `offlineThreshold` is
+reached.
 
-| Region | Address range | Example content | Mutable |
+Without a detect signal, idle removal is unknowable until an explicit operation
+or scheduled probe fails. Removal and replacement entirely between polls may be
+missed. A replacement that returns before the Driver reaches `OFFLINE` may also
+be unobservable. After successful recovery, firmware may read and compare the
+serial number before using application-owned data associated with the previous
+device.
+
+The library never wakes itself, debounces, retries, tracks attachment
+generations or decides replacement policy.
+
+## RTOS integration
+
+The safe default is one firmware task or cooperative loop owning all AT21CS
+objects and calling them sequentially. Drivers sharing one Bus must always have
+the same owner.
+
+Other application tasks may exchange copied application-defined messages with
+that owner. Queue capacity, priorities, deadlines, backoff and result routing
+remain firmware policy. The library ships no RTOS wrapper or owner framework.
+
+Simultaneous calls from multiple tasks, even to separate ESP32 Backend
+instances, are outside the current qualification. Separate tasks should be used
+only after that exact Backend and hardware arrangement has been independently
+qualified for concurrent timing.
+
+## Errors, reads and writes
+
+Validation and state errors are distinct from a device NACK and from transport
+timeout, stalled clock, stuck line or I/O failure. `Status.detail` preserves the
+protocol phase and byte index where applicable. Callers should branch on the
+returned status instead of guessing from Driver state.
+
+Reads are address-explicit random reads; there is no current-address operation
+and no I2C-style scan. `readEeprom()` and `readSecurity()` collect every bounded
+frame in fixed-size scratch storage and update the caller buffer only after the
+whole request succeeds. On any failure, the caller buffer remains unchanged.
+
+`WriteResult` records a proven committed prefix, the last page's accepted-byte
+evidence and whether that page may have committed. `MutationResult` similarly
+distinguishes not attempted, possibly committed, accepted and verified
+outcomes. Firmware must never automatically replay a possibly committed
+mutation.
+
+AT21CS11 supports High-Speed only; a Standard-Speed request fails before device
+I/O.
+
+## Permanent Security and ROM protection
+
+Security Lock, ROM-zone enable and ROM Freeze are irreversible provisioning
+actions. The shipped examples deliberately do not expose them.
+
+| Operation | Permanent result |
+|---|---|
+| `permanentlyLockSecurity()` | Locks Security-user bytes `0x10..0x1F`; it does not protect main EEPROM. |
+| `permanentlyEnableRomZone(0..3)` | Makes one 32-byte EEPROM zone permanently read-only. Zones map in order to `0x00..0x1F`, `0x20..0x3F`, `0x40..0x5F`, and `0x60..0x7F`. |
+| `permanentlyFreezeRomZones()` | Locks the current four-zone configuration. It does not freeze EEPROM data: disabled zones stay writable forever and can never later become ROM. |
+
+The safe order is: verify the exact chip identity, write and read back all data,
+Lock Security if required, enable and verify every desired ROM zone, reread the
+complete four-zone map, and only then Freeze with explicit authorization. A
+permanent step is confirmed only when `Status::ok()` is true and
+`MutationResult::effect` is `VERIFIED`. Never automatically retry
+`MAY_HAVE_COMMITTED` or accepted-but-unverified evidence; quarantine the device
+for deliberate inspection.
+
+See [the irreversible-operation guide](docs/IRREVERSIBLE_OPERATIONS.md) for the
+zone map, exact method behavior, provisioning sequence and result handling.
+
+The fixed 10 ms hold is the library's conservative software policy, not a claim
+that every voltage, temperature, pull-up, board or waveform has been physically
+qualified.
+
+## Examples and configuration
+
+The repository and package contain exactly two Arduino examples:
+
+- [single-device CLI](examples/01_basic_bringup_cli/main.cpp)
+- [two-wire/two-device CLI](examples/02_multi_device_cli/main.cpp)
+
+Both use [shared bounded helpers](examples/common/BoardConfig.h). Their
+build-time overrides are:
+
+| Setting | Primary | Secondary | Committed default |
 |---|---|---|---|
-| Security (factory) | `0x00..0x07` | Chip serial payload (product ID + UID + CRC from factory) | No |
-| Security (user) | `0x10..0x1F` | Module serial, model ID, HW revision, manufacturing batch, schema version, CRC | Program once, then lock |
-| EEPROM Zone 0 | `0x00..0x1F` | Calibration master block: nominal capacity, zero balance, span/gain coefficients, temp compensation coefficients, CRC32 | No after ROM set |
-| EEPROM Zone 1 | `0x20..0x3F` | Calibration mirror block and backup static metadata (factory date code, fixture ID), CRC32 | No after ROM set |
-| EEPROM Zone 2 | `0x40..0x5F` | Mutable operating state: installation tare, customer offset trim, filter profile, last service flags, rolling sequence + CRC | Yes |
-| EEPROM Zone 3 | `0x60..0x7F` | Mutable lifecycle counters: overload events, overtemperature events, power cycles, service cycles (wear-leveled journal) | Yes |
+| SI/O GPIO | `AT21CS_EXAMPLE_PRIMARY_SIO_PIN` | `AT21CS_EXAMPLE_SECONDARY_SIO_PIN` | `6`, `10` |
+| detect GPIO | `AT21CS_EXAMPLE_PRIMARY_PRESENCE_PIN` | `AT21CS_EXAMPLE_SECONDARY_PRESENCE_PIN` | `-1`, `-1` |
+| detect active-high | `AT21CS_EXAMPLE_PRIMARY_PRESENCE_ACTIVE_HIGH` | `AT21CS_EXAMPLE_SECONDARY_PRESENCE_ACTIVE_HIGH` | `1`, `1` |
+| address bits | `AT21CS_EXAMPLE_PRIMARY_ADDRESS_BITS` | `AT21CS_EXAMPLE_SECONDARY_ADDRESS_BITS` | `0`, `0` |
+| expected part (`1` or `11`) | `AT21CS_EXAMPLE_PRIMARY_PART` | `AT21CS_EXAMPLE_SECONDARY_PART` | `11`, `11` |
 
-### Implemented helper: `LoadCellMap.h` (example-only)
+Override these with PlatformIO `build_flags`. Enabled detect pins require the
+external bias described above.
 
-A full, production-style map helper is provided in:
+Build environments are `ex_cli_s3`, `ex_cli_s2`, `ex_multi_s3` and
+`ex_multi_s2`.
 
-- `examples/common/LoadCellMap.h`
+## Package and development checks
 
-This file is part of the example scaffolding, not the public driver include surface.
-Treat it as a reference implementation to copy or adapt into your own project rather
-than a stable library header dependency.
+`library.json` is the version source of truth. `Version.h` is generated
+deterministically:
 
-It includes:
-- Fixed addresses and field offsets for identity/calibration/runtime/counter records.
-- Versioned typed structs with CRC validation.
-- Master+mirror calibration helpers with fallback read.
-- Safe EEPROM/security writes split by 8-byte page boundaries.
-- Typed POD read/write helpers (`float` supported via `readFloat32` / `writeFloat32`).
-
-Quick usage:
-
-```cpp
-#include "examples/common/LoadCellMap.h"  // Example-local helper, not installed as part of the library
-
-lcmap::CalibrationBlockV1 cal = {};
-cal.capacityGrams = 50000;
-cal.zeroBalanceRaw = -17320;
-cal.spanRawAtCapacity = 947112;
-cal.sensitivityNvPerV = 2000000;
-cal.tempCoeffPpmPerC = -35;
-cal.linearityPpm = 120;
-AT21CS::Status st = lcmap::writeCalibrationBoth(dev, cal);
-
-lcmap::RuntimeBlockV1 runtime = {};
-bool valid = false;
-st = lcmap::readRuntime(dev, runtime, valid);
-if (st.ok() && valid) {
-  runtime.seq += 1;
-  runtime.installTareRaw = -250;
-  st = lcmap::writeRuntime(dev, runtime);
-}
+```text
+python scripts/generate_version.py
+python scripts/generate_version.py --check
 ```
 
-### Suggested record model
+The package export contains only public headers, sources, metadata, current
+consumer documentation and the two examples. The principal local gates are:
 
-- Keep immutable records self-contained with `magic`, `version`, `payload`, and `crc`.
-- Keep mutable records as append/journal entries with sequence counters to survive brown-outs.
-- Update counters in batches when possible to reduce wear and write latency (`t_WR`).
-
-Example immutable calibration payload (stored in Zone 0 / Zone 1 mirror):
-
-```cpp
-struct CalibrationBlockV1 {
-  uint32_t magic;              // 'LCAL'
-  uint16_t version;            // = 1
-  uint16_t capacityGramsDiv10; // 500000 = 50 kg
-  int32_t zeroBalanceRaw;      // ADC code at no-load
-  int32_t spanRawAtCapacity;   // ADC code at rated load
-  int16_t tempCoeffPpmPerC;    // optional compensation
-  uint16_t reserved;
-  uint32_t crc32;              // of all previous bytes
-}; // 24 B, room left for future fields
-```
-
-Example mutable state entry (Zone 2/3, journal style):
-
-```cpp
-struct RuntimeEntryV1 {
-  uint32_t seq;             // monotonic
-  int32_t installTareRaw;   // field tare
-  uint32_t overloadCount;   // accumulated events
-  uint32_t powerCycleCount; // optional
-  uint16_t flags;           // service/calibration flags
-  uint16_t crc16;
-}; // 20 B
-```
-
-### Recommended production lock sequence
-
-1. Program Security user bytes (`0x10..0x1F`) with module identity + schema + CRC.
-2. Verify readback, then call `lockSecurityRegister()` (irreversible).
-3. Program Zone 0 (calibration master) and Zone 1 (mirror), verify CRC.
-4. Call `setZoneRom(0)` and `setZoneRom(1)` to make calibration immutable.
-5. After final EOL validation, call `freezeRomZones()` so ROM-zone configuration cannot change.
-6. During normal operation, write only to Zone 2/3.
-
-Notes:
-- No password/unlock mechanism exists for security lock, ROM zone setting, or ROM zone freeze.
-- If you need post-sale recalibration, keep at least one zone writable for a signed calibration update record.
-
-## Examples
-
-1. `examples/01_basic_bringup_cli` (single canonical Arduino bringup CLI with probe/recover/driver health/read/config/stress/stress_mix/selftest command surface)
-   - `cfg` / `settings` prints the cached `SettingsSnapshot`, including
-     initialization state, selected pins, address bits, detected part, speed,
-     verbose mode, and offline threshold.
-2. `examples/espidf_basic` (native ESP-IDF CLI with the same user-facing command contract)
-
-## Static Reference
-
-The chip reference remains in:
-
-- `docs/AT21CS01_AT21CS11_complete_driver_report.md`
-
-## Documentation
-
-- `CHANGELOG.md` - full release history
-- `docs/IDF_PORT.md` - ESP-IDF portability guidance
-- `docs/IDF_PORT_IMPLEMENTATION.md` - implemented ESP-IDF port notes
-- `docs/MIGRATION.md` - compatibility and staged backend split notes
-- `docs/ARCHITECTURE_SPLIT_PLAN.md` - planned core/backend split and remaining work
-
-## Development Build Notes
-
-The repository `platformio.ini` pins ESP32 example builds to the pioarduino
-`platform-espressif32` 54.03.20 package and explicitly builds with C++17. This
-keeps CI and local example builds on the same Arduino-ESP32 3.2.0 toolchain.
-
-Recommended validation:
-
-```bash
+```text
+.\scripts\pio.cmd test -e native
+.\scripts\pio.cmd test -e native_sanitize
 python tools/check_cli_contract.py
-python tools/check_idf_example_contract.py
-python tools/check_core_timing_guard.py
-python -m platformio test -e native
-python -m platformio run -e ex_cli_s3
-python -m platformio run -e ex_cli_s2
-idf.py -C examples/espidf_basic set-target esp32s3
-idf.py -C examples/espidf_basic build
+python tools/check_docs.py
+python tools/check_package.py --inspect
+python tools/check_package.py --build-platform-neutral
+python tools/check_package.py --build-arduino
 ```
+
+See [migration notes](docs/MIGRATION.md),
+[irreversible-operation guidance](docs/IRREVERSIBLE_OPERATIONS.md),
+[hardware validation](docs/HARDWARE_VALIDATION.md), [changelog](CHANGELOG.md), the
+[contribution guide](https://github.com/janhavelka/AT21CS11/blob/main/CONTRIBUTING.md)
+and [security policy](https://github.com/janhavelka/AT21CS11/blob/main/SECURITY.md).
 
 ## License
 
-MIT, see `LICENSE`.
+MIT; see [LICENSE](LICENSE).

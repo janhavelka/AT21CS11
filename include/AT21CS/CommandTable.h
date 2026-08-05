@@ -30,20 +30,24 @@ static constexpr uint8_t SECURITY_SERIAL_START = 0x00;
 static constexpr size_t SECURITY_SERIAL_SIZE = 8;
 static constexpr uint8_t SECURITY_PRODUCT_ID = 0xA0;
 
-// Manufacturer IDs (24-bit values).
-static constexpr uint32_t MANUFACTURER_ID_AT21CS01 = 0x00D200;
-static constexpr uint32_t MANUFACTURER_ID_AT21CS11 = 0x00D380;
+// Manufacturer ID part/revision fields (24-bit values).
+static constexpr uint32_t MANUFACTURER_ID_PART_MASK = 0x00FFFFF8u;
+static constexpr uint32_t MANUFACTURER_ID_AT21CS01_BASE = 0x00D200u;
+static constexpr uint32_t MANUFACTURER_ID_AT21CS11_BASE = 0x00D380u;
+static constexpr uint32_t MANUFACTURER_ID_REVISION_MASK = 0x00000007u;
 
-// ROM zone configuration.
+// ROM-zone configuration. Applications should use Driver's guarded permanent
+// methods instead of constructing these raw frames.
 static constexpr uint8_t ROM_ZONE_REGISTER_COUNT = 4;
 static constexpr uint8_t ROM_ZONE_REGISTERS[ROM_ZONE_REGISTER_COUNT] = {0x01, 0x02, 0x04, 0x08};
 static constexpr uint8_t ROM_ZONE_ROM_VALUE = 0xFF;
 
-// Freeze ROM command payload.
+// Datasheet-mandated irreversible Freeze payload. Freeze locks the four
+// ROM-zone configuration bits; it does not directly freeze EEPROM data.
 static constexpr uint8_t FREEZE_ROM_ADDR = 0x55;
 static constexpr uint8_t FREEZE_ROM_DATA = 0xAA;
 
-// Security lock command address format.
+// Datasheet-mandated irreversible Security Lock command address format.
 static constexpr uint8_t LOCK_SECURITY_ADDRESS = 0x60;
 
 }  // namespace cmd

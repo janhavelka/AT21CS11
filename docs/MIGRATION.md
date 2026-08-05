@@ -1,76 +1,93 @@
-# Migration Notes
+# Migrating from v1 to v2
 
-## Unreleased Transport And Backend Boundary
+Version 2 is intentionally API-breaking. It has one synchronous production
+path and no compatibility facade. Refactor ownership once instead of wrapping
+the removed API.
 
-This staged hardening pass keeps the compatibility pin fields for the current
-major version. Existing Arduino and ESP-IDF consumers that use
-`AT21CS::Driver` with `Config::sioPin` and optional `presencePin` can continue
-using the built-in ESP32/Arduino backend.
+## Ownership
 
-New code may include `AT21CS/Core.h` or `AT21CS/Transport.h` when it needs the
-clean core API or the explicit single-wire backend contract. `Config::transport`
-is optional. When null, the existing built-in platform backend is used.
+The v1 Driver owned pins and transport behavior. Version 2 separates these
+responsibilities:
 
-When `Config::transport` is set, the injected backend must provide byte-level
-timing primitives:
+```text
+Esp32Transport -> Bus -> Driver(s)
+```
 
-- `writeByteReadAck`
-- `readByteSendAck`
-- `resetAndDiscover`
-- `releaseLine`
-- a microsecond wait source through `Config::sleepUs` or `SingleWireTransport::sleepUs`
+Create one `Esp32Transport` and one `Bus` for each physical SI/O pin. Bind one
+to eight uniquely addressed Drivers to that Bus. Separate pins need separate
+tuples and may reuse address zero.
 
-The backend is responsible for preserving AT21CS timing at the SI/O pin,
-including critical sections, interrupt masking, and fast line access. The core
-does not add platform critical sections around injected byte primitives.
+Move pin settings from the old Driver configuration to
+`Esp32TransportConfig`. The v2 `Config` contains only per-device address, part,
+speed and health settings.
 
-The built-in ESP32/Arduino compatibility backend has moved out of
-`src/AT21CS.cpp` into `src/platform/esp32/AT21CSEsp32Backend.cpp`. The core
-protocol source no longer includes Arduino, ESP-IDF, FreeRTOS, ESP32 GPIO, CPU,
-timer, ROM-delay, or SoC headers. This is a source/backend split only; the
-existing `Config::sioPin` compatibility path remains available when no
-transport is injected.
+```cpp
+AT21CS::Esp32Transport backend;
+AT21CS::Bus bus;
+AT21CS::Driver driver;
 
-For this release candidate the built-in ESP32 compatibility backend remains
-enabled by default. That is intentional for the current major version because
-the public Arduino and ESP-IDF examples still demonstrate the compatibility
-`Config::sioPin` path. ESP-IDF applications that provide a complete
-`SingleWireTransport` can configure the component with
-`AT21CS_ENABLE_ESP32_COMPAT_BACKEND=OFF`; in that transport-only mode the
-component omits the ESP32 GPIO/timer/FreeRTOS dependencies and any attempt to
-use the pin-based path fails with `INVALID_CONFIG`.
+AT21CS::Esp32TransportConfig backendConfig{};
+backendConfig.sioPin = 6;
+backendConfig.presencePin = -1;
 
-`Config::sioPin`, `presencePin`, and `presenceActiveHigh` are now explicitly
-defined as built-in backend compatibility config. They are used only when
-`Config::transport == nullptr`. When `Config::transport` is set, leave these
-fields unset (`sioPin = -1`, `presencePin = -1`) and provide presence checks
-through `SingleWireTransport::presencePresent` if needed. Mixed
-transport-plus-pin configuration now fails fast with `INVALID_CONFIG` so the
-core never silently ignores pin policy.
+AT21CS::Status status = backend.begin(backendConfig);
+if (status.ok()) {
+  AT21CS::BusConfig busConfig{};
+  busConfig.transport = backend.descriptor();
+  status = bus.bind(busConfig);
+}
+if (status.ok()) {
+  AT21CS::Config deviceConfig{};
+  deviceConfig.addressBits = 0;
+  deviceConfig.expectedPart = AT21CS::PartType::AT21CS11;
+  status = driver.begin(bus, deviceConfig);
+}
+```
 
-## Compatibility
+Shutdown is `Driver::end()`, successful `Bus::end()`, then
+`Esp32Transport::end()`. Keep the Backend alive while Bus shutdown is pending.
 
-No required application code changes are introduced for callers using the
-built-in compatibility backend. The existing pin fields remain supported, and
-`begin(const Config&)` is unchanged.
+## Removed behavior
 
-Applications that adopted the unreleased injected transport path must avoid
-also setting `sioPin` or `presencePin`. Move any presence policy into the
-transport's `presencePresent` callback.
+There is no `tick()`, current-address read, ready poll, scan, hidden discovery
+retry, internal reconnect loop or pin-owning Driver constructor in v2. Reads
+are address-explicit. Writes return only after the bounded frame and Bus-owned
+fixed 10 ms released-high hold.
 
-The ESP-IDF component no longer publishes `AT21CS_PLATFORM_IDF` to consumers.
-Applications should not depend on that macro from public AT21CS headers.
+Use `Driver::probe()` for one explicit liveness check and `Driver::recover()`
+for one explicit Reset/Discovery recovery attempt. Firmware owns their cadence
+and any retry/backoff.
 
-Native tests use the injected `SingleWireTransport` path for no-hardware
-coverage instead of depending on Arduino/Wire stubs for built-in GPIO behavior.
-The fake transport now covers reset/discovery, byte read/write sequencing,
-device-address, memory-address, and data NACKs, reset error propagation, and
-serial-number CRC handling. Phase 6 adds fake-transport coverage for
-`presencePresent` blocking `begin()` before protocol I/O and for bounded
-`waitReady()` timeout/health behavior.
+## Hot-plug
 
-## Remaining Planned Breaking Work
+An initialization absence retains valid bindings and the address claim. Leave
+`presencePin == -1` for a fixed device or when no detect signal exists. Polling
+is optional firmware policy and is needed only when the application wants to
+detect hot-plug without a separate signal. See the README's hot-plug section
+for detect polarity, debounce and explicit `probe()`/`recover()` guidance.
 
-The planned major-version split can still move `sioPin`, `presencePin`, and
-presence polarity into backend-specific configuration and replace the current
-compatibility `Config` with a protocol-only core config.
+## RTOS applications
+
+Use one firmware task or cooperative loop as the default owner of every AT21CS
+object. Drivers sharing a Bus must share the same owner. The README describes
+the supported synchronous ownership model; the library ships no asynchronous
+wrapper.
+
+## Status and mutation handling
+
+All fallible APIs return `Status`. Keep validation failures, NACK phase and
+transport failures distinct. Do not infer success from state alone.
+
+Page and range writes take `WriteResult`; irreversible APIs take
+`MutationResult`. If evidence says an operation may have committed, do not
+replay it automatically. Before using Security Lock, ROM-zone enable or ROM
+Freeze, follow [the irreversible-operation guide](IRREVERSIBLE_OPERATIONS.md).
+
+EEPROM and Security reads are whole-call transactional. They use fixed-size
+scratch storage and leave the caller buffer unchanged if any frame fails.
+
+## Supported integration
+
+The shipped adapter supports Arduino on ESP32-S2/S3 using the pinned PioArduino
+platform. Core headers remain framework-neutral; no other adapter is currently
+implemented, packaged or qualified.

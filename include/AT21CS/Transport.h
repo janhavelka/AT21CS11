@@ -1,85 +1,132 @@
 /// @file Transport.h
-/// @brief Framework-neutral single-wire backend contract for AT21CS drivers.
+/// @brief Whole-frame framework-neutral single-wire transport contract.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
-#include "AT21CS/Status.h"
+#include "AT21CS/Types.h"
 
 namespace AT21CS {
 
-/// @brief Timing profile passed to timing-critical backend primitives.
-///
-/// Values are expressed in microseconds. Backends must meet the active AT21CS
-/// timing window at the device pin, including callback dispatch, critical
-/// sections, GPIO access, and any interrupt masking overhead they introduce.
-struct SingleWireTimingProfile {
-  uint16_t bitUs;
-  uint16_t low0Us;
-  uint16_t low1Us;
-  uint16_t readLowUs;
-  uint16_t readSampleUs;
-  uint16_t htssUs;
+enum class TransportCode : uint8_t {
+  OK = 0,
+  NACK,
+  TIMEOUT,
+  LINE_STUCK,
+  IO_ERROR
 };
 
-/// @brief Optional backend callbacks for the AT21CS single-wire physical layer.
-///
-/// The production timing contract is byte-oriented: `writeByteReadAck`,
-/// `readByteSendAck`, and `resetAndDiscover` must execute the complete
-/// timing-critical sequence internally, MSb-first, with ACK represented as a
-/// low bit from the device. Backend implementations are responsible for any
-/// critical sections or hardware-specific fast GPIO paths needed to preserve
-/// the protocol timing. The core does not wrap injected byte primitives in
-/// platform critical sections and does not compensate for callback overhead.
-///
-/// Injected backends own all board pin policy. Do not combine an injected
-/// transport with `Config::sioPin` or `Config::presencePin`; use
-/// `presencePresent` for external presence policy.
-///
-/// Line-level callbacks are intentionally not part of the required high-speed
-/// contract. They may be populated for diagnostics, fake transports, or
-/// hardware-validated portable backends, but the core driver will reject an
-/// injected transport that lacks the byte-level primitives.
+enum class TransferPhase : uint8_t {
+  NONE = 0,
+  PRESENCE,
+  RESET_LOW,
+  RESET_RECOVERY,
+  DISCOVERY_REQUEST,
+  DISCOVERY_SAMPLE,
+  DISCOVERY_RELEASE,
+  START,
+  DEVICE_ADDRESS_WRITE,
+  MEMORY_ADDRESS,
+  RESTART,
+  DEVICE_ADDRESS_READ,
+  DATA_WRITE,
+  DATA_READ,
+  STOP,
+  WAIT_HIGH
+};
+
+constexpr const char* toString(TransportCode value) {
+  switch (value) {
+    case TransportCode::OK: return "OK";
+    case TransportCode::NACK: return "NACK";
+    case TransportCode::TIMEOUT: return "TIMEOUT";
+    case TransportCode::LINE_STUCK: return "LINE_STUCK";
+    case TransportCode::IO_ERROR: return "IO_ERROR";
+  }
+  return "UNKNOWN";
+}
+
+constexpr const char* toString(TransferPhase value) {
+  switch (value) {
+    case TransferPhase::NONE: return "NONE";
+    case TransferPhase::PRESENCE: return "PRESENCE";
+    case TransferPhase::RESET_LOW: return "RESET_LOW";
+    case TransferPhase::RESET_RECOVERY: return "RESET_RECOVERY";
+    case TransferPhase::DISCOVERY_REQUEST: return "DISCOVERY_REQUEST";
+    case TransferPhase::DISCOVERY_SAMPLE: return "DISCOVERY_SAMPLE";
+    case TransferPhase::DISCOVERY_RELEASE: return "DISCOVERY_RELEASE";
+    case TransferPhase::START: return "START";
+    case TransferPhase::DEVICE_ADDRESS_WRITE: return "DEVICE_ADDRESS_WRITE";
+    case TransferPhase::MEMORY_ADDRESS: return "MEMORY_ADDRESS";
+    case TransferPhase::RESTART: return "RESTART";
+    case TransferPhase::DEVICE_ADDRESS_READ: return "DEVICE_ADDRESS_READ";
+    case TransferPhase::DATA_WRITE: return "DATA_WRITE";
+    case TransferPhase::DATA_READ: return "DATA_READ";
+    case TransferPhase::STOP: return "STOP";
+    case TransferPhase::WAIT_HIGH: return "WAIT_HIGH";
+  }
+  return "UNKNOWN";
+}
+
+inline constexpr int32_t BACKEND_NOT_INITIALIZED_DETAIL = -1;
+
+struct TransferResult {
+  TransportCode code = TransportCode::IO_ERROR;
+  TransferPhase phase = TransferPhase::NONE;
+  int32_t detail = 0;
+  size_t dataBytesTransferred = 0;
+  bool currentWriteByteMayBeAccepted = false;
+  bool firstDeviceAddressAcked = false;
+  bool memoryAddressAcked = false;
+  bool repeatedDeviceAddressAcked = false;
+  bool stopCompleted = false;
+
+  constexpr bool ok() const { return code == TransportCode::OK; }
+};
+
+struct WriteCycleResult {
+  TransferResult frame{};
+  TransferResult hold{};
+  bool holdRequired = false;
+  bool holdCompleted = false;
+};
+
+struct SingleWireTransfer {
+  SpeedMode speed = SpeedMode::HIGH_SPEED;
+  uint8_t deviceAddress = 0;
+  bool hasMemoryAddress = false;
+  uint8_t memoryAddress = 0;
+  const uint8_t* txData = nullptr;
+  size_t txLength = 0;
+  bool hasRepeatedStart = false;
+  uint8_t repeatedDeviceAddress = 0;
+  uint8_t* rxData = nullptr;
+  size_t rxLength = 0;
+  uint32_t minimumPostTransferHighUs = 0;
+};
+
+// Bus-generated callback deadlines are finite values below UINT64_MAX;
+// UINT64_MAX is reserved for Bus-internal permanent write-high poison.
+using NowUsFn = uint64_t (*)(void* user);
+using TransferFn = TransferResult (*)(const SingleWireTransfer& transfer,
+                                     uint64_t deadlineUs,
+                                     void* user);
+using ResetDiscoverFn = TransferResult (*)(bool& present,
+                                          uint64_t deadlineUs,
+                                          void* user);
+using WaitUntilUsFn = TransferResult (*)(uint64_t deadlineUs, void* user);
+using ReadPresenceFn = TransferResult (*)(bool& present,
+                                         uint64_t deadlineUs,
+                                         void* user);
+
 struct SingleWireTransport {
   void* user = nullptr;
-
-  /// Optional backend initialization hook. Called from Driver::begin().
-  Status (*begin)(void* user) = nullptr;
-
-  /// Optional backend shutdown hook. Called from Driver::end().
-  void (*end)(void* user) = nullptr;
-
-  /// Optional presence hook. Return true when the device should be considered present.
-  bool (*presencePresent)(void* user) = nullptr;
-
-  /// Required for injected transports. Releases SI/O high between timing phases.
-  void (*releaseLine)(void* user) = nullptr;
-
-  /// Optional line-level low pulse hook for validated non-byte backends.
-  void (*driveLowForUs)(uint32_t lowUs, void* user) = nullptr;
-
-  /// Optional line-level read hook for validated non-byte backends.
-  bool (*readLine)(void* user) = nullptr;
-
-  /// Required for injected transports. Writes one byte and returns true on ACK.
-  bool (*writeByteReadAck)(uint8_t value,
-                           const SingleWireTimingProfile& timing,
-                           void* user) = nullptr;
-
-  /// Required for injected transports. Reads one byte and sends ACK when ack is true.
-  uint8_t (*readByteSendAck)(bool ack,
-                             const SingleWireTimingProfile& timing,
-                             void* user) = nullptr;
-
-  /// Required for injected transports. Performs reset/discovery and returns protocol status.
-  Status (*resetAndDiscover)(const SingleWireTimingProfile& highSpeedTiming,
-                             void* user) = nullptr;
-
-  /// Optional monotonic millisecond source used when Config::nowMs is null.
-  uint32_t (*nowMs)(void* user) = nullptr;
-
-  /// Required for injected transports unless Config::sleepUs is provided.
-  void (*sleepUs)(uint32_t us, void* user) = nullptr;
+  NowUsFn nowUs = nullptr;
+  TransferFn transfer = nullptr;
+  ResetDiscoverFn resetAndDiscover = nullptr;
+  WaitUntilUsFn waitUntilUs = nullptr;
+  ReadPresenceFn readPresence = nullptr;
 };
 
 }  // namespace AT21CS

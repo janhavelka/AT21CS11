@@ -1,1263 +1,1433 @@
-/// @file AT21CS.cpp
-/// @brief Implementation of the AT21CS01/AT21CS11 single-wire EEPROM driver.
-
 #include "AT21CS/AT21CS.h"
 
-#include <climits>
 #include <cstring>
+#include <limits>
 
+namespace AT21CS {
 namespace {
 
-inline void incrementWrap(uint8_t& value) {
-  if (value != UINT8_MAX) {
+constexpr bool isKnownPart(PartType part) {
+  return part == PartType::UNKNOWN || part == PartType::AT21CS01 ||
+         part == PartType::AT21CS11;
+}
+
+constexpr bool isKnownSpeed(SpeedMode speed) {
+  return speed == SpeedMode::HIGH_SPEED || speed == SpeedMode::STANDARD_SPEED;
+}
+
+Status validateConfig(const Config& config) {
+  if (config.addressBits > 7u || !isKnownPart(config.expectedPart) ||
+      !isKnownSpeed(config.startupSpeed)) {
+    return Status::Error(Err::INVALID_CONFIG);
+  }
+  if (config.startupSpeed == SpeedMode::STANDARD_SPEED &&
+      config.expectedPart != PartType::AT21CS01) {
+    return Status::Error(Err::INVALID_CONFIG);
+  }
+  return Status::Ok();
+}
+
+constexpr bool isManufacturerAddressNack(const Status& status) {
+  return status.code == Err::NACK_DEVICE_ADDRESS &&
+         protocolDetailPhase(status.detail) ==
+             ProtocolPhase::DEVICE_ADDRESS_READ;
+}
+
+constexpr bool rangeFits(size_t start, size_t length, size_t capacity) {
+  return start <= capacity && length <= (capacity - start);
+}
+
+constexpr bool pageFits(uint8_t address, size_t length) {
+  const size_t pageOffset = static_cast<size_t>(address) % cmd::PAGE_SIZE;
+  return rangeFits(pageOffset, length, cmd::PAGE_SIZE);
+}
+
+constexpr MutationEffect failedMutationEffect(WriteEffect effect) {
+  return effect == WriteEffect::MAY_HAVE_COMMITTED
+             ? MutationEffect::MAY_HAVE_COMMITTED
+             : MutationEffect::NOT_ATTEMPTED;
+}
+
+template <typename T>
+void incrementSaturating(T& value) {
+  if (value != std::numeric_limits<T>::max()) {
     ++value;
   }
-}
-
-inline void incrementWrap(uint32_t& value) {
-  if (value != UINT32_MAX) {
-    ++value;
-  }
-}
-
-inline uint16_t retryAttempts(uint8_t retries) {
-  return static_cast<uint16_t>(retries) + 1U;
-}
-
-inline bool rangeFits(uint8_t startAddress, size_t len, size_t totalSize) {
-  if (len == 0) {
-    return false;
-  }
-  if (static_cast<size_t>(startAddress) >= totalSize) {
-    return false;
-  }
-  const size_t available = totalSize - static_cast<size_t>(startAddress);
-  return len <= available;
-}
-
-inline bool staysWithinPage(uint8_t startAddress, size_t len, size_t pageSize) {
-  if (len == 0 || pageSize == 0) {
-    return false;
-  }
-  const size_t pageOffset = static_cast<size_t>(startAddress) % pageSize;
-  const size_t availableInPage = pageSize - pageOffset;
-  return len <= availableInPage;
-}
-
-inline bool isValidPartType(AT21CS::PartType part) {
-  switch (part) {
-    case AT21CS::PartType::UNKNOWN:
-    case AT21CS::PartType::AT21CS01:
-    case AT21CS::PartType::AT21CS11:
-      return true;
-  }
-  return false;
-}
-
-inline bool isValidSpeedMode(AT21CS::SpeedMode mode) {
-  switch (mode) {
-    case AT21CS::SpeedMode::HIGH_SPEED:
-    case AT21CS::SpeedMode::STANDARD_SPEED:
-      return true;
-  }
-  return false;
-}
-
-inline uint32_t saturatedAdd(uint32_t lhs, uint32_t rhs) {
-  const uint32_t room = UINT32_MAX - lhs;
-  return (rhs > room) ? UINT32_MAX : (lhs + rhs);
-}
-
-inline uint32_t waitReadyStallGuardIterations(uint32_t timeoutMs) {
-  uint32_t polls = timeoutMs;
-  if (polls > UINT32_MAX / 10U) {
-    polls = UINT32_MAX;
-  } else {
-    polls *= 10U;  // waitReady sleeps 100 us between polls: 10 polls/ms.
-  }
-  polls = saturatedAdd(polls, 16U);
-  return (polls < 32U) ? 32U : polls;
-}
-
-static constexpr uint32_t MAX_READY_TIMEOUT_MS = 250;
-
-inline bool hasRequiredTransportPrimitives(const AT21CS::SingleWireTransport& transport,
-                                           bool configHasSleepUs) {
-  return transport.releaseLine != nullptr &&
-         transport.writeByteReadAck != nullptr &&
-         transport.readByteSendAck != nullptr &&
-         transport.resetAndDiscover != nullptr &&
-         (configHasSleepUs || transport.sleepUs != nullptr);
 }
 
 }  // namespace
 
-namespace AT21CS {
+Status Driver::bind(Bus& bus, const Config& config) {
+  const Status configStatus = validateConfig(config);
+  if (!configStatus.ok()) {
+    return configStatus;
+  }
+  const BusSnapshot busState = bus.snapshot();
+  if (!busState.bound) {
+    return Status::Error(Err::NOT_BOUND);
+  }
+  if (!busState.bindingEpochValid) {
+    return Status::Error(Err::INVALID_STATE);
+  }
 
-constexpr Driver::TimingProfile Driver::HIGH_SPEED_TIMING;
-constexpr Driver::TimingProfile Driver::STANDARD_SPEED_TIMING;
-
-Status Driver::begin(const Config& config) {
-  if (_initialized) {
-    end();
-  } else if (_hasTransport()) {
-    _releaseLine();
-    if (_config.transport->end != nullptr) {
-      _config.transport->end(_config.transport->user);
+  const bool keepsExistingClaim =
+      _bound && _bus == &bus && _config.addressBits == config.addressBits;
+  if (!keepsExistingClaim) {
+    const Status claimStatus = bus._claimAddress(config.addressBits);
+    if (!claimStatus.ok()) {
+      return claimStatus;
     }
-  } else if (_config.sioPin >= 0) {
-    // Clean up the line from a previously failed begin() that configured it
-    // but didn't complete initialization.
-    _releaseLine();
   }
 
-  _config = Config{};
-  _initialized = false;
-  _driverState = DriverState::UNINIT;
-  _detectedPart = PartType::UNKNOWN;
-  _setSpeedMode(SpeedMode::HIGH_SPEED);
-  _resetHealth();
-  _lastTickMs = 0;
-
-  auto failBegin = [this](Status failure, DriverState state) -> Status {
-    _initialized = false;
-    _driverState = state;
-    _detectedPart = PartType::UNKNOWN;
-    _setSpeedMode(SpeedMode::HIGH_SPEED);
-    _resetHealth();
-    return failure;
-  };
-
-  const bool usesTransport = (config.transport != nullptr);
-  if (usesTransport &&
-      !hasRequiredTransportPrimitives(*config.transport, config.sleepUs != nullptr)) {
-    return failBegin(
-        Status::Error(Err::INVALID_CONFIG, "transport missing required single-wire primitives"),
-        DriverState::FAULT);
-  }
-  if (usesTransport && config.sioPin >= 0) {
-    return failBegin(
-        Status::Error(Err::INVALID_CONFIG, "sioPin is only valid with built-in backend"),
-        DriverState::FAULT);
-  }
-  if (usesTransport && config.presencePin != -1) {
-    return failBegin(
-        Status::Error(Err::INVALID_CONFIG,
-                      "presencePin is only valid with built-in backend"),
-        DriverState::FAULT);
-  }
-  if (!usesTransport && config.sioPin < 0) {
-    return failBegin(Status::Error(Err::INVALID_CONFIG, "sioPin must be >= 0"),
-                     DriverState::FAULT);
-  }
-  if (!usesTransport && config.sioPin > 63) {
-    return failBegin(Status::Error(Err::INVALID_CONFIG, "sioPin must be <= 63"),
-                     DriverState::FAULT);
-  }
-  if (!usesTransport && config.presencePin > 63) {
-    return failBegin(Status::Error(Err::INVALID_CONFIG, "presencePin must be <= 63"),
-                     DriverState::FAULT);
-  }
-  if (!usesTransport && config.presencePin < -1) {
-    return failBegin(
-        Status::Error(Err::INVALID_CONFIG, "presencePin must be -1 or in range 0..63"),
-        DriverState::FAULT);
-  }
-  if (!usesTransport && config.presencePin >= 0 && config.presencePin == config.sioPin) {
-    return failBegin(
-        Status::Error(Err::INVALID_CONFIG, "presencePin must be different from sioPin"),
-        DriverState::FAULT);
-  }
-  if (config.addressBits > 0x07) {
-    return failBegin(Status::Error(Err::INVALID_CONFIG, "addressBits must be in range 0..7"),
-                     DriverState::FAULT);
-  }
-  if (config.writeTimeoutMs == 0) {
-    return failBegin(Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be > 0"),
-                     DriverState::FAULT);
-  }
-  if (config.writeTimeoutMs > MAX_READY_TIMEOUT_MS) {
-    return failBegin(Status::Error(Err::INVALID_CONFIG, "writeTimeoutMs must be <= 250"),
-                     DriverState::FAULT);
-  }
-  if (!isValidPartType(config.expectedPart)) {
-    return failBegin(Status::Error(Err::INVALID_CONFIG, "invalid expectedPart enum"),
-                     DriverState::FAULT);
-  }
-  if (!isValidSpeedMode(config.startupSpeed)) {
-    return failBegin(Status::Error(Err::INVALID_CONFIG, "invalid startupSpeed enum"),
-                     DriverState::FAULT);
+  Bus* const previousBus = _bus;
+  const uint8_t previousAddress = _config.addressBits;
+  const bool hadPreviousClaim = _bound && previousBus != nullptr;
+  if (hadPreviousClaim && !keepsExistingClaim) {
+    previousBus->_releaseAddress(previousAddress);
   }
 
+  _resetLocalState();
+  _bus = &bus;
   _config = config;
-  if (_config.offlineThreshold == 0) {
-    _config.offlineThreshold = 1;
-  }
-  _initialized = false;
-  _driverState = DriverState::UNINIT;
-  _detectedPart = PartType::UNKNOWN;
-  _setSpeedMode(SpeedMode::HIGH_SPEED);
-  _resetHealth();
-
-  Status st = _configurePins();
-  if (!st.ok()) {
-    return failBegin(st, DriverState::FAULT);
-  }
-
-  if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
-    return failBegin(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"),
-                     DriverState::OFFLINE);
-  }
-
-  _driverState = DriverState::PROBING;
-  Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
-  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
-    discovery = _resetAndDiscoverRaw();
-    if (discovery.ok()) {
-      break;
-    }
-  }
-  if (!discovery.ok()) {
-    return failBegin(
-        Status::Error(Err::NOT_PRESENT, "Device did not respond to reset/discovery"),
-        DriverState::OFFLINE);
-  }
-
-  uint32_t manufacturerId = 0;
-  st = _readManufacturerIdRaw(manufacturerId);
-  if (!st.ok()) {
-    return failBegin(st, DriverState::OFFLINE);
-  }
-
-  PartType detected = PartType::UNKNOWN;
-  if (manufacturerId == cmd::MANUFACTURER_ID_AT21CS01) {
-    detected = PartType::AT21CS01;
-  } else if (manufacturerId == cmd::MANUFACTURER_ID_AT21CS11) {
-    detected = PartType::AT21CS11;
-  } else {
-    return failBegin(
-        Status::Error(Err::PART_MISMATCH, "Unknown manufacturer ID",
-                      static_cast<int32_t>(manufacturerId)),
-        DriverState::FAULT);
-  }
-
-  if (_config.expectedPart != PartType::UNKNOWN && _config.expectedPart != detected) {
-    return failBegin(Status::Error(Err::PART_MISMATCH, "Detected part does not match expectedPart"),
-                     DriverState::FAULT);
-  }
-
-  if (_config.startupSpeed == SpeedMode::STANDARD_SPEED && detected == PartType::AT21CS11) {
-    return failBegin(
-        Status::Error(Err::INVALID_CONFIG, "AT21CS11 does not support Standard Speed"),
-        DriverState::FAULT);
-  }
-
-  _detectedPart = detected;
-
-  _driverState = DriverState::INIT_CONFIG;
-  if (_config.startupSpeed == SpeedMode::STANDARD_SPEED) {
-    bool ack = false;
-    st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, false, ack);
-    if (!st.ok()) {
-      return failBegin(st, DriverState::OFFLINE);
-    }
-    if (!ack) {
-      return failBegin(
-          Status::Error(Err::NACK_DEVICE_ADDRESS, "Standard Speed command NACK during begin()"),
-          DriverState::FAULT);
-    }
-    _setSpeedMode(SpeedMode::STANDARD_SPEED);
-  } else {
-    _setSpeedMode(SpeedMode::HIGH_SPEED);
-  }
-
-  _initialized = true;
-  _driverState = DriverState::READY;
-  _lastOkMs = _nowMs();
-  _lastTickMs = _lastOkMs;
-  _lastError = Status::Ok();
-
+  _bound = true;
+  _seenBusBindingEpochValid = busState.bindingEpochValid;
+  _seenBusBindingEpoch = busState.bindingEpoch;
+  _seenBusGeneration = busState.generation;
   return Status::Ok();
 }
 
-void Driver::tick(uint32_t nowMs) {
-  if (!_initialized) {
-    return;
+Status Driver::initialize() {
+  const Status boundStatus = _requireBound();
+  if (!boundStatus.ok()) {
+    return boundStatus;
   }
-  _lastTickMs = nowMs;
-}
+  if (_initialized || _state != DriverState::UNINIT ||
+      !_hasCurrentBusBinding()) {
+    return Status::Error(Err::INVALID_STATE);
+  }
+  if (_bus->snapshot().generation ==
+      std::numeric_limits<uint64_t>::max()) {
+    return Status::Error(Err::INVALID_STATE);
+  }
 
-void Driver::end() {
-  if (_hasTransport()) {
-    _releaseLine();
-    if (_config.transport->end != nullptr) {
-      _config.transport->end(_config.transport->user);
+  const DriverState entryState = _state;
+  if (_bus->hasPresenceIndicator()) {
+    bool present = false;
+    TransferResult presenceResult{};
+    Status status = _bus->_readPresence(present, presenceResult);
+    if (status.ok() && !present) {
+      status = Status::Error(Err::NOT_PRESENT);
     }
-  } else if (_config.sioPin >= 0) {
-    _releaseLine();
-  }
-
-  _config = Config{};
-  _initialized = false;
-  _driverState = DriverState::UNINIT;
-  _detectedPart = PartType::UNKNOWN;
-  _setSpeedMode(SpeedMode::HIGH_SPEED);
-  _resetHealth();
-  _backend = BuiltInBackendState{};
-}
-
-SettingsSnapshot Driver::getSettings() const {
-  SettingsSnapshot snapshot;
-  (void)getSettings(snapshot);
-  return snapshot;
-}
-
-Status Driver::getSettings(SettingsSnapshot& out) const {
-  out.config = _config;
-  out.initialized = _initialized;
-  out.state = _driverState;
-  out.detectedPart = _detectedPart;
-  out.speedMode = _speedMode;
-  out.lastOkMs = _lastOkMs;
-  out.lastErrorMs = _lastErrorMs;
-  out.lastError = _lastError;
-  out.consecutiveFailures = _consecutiveFailures;
-  out.totalFailures = _totalFailures;
-  out.totalSuccess = _totalSuccess;
-  return Status::Ok();
-}
-
-Status Driver::probe() {
-  Status st = _checkInitialized(true);
-  if (!st.ok()) {
-    return st;
-  }
-
-  if (_hasPresenceIndicator()) {
-    if (!_presencePinReportsPresent()) {
-      return Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent");
+    if (!status.ok()) {
+      _speedKnown = false;
+      _finishOperation(status, OperationKind::INITIALIZE, entryState);
+      return status;
     }
-    return Status::Ok();
   }
 
-  const DriverState previous = _driverState;
-  _driverState = DriverState::PROBING;
-  st = _resetAndDiscoverRaw();
-  _driverState = previous;
-  return st;
+  _enterOperation(DriverState::PROBING);
+  const Status status = _runInitializationSequence();
+  _finishOperation(status, OperationKind::INITIALIZE, entryState);
+  return status;
+}
+
+Status Driver::begin(Bus& bus, const Config& config) {
+  const Status status = bind(bus, config);
+  return status.ok() ? initialize() : status;
 }
 
 Status Driver::recover() {
-  Status st = _checkInitialized(true);
-  if (!st.ok()) {
-    return st;
+  const Status boundStatus = _requireBound();
+  if (!boundStatus.ok()) {
+    return boundStatus;
+  }
+  if (_state != DriverState::UNINIT && _state != DriverState::READY &&
+      _state != DriverState::DEGRADED && _state != DriverState::OFFLINE) {
+    return Status::Error(Err::INVALID_STATE);
+  }
+  if (_bus->snapshot().generation ==
+      std::numeric_limits<uint64_t>::max()) {
+    return Status::Error(Err::INVALID_STATE);
   }
 
-  if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
-    _driverState = DriverState::OFFLINE;
-    return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
-  }
+  const DriverState entryState = _state;
+  _setState(DriverState::RECOVERING, false);
+  _speedKnown = false;
 
-  _driverState = DriverState::RECOVERING;
-  Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
-  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
-    discovery = _resetAndDiscoverRaw();
-    if (discovery.ok()) {
-      break;
+  if (_bus->hasPresenceIndicator()) {
+    bool present = false;
+    TransferResult presenceResult{};
+    Status status = _bus->_readPresence(present, presenceResult);
+    if (status.ok() && !present) {
+      status = Status::Error(Err::NOT_PRESENT);
+    }
+    if (!status.ok()) {
+      _finishOperation(status, OperationKind::RECOVER, entryState);
+      return status;
     }
   }
-  if (!discovery.ok()) {
-    return _trackIo(discovery);
-  }
 
-  uint32_t manufacturerId = 0;
-  st = _readManufacturerIdRaw(manufacturerId);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  if (manufacturerId == cmd::MANUFACTURER_ID_AT21CS01) {
-    _detectedPart = PartType::AT21CS01;
-  } else if (manufacturerId == cmd::MANUFACTURER_ID_AT21CS11) {
-    _detectedPart = PartType::AT21CS11;
-  } else {
-    return _trackIo(Status::Error(Err::PART_MISMATCH, "Unknown manufacturer ID", static_cast<int32_t>(manufacturerId)));
-  }
-
-  if (_config.expectedPart != PartType::UNKNOWN && _config.expectedPart != _detectedPart) {
-    return _trackIo(Status::Error(Err::PART_MISMATCH, "Detected part does not match expectedPart"));
-  }
-
-  // After reset+discovery, device is always in High-Speed mode.
-  // Re-apply startup speed setting if Standard Speed was configured.
-  if (_config.startupSpeed == SpeedMode::STANDARD_SPEED && _detectedPart == PartType::AT21CS01) {
-    bool ack = false;
-    st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, false, ack);
-    if (!st.ok()) {
-      return _trackIo(st);
-    }
-    if (!ack) {
-      return _trackIo(
-          Status::Error(Err::NACK_DEVICE_ADDRESS, "Standard Speed command NACK during recovery"));
-    }
-    _setSpeedMode(SpeedMode::STANDARD_SPEED);
-  } else {
-    _setSpeedMode(SpeedMode::HIGH_SPEED);
-  }
-
-  return _trackIo(Status::Ok());
+  const Status status = _runInitializationSequence();
+  _finishOperation(status, OperationKind::RECOVER, entryState);
+  return status;
 }
 
-Status Driver::resetAndDiscover() {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
+void Driver::end() {
+  if (_bound && _bus != nullptr) {
+    _bus->_releaseAddress(_config.addressBits);
   }
-
-  if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
-    _driverState = DriverState::OFFLINE;
-    return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
-  }
-
-  _driverState = DriverState::PROBING;
-  Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
-  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
-    discovery = _resetAndDiscoverRaw();
-    if (discovery.ok()) {
-      return _trackIo(discovery);
-    }
-  }
-  return _trackIo(discovery);
+  _resetLocalState();
 }
 
-Status Driver::isPresent(bool& present) {
-  present = false;
-
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
+Status Driver::probe() {
+  const Status boundStatus = _requireBound();
+  if (!boundStatus.ok()) {
+    return boundStatus;
+  }
+  if (_state == DriverState::BUSY) {
+    return Status::Error(Err::BUSY);
+  }
+  if (_state == DriverState::UNINIT) {
+    return Status::Error(Err::NOT_INITIALIZED);
+  }
+  if (_state != DriverState::READY && _state != DriverState::DEGRADED &&
+      _state != DriverState::OFFLINE) {
+    return Status::Error(Err::INVALID_STATE);
+  }
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED);
   }
 
-  if (_hasPresenceIndicator()) {
-    present = _presencePinReportsPresent();
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code == Err::NOT_BOUND || status.code == Err::INVALID_STATE) {
+      return status;
+    }
+    _finishOperation(status, OperationKind::PROBE, entryState);
+    return status;
+  }
+
+  _enterOperation(DriverState::PROBING);
+  uint32_t rawId = 0;
+  status = _readManufacturerIdRaw(rawId);
+  PartType part = PartType::UNKNOWN;
+  uint8_t revision = 0;
+  if (status.ok()) {
+    status = _classifyManufacturerIdRaw(rawId, part, revision);
+  }
+  if (status.ok() && _config.expectedPart != PartType::UNKNOWN &&
+      part != _config.expectedPart) {
+    status = Status::Error(Err::PART_MISMATCH,
+                           static_cast<int32_t>(rawId));
+  }
+  if (status.ok() && _detectedPart != PartType::UNKNOWN &&
+      part != _detectedPart) {
+    status = Status::Error(Err::PART_MISMATCH,
+                           static_cast<int32_t>(rawId));
+  }
+  if (status.ok()) {
+    _detectedPart = part;
+    _manufacturerId = rawId;
+    _siliconRevision = revision;
+  }
+
+  _finishOperation(status, OperationKind::PROBE, entryState);
+  return status;
+}
+
+bool Driver::isBound() const {
+  return _bound;
+}
+
+bool Driver::isInitialized() const {
+  return _initialized;
+}
+
+bool Driver::isOnline() const {
+  return _bound && _initialized && isSpeedKnown() &&
+         (_state == DriverState::READY || _state == DriverState::DEGRADED);
+}
+
+DriverState Driver::state() const {
+  return _state;
+}
+
+PartType Driver::detectedPart() const {
+  return _detectedPart;
+}
+
+uint32_t Driver::manufacturerId() const {
+  return _manufacturerId;
+}
+
+uint8_t Driver::siliconRevision() const {
+  return _siliconRevision;
+}
+
+bool Driver::isSpeedKnown() const {
+  if (!_speedKnown || !_hasCurrentBusBinding()) {
+    return false;
+  }
+  return _bus->snapshot().generation == _seenBusGeneration;
+}
+
+SpeedMode Driver::speedMode() const {
+  return _activeSpeed;
+}
+
+Status Driver::lastStatus() const {
+  return Status::Error(_lastStatusCode, _lastStatusDetail);
+}
+
+Status Driver::lastError() const {
+  return Status::Error(_lastErrorCode, _lastErrorDetail);
+}
+
+SettingsSnapshot Driver::snapshot() const {
+  SettingsSnapshot value{};
+  value.bound = _bound;
+  value.initialized = _initialized;
+  value.state = _state;
+  value.addressBits = _config.addressBits;
+  value.offlineThreshold = _config.offlineThreshold;
+  value.expectedPart = _config.expectedPart;
+  value.detectedPart = _detectedPart;
+  value.manufacturerId = _manufacturerId;
+  value.siliconRevision = _siliconRevision;
+  value.configuredSpeed = _config.startupSpeed;
+  value.activeSpeed = _activeSpeed;
+  value.speedKnown = isSpeedKnown();
+  value.seenBusBindingEpochValid = _seenBusBindingEpochValid;
+  value.seenBusBindingEpoch = _seenBusBindingEpoch;
+  value.seenBusGeneration = _seenBusGeneration;
+  value.lastStatusCode = _lastStatusCode;
+  value.lastStatusDetail = _lastStatusDetail;
+  value.lastErrorCode = _lastErrorCode;
+  value.lastErrorDetail = _lastErrorDetail;
+  value.lastOkUs = _lastOkUs;
+  value.lastErrorUs = _lastErrorUs;
+  value.consecutiveFailures = _consecutiveFailures;
+  value.totalSuccess = _totalSuccess;
+  value.totalFailures = _totalFailures;
+  return value;
+}
+
+Status Driver::readEeprom(uint8_t address, uint8_t* data, size_t length) {
+  if (data == nullptr || length == 0 ||
+      static_cast<size_t>(address) >= cmd::EEPROM_SIZE ||
+      length > (cmd::EEPROM_SIZE - static_cast<size_t>(address))) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+    }
+    return status;
+  }
+
+  status = _readRandomRangeRaw(
+      cmd::OPCODE_EEPROM, address, cmd::EEPROM_SIZE, data, length);
+
+  _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
+}
+
+Status Driver::readSecurity(uint8_t address, uint8_t* data, size_t length) {
+  if (data == nullptr || length == 0 ||
+      static_cast<size_t>(address) >= cmd::SECURITY_SIZE ||
+      length > (cmd::SECURITY_SIZE - static_cast<size_t>(address))) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+    }
+    return status;
+  }
+
+  status = _readRandomRangeRaw(
+      cmd::OPCODE_SECURITY, address, cmd::SECURITY_SIZE, data, length);
+
+  _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
+}
+
+Status Driver::writeEepromPage(uint8_t address,
+                               const uint8_t* data,
+                               size_t length,
+                               WriteResult& result) {
+  result = WriteResult{};
+  const size_t start = static_cast<size_t>(address);
+  if (data == nullptr || length == 0 || length > cmd::PAGE_SIZE ||
+      !rangeFits(start, length, cmd::EEPROM_SIZE) ||
+      !pageFits(address, length)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  _enterOperation(DriverState::BUSY);
+  status = _writePageRaw(cmd::OPCODE_EEPROM, address, data, length, result);
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::writeEeprom(uint8_t address,
+                           const uint8_t* data,
+                           size_t length,
+                           WriteResult& result) {
+  result = WriteResult{};
+  const size_t start = static_cast<size_t>(address);
+  if (data == nullptr || length == 0 ||
+      !rangeFits(start, length, cmd::EEPROM_SIZE)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  _enterOperation(DriverState::BUSY);
+  status = _writeRange(cmd::OPCODE_EEPROM, 0,
+                       static_cast<uint8_t>(cmd::EEPROM_SIZE - 1u), address,
+                       data, length, result);
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::writeSecurityUserPage(uint8_t address,
+                                     const uint8_t* data,
+                                     size_t length,
+                                     WriteResult& result) {
+  result = WriteResult{};
+  const size_t start = static_cast<size_t>(address);
+  const size_t first = static_cast<size_t>(cmd::SECURITY_USER_MIN);
+  const size_t capacity =
+      static_cast<size_t>(cmd::SECURITY_USER_MAX - cmd::SECURITY_USER_MIN) +
+      1u;
+  if (data == nullptr || length == 0 || length > cmd::PAGE_SIZE ||
+      start < first || !rangeFits(start - first, length, capacity) ||
+      !pageFits(address, length)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  _enterOperation(DriverState::BUSY);
+  status =
+      _writePageRaw(cmd::OPCODE_SECURITY, address, data, length, result);
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::writeSecurityUser(uint8_t address,
+                                 const uint8_t* data,
+                                 size_t length,
+                                 WriteResult& result) {
+  result = WriteResult{};
+  const size_t start = static_cast<size_t>(address);
+  const size_t first = static_cast<size_t>(cmd::SECURITY_USER_MIN);
+  const size_t capacity =
+      static_cast<size_t>(cmd::SECURITY_USER_MAX - cmd::SECURITY_USER_MIN) +
+      1u;
+  if (data == nullptr || length == 0 || start < first ||
+      !rangeFits(start - first, length, capacity)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  _enterOperation(DriverState::BUSY);
+  status = _writeRange(cmd::OPCODE_SECURITY, cmd::SECURITY_USER_MIN,
+                       cmd::SECURITY_USER_MAX, address, data, length, result);
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::readSecurityLockState(bool& locked) {
+  locked = false;
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+    }
+    return status;
+  }
+  status = _readSecurityLockStateRaw(locked);
+  _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
+}
+
+Status Driver::permanentlyLockSecurity(MutationResult& result) {
+  result = MutationResult{};
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  bool locked = false;
+  status = _readSecurityLockStateRaw(locked);
+  if (!status.ok()) {
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+  if (locked) {
+    result.effect = MutationEffect::VERIFIED;
+    result.alreadyApplied = true;
+    _finishOperation(Status::Ok(), OperationKind::MUTATION, entryState);
     return Status::Ok();
   }
 
-  _driverState = DriverState::PROBING;
-  Status discovery = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
-  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
-    discovery = _resetAndDiscoverRaw();
-    if (discovery.ok()) {
-      present = true;
-      return _trackIo(Status::Ok());
-    }
+  const uint8_t lockData = 0;
+  WriteResult writeResult{};
+  _enterOperation(DriverState::BUSY);
+  status = _writePageRaw(cmd::OPCODE_LOCK_SECURITY,
+                         cmd::LOCK_SECURITY_ADDRESS, &lockData, 1,
+                         writeResult);
+  if (!status.ok()) {
+    result.effect = failedMutationEffect(writeResult.lastPageEffect);
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
   }
 
-  present = false;
-  return _trackIo(discovery);
-}
-
-Status Driver::waitReady(uint32_t timeoutMs) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-  if (timeoutMs == 0) {
-    return Status::Error(Err::INVALID_PARAM, "timeoutMs must be > 0");
-  }
-  if (timeoutMs > MAX_READY_TIMEOUT_MS) {
-    return Status::Error(Err::INVALID_PARAM, "timeoutMs must be <= 250");
-  }
-
-  if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
-    _driverState = DriverState::OFFLINE;
-    return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
-  }
-
-  _driverState = DriverState::BUSY;
-  const uint32_t startMs = _nowMs();
-  uint32_t lastObservedMs = startMs;
-  uint32_t stalledPolls = 0;
-  const uint32_t maxStalledPolls = waitReadyStallGuardIterations(timeoutMs);
-  while (true) {
-    if (_hasPresenceIndicator() && !_presencePinReportsPresent()) {
-      _driverState = DriverState::OFFLINE;
-      return _trackIo(Status::Error(Err::NOT_PRESENT, "Presence pin indicates device absent"));
-    }
-
-    bool ack = false;
-    st = _addressOnlyRaw(cmd::OPCODE_EEPROM, false, ack);
-    if (!st.ok()) {
-      return _trackIo(st);
-    }
-    if (ack) {
-      return _trackIo(Status::Ok());
-    }
-
-    const uint32_t elapsedMs = _nowMs() - startMs;
-    if (elapsedMs >= timeoutMs) {
-      return _trackIo(Status::Error(Err::BUSY_TIMEOUT, "Timed out waiting for write cycle completion"));
-    }
-    const uint32_t observedMs = _nowMs();
-    if (observedMs == lastObservedMs) {
-      if (++stalledPolls >= maxStalledPolls) {
-        return _trackIo(Status::Error(Err::BUSY_TIMEOUT, "Timed out waiting for write cycle completion"));
-      }
-    } else {
-      lastObservedMs = observedMs;
-      stalledPolls = 0;
-    }
-
-    _sleepUs(100);
-  }
-}
-
-Status Driver::readCurrentAddress(uint8_t& value) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _readCurrentAddressRaw(value);
-  return _trackIo(st);
-}
-
-Status Driver::readEeprom(uint8_t address, uint8_t* data, size_t len) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-  if (data == nullptr) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM read buffer is null");
-  }
-  if (!rangeFits(address, len, cmd::EEPROM_SIZE)) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM read range out of bounds");
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _readRandomRaw(cmd::OPCODE_EEPROM, address, data, len);
-  return _trackIo(st);
-}
-
-Status Driver::writeEepromByte(uint8_t address, uint8_t value) {
-  return writeEepromPage(address, &value, 1);
-}
-
-Status Driver::writeEepromPage(uint8_t address, const uint8_t* data, size_t len) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-  if (data == nullptr) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM write buffer is null");
-  }
-  if (len > cmd::PAGE_SIZE) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM page write length must be 1..8");
-  }
-  if (len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM page write length must be 1..8");
-  }
-  if (!rangeFits(address, len, cmd::EEPROM_SIZE)) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM write range out of bounds");
-  }
-  if (!staysWithinPage(address, len, cmd::PAGE_SIZE)) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM page write crosses page boundary");
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _writeRaw(cmd::OPCODE_EEPROM, address, data, len);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = waitReady(_config.writeTimeoutMs);
-  return st;
-}
-
-Status Driver::writeEeprom(uint8_t address, const uint8_t* data, size_t len) {
-  Status init = _checkInitialized();
-  if (!init.ok()) {
-    return init;
-  }
-  if (data == nullptr) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM write buffer is null");
-  }
-  if (len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM write length must be >= 1");
-  }
-  if (!rangeFits(address, len, cmd::EEPROM_SIZE)) {
-    return Status::Error(Err::INVALID_PARAM, "EEPROM write range out of bounds");
-  }
-
-  size_t offset = 0;
-  while (offset < len) {
-    const uint8_t curAddr = static_cast<uint8_t>(address + offset);
-    const uint8_t pageOffset = curAddr % cmd::PAGE_SIZE;
-    size_t chunk = cmd::PAGE_SIZE - pageOffset;
-    if (chunk > len - offset) {
-      chunk = len - offset;
-    }
-    Status st = writeEepromPage(curAddr, data + offset, chunk);
-    if (!st.ok()) {
-      return st;
-    }
-    offset += chunk;
-  }
-  return Status::Ok();
-}
-
-Status Driver::readSecurity(uint8_t address, uint8_t* data, size_t len) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-  if (data == nullptr) {
-    return Status::Error(Err::INVALID_PARAM, "Security read buffer is null");
-  }
-  if (!rangeFits(address, len, cmd::SECURITY_SIZE)) {
-    return Status::Error(Err::INVALID_PARAM, "Security read range out of bounds");
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _readRandomRaw(cmd::OPCODE_SECURITY, address, data, len);
-  return _trackIo(st);
-}
-
-Status Driver::writeSecurityUserByte(uint8_t address, uint8_t value) {
-  return writeSecurityUserPage(address, &value, 1);
-}
-
-Status Driver::writeSecurityUserPage(uint8_t address, const uint8_t* data, size_t len) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-  if (!_isSecurityUserAddressValid(address)) {
-    return Status::Error(Err::INVALID_PARAM, "Security writes are allowed only in 0x10..0x1F");
-  }
-  if (data == nullptr) {
-    return Status::Error(Err::INVALID_PARAM, "Security write buffer is null");
-  }
-  if (len == 0 || len > cmd::PAGE_SIZE) {
-    return Status::Error(Err::INVALID_PARAM, "Security page write length must be 1..8");
-  }
-  const uint16_t endAddress = static_cast<uint16_t>(address) + static_cast<uint16_t>(len);
-  if (endAddress > static_cast<uint16_t>(cmd::SECURITY_USER_MAX) + 1U) {
-    return Status::Error(Err::INVALID_PARAM, "Security write exceeds user area 0x10..0x1F");
-  }
-  if (!staysWithinPage(address, len, cmd::PAGE_SIZE)) {
-    return Status::Error(Err::INVALID_PARAM, "Security page write crosses page boundary");
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _writeRaw(cmd::OPCODE_SECURITY, address, data, len);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = waitReady(_config.writeTimeoutMs);
-  return st;
-}
-
-Status Driver::writeSecurityUser(uint8_t address, const uint8_t* data, size_t len) {
-  Status init = _checkInitialized();
-  if (!init.ok()) {
-    return init;
-  }
-  if (data == nullptr) {
-    return Status::Error(Err::INVALID_PARAM, "Security write buffer is null");
-  }
-  if (len == 0) {
-    return Status::Error(Err::INVALID_PARAM, "Security write length must be >= 1");
-  }
-  if (!_isSecurityUserAddressValid(address)) {
-    return Status::Error(Err::INVALID_PARAM, "Security writes are allowed only in 0x10..0x1F");
-  }
-  const uint16_t endAddress = static_cast<uint16_t>(address) + static_cast<uint16_t>(len);
-  if (endAddress > static_cast<uint16_t>(cmd::SECURITY_USER_MAX) + 1U) {
-    return Status::Error(Err::INVALID_PARAM, "Security write exceeds user area 0x10..0x1F");
-  }
-
-  size_t offset = 0;
-  while (offset < len) {
-    const uint8_t curAddr = static_cast<uint8_t>(address + offset);
-    const uint8_t pageOffset = curAddr % cmd::PAGE_SIZE;
-    size_t chunk = cmd::PAGE_SIZE - pageOffset;
-    if (chunk > len - offset) {
-      chunk = len - offset;
-    }
-    Status st = writeSecurityUserPage(curAddr, data + offset, chunk);
-    if (!st.ok()) {
-      return st;
-    }
-    offset += chunk;
-  }
-  return Status::Ok();
-}
-
-Status Driver::lockSecurityRegister() {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-
-  const uint8_t lockData = 0x00;
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _writeRaw(cmd::OPCODE_LOCK_SECURITY, cmd::LOCK_SECURITY_ADDRESS, &lockData, 1);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = waitReady(_config.writeTimeoutMs);
-  return st;
-}
-
-Status Driver::isSecurityLocked(bool& locked) {
+  result.effect = MutationEffect::ACCEPTED;
+  _setState(entryState, _initialized);
   locked = false;
+  status = _readSecurityLockStateRaw(locked);
+  if (status.ok() && !locked) {
+    status = Status::Error(Err::VERIFY_MISMATCH);
+  } else if (status.ok()) {
+    result.effect = MutationEffect::VERIFIED;
+  }
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
 
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
+Status Driver::readRomZoneState(uint8_t zoneIndex, bool& enabled) {
+  enabled = false;
+  if (zoneIndex >= cmd::ROM_ZONE_REGISTER_COUNT) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
   }
 
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+    }
+    return status;
+  }
+  status = _readRomZoneStateRaw(zoneIndex, enabled);
+  _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
+}
+
+Status Driver::permanentlyEnableRomZone(uint8_t zoneIndex,
+                                        MutationResult& result) {
+  result = MutationResult{};
+  if (zoneIndex >= cmd::ROM_ZONE_REGISTER_COUNT) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
   }
 
-  bool ack = false;
-  st = _addressOnlyRaw(cmd::OPCODE_LOCK_SECURITY, true, ack);
-  if (!st.ok()) {
-    return _trackIo(st);
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
   }
 
-  locked = !ack;
-  return _trackIo(Status::Ok());
+  bool enabled = false;
+  status = _readRomZoneStateRaw(zoneIndex, enabled);
+  if (!status.ok()) {
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+  if (enabled) {
+    result.effect = MutationEffect::VERIFIED;
+    result.alreadyApplied = true;
+    _finishOperation(Status::Ok(), OperationKind::MUTATION, entryState);
+    return Status::Ok();
+  }
+
+  const uint8_t romValue = cmd::ROM_ZONE_ROM_VALUE;
+  WriteResult writeResult{};
+  _enterOperation(DriverState::BUSY);
+  status = _writePageRaw(cmd::OPCODE_ROM_ZONE,
+                         cmd::ROM_ZONE_REGISTERS[zoneIndex], &romValue, 1,
+                         writeResult);
+  if (!status.ok()) {
+    result.effect = failedMutationEffect(writeResult.lastPageEffect);
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+
+  result.effect = MutationEffect::ACCEPTED;
+  _setState(entryState, _initialized);
+  enabled = false;
+  status = _readRomZoneStateRaw(zoneIndex, enabled);
+  if (status.ok() && !enabled) {
+    status = Status::Error(Err::VERIFY_MISMATCH);
+  } else if (status.ok()) {
+    result.effect = MutationEffect::VERIFIED;
+  }
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
+}
+
+Status Driver::permanentlyFreezeRomZones(MutationResult& result) {
+  result = MutationResult{};
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
+  }
+
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::MUTATION, entryState);
+    }
+    return status;
+  }
+
+  bool frozen = false;
+  status = _observeFreezeStateRaw(frozen);
+  if (!status.ok()) {
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+  if (frozen) {
+    result.effect = MutationEffect::VERIFIED;
+    result.alreadyApplied = true;
+    _finishOperation(Status::Ok(), OperationKind::MUTATION, entryState);
+    return Status::Ok();
+  }
+
+  // DS20005857I defines 0x55/0xAA as the only permanent Freeze payload.
+  // Freeze locks the current ROM-zone configuration, not EEPROM contents.
+  const uint8_t freezeData = cmd::FREEZE_ROM_DATA;
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(cmd::OPCODE_FREEZE_ROM, false);
+  transfer.hasMemoryAddress = true;
+  transfer.memoryAddress = cmd::FREEZE_ROM_ADDR;
+  transfer.txData = &freezeData;
+  transfer.txLength = 1;
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  WriteCycleResult writeCycle{};
+  _enterOperation(DriverState::BUSY);
+  status = _bus->_executeWrite(transfer, writeCycle);
+  if (!status.ok()) {
+    if (writeCycle.holdRequired) {
+      result.effect = MutationEffect::MAY_HAVE_COMMITTED;
+    }
+    if (status.code == Err::NACK_DEVICE_ADDRESS &&
+        protocolDetailPhase(status.detail) ==
+            ProtocolPhase::DEVICE_ADDRESS_WRITE) {
+      status = Status::Error(Err::INDETERMINATE, status.detail);
+    }
+    _finishOperation(status, OperationKind::MUTATION, entryState);
+    return status;
+  }
+
+  result.effect = MutationEffect::ACCEPTED;
+  _setState(entryState, _initialized);
+  frozen = false;
+  status = _observeFreezeStateRaw(frozen);
+  if (status.ok() && !frozen) {
+    status = Status::Error(Err::VERIFY_MISMATCH);
+  } else if (status.ok()) {
+    result.effect = MutationEffect::VERIFIED;
+  }
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
 }
 
 Status Driver::readSerialNumber(SerialNumberInfo& serial) {
-  std::memset(&serial, 0, sizeof(serial));
-
-  Status st = readSecurity(cmd::SECURITY_SERIAL_START, serial.bytes, cmd::SECURITY_SERIAL_SIZE);
-  if (!st.ok()) {
-    return st;
+  serial = {};
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
   }
 
-  serial.productIdOk = (serial.bytes[0] == cmd::SECURITY_PRODUCT_ID);
-  const uint8_t crc = crc8_31(serial.bytes, cmd::SECURITY_SERIAL_SIZE - 1U);
-  serial.crcOk = (crc == serial.bytes[cmd::SECURITY_SERIAL_SIZE - 1U]);
-
-  if (!serial.productIdOk) {
-    return Status::Error(Err::PART_MISMATCH, "Serial product ID is not 0xA0");
-  }
-  if (!serial.crcOk) {
-    return Status::Error(Err::CRC_MISMATCH, "Serial number CRC check failed");
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+    }
+    return status;
   }
 
-  return Status::Ok();
+  status = _readRandomRaw(cmd::OPCODE_SECURITY,
+                          cmd::SECURITY_SERIAL_START, serial.bytes,
+                          cmd::SECURITY_SERIAL_SIZE);
+  if (status.ok() && serial.bytes[0] != cmd::SECURITY_PRODUCT_ID) {
+    status = Status::Error(Err::PART_MISMATCH,
+                           static_cast<int32_t>(serial.bytes[0]));
+  } else if (status.ok()) {
+    serial.productIdOk = true;
+    const uint8_t computed = crc8Maxim(serial.bytes,
+                                       cmd::SECURITY_SERIAL_SIZE - 1u);
+    const uint8_t stored = serial.bytes[cmd::SECURITY_SERIAL_SIZE - 1u];
+    if (computed != stored) {
+      status = Status::Error(
+          Err::CRC_MISMATCH,
+          static_cast<int32_t>((static_cast<uint16_t>(computed) << 8u) |
+                               static_cast<uint16_t>(stored)));
+    } else {
+      serial.crcOk = true;
+    }
+  }
+
+  _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
 }
 
 Status Driver::readManufacturerId(uint32_t& manufacturerId) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
+  manufacturerId = 0;
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
   }
 
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _readManufacturerIdRaw(manufacturerId);
-  return _trackIo(st);
-}
-
-Status Driver::detectPart(PartType& part) {
-  part = PartType::UNKNOWN;
-
-  uint32_t manufacturerId = 0;
-  Status st = readManufacturerId(manufacturerId);
-  if (!st.ok()) {
-    return st;
-  }
-
-  if (manufacturerId == cmd::MANUFACTURER_ID_AT21CS01) {
-    part = PartType::AT21CS01;
-  } else if (manufacturerId == cmd::MANUFACTURER_ID_AT21CS11) {
-    part = PartType::AT21CS11;
-  } else {
-    return Status::Error(Err::PART_MISMATCH, "Unknown manufacturer ID", static_cast<int32_t>(manufacturerId));
-  }
-
-  return Status::Ok();
-}
-
-Status Driver::readRomZoneRegister(uint8_t zoneIndex, uint8_t& value) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-  if (!_isZoneIndexValid(zoneIndex)) {
-    return Status::Error(Err::INVALID_PARAM, "zoneIndex must be in range 0..3");
-  }
-
-  const uint8_t zoneRegisterAddress = cmd::ROM_ZONE_REGISTERS[zoneIndex];
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _readRandomRaw(cmd::OPCODE_ROM_ZONE, zoneRegisterAddress, &value, 1);
-  return _trackIo(st);
-}
-
-Status Driver::isZoneRom(uint8_t zoneIndex, bool& isRom) {
-  isRom = false;
-  uint8_t value = 0;
-  Status st = readRomZoneRegister(zoneIndex, value);
-  if (!st.ok()) {
-    return st;
-  }
-
-  isRom = (value == cmd::ROM_ZONE_ROM_VALUE);
-  return Status::Ok();
-}
-
-Status Driver::setZoneRom(uint8_t zoneIndex) {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-  if (!_isZoneIndexValid(zoneIndex)) {
-    return Status::Error(Err::INVALID_PARAM, "zoneIndex must be in range 0..3");
-  }
-
-  const uint8_t zoneRegisterAddress = cmd::ROM_ZONE_REGISTERS[zoneIndex];
-  const uint8_t value = cmd::ROM_ZONE_ROM_VALUE;
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _writeRaw(cmd::OPCODE_ROM_ZONE, zoneRegisterAddress, &value, 1);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = waitReady(_config.writeTimeoutMs);
-  return st;
-}
-
-Status Driver::freezeRomZones() {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-
-  const uint8_t data = cmd::FREEZE_ROM_DATA;
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = _writeRaw(cmd::OPCODE_FREEZE_ROM, cmd::FREEZE_ROM_ADDR, &data, 1);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  st = waitReady(_config.writeTimeoutMs);
-  return st;
-}
-
-Status Driver::areRomZonesFrozen(bool& frozen) {
-  frozen = false;
-
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  bool ack = false;
-  st = _addressOnlyRaw(cmd::OPCODE_FREEZE_ROM, true, ack);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  frozen = !ack;
-  return _trackIo(Status::Ok());
-}
-
-Status Driver::setHighSpeed() {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  bool ack = false;
-  st = _addressOnlyRaw(cmd::OPCODE_HIGH_SPEED, false, ack);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-  if (!ack) {
-    return _trackIo(Status::Error(Err::NACK_DEVICE_ADDRESS, "High-Speed command NACK"));
-  }
-
-  _setSpeedMode(SpeedMode::HIGH_SPEED);
-  return _trackIo(Status::Ok());
-}
-
-Status Driver::isHighSpeed(bool& enabled) {
-  enabled = false;
-
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  bool ack = false;
-  st = _addressOnlyRaw(cmd::OPCODE_HIGH_SPEED, true, ack);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  enabled = ack;
-  return _trackIo(Status::Ok());
-}
-
-Status Driver::setStandardSpeed() {
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
-  }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-
-  bool ack = false;
-  st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, false, ack);
-  if (!st.ok()) {
-    return _trackIo(st);
-  }
-  if (!ack) {
-    if (_detectedPart == PartType::AT21CS11) {
-      return _trackIo(Status::Error(Err::UNSUPPORTED_COMMAND, "AT21CS11 does not support Standard Speed"));
+  const DriverState entryState = _state;
+  Status status = _synchronizeBusState(true);
+  if (!status.ok()) {
+    if (status.code != Err::NOT_BOUND && status.code != Err::INVALID_STATE) {
+      _finishOperation(status, OperationKind::NORMAL_IO, entryState);
     }
-    return _trackIo(Status::Error(Err::NACK_DEVICE_ADDRESS, "Standard Speed command NACK"));
+    return status;
   }
-
-  _setSpeedMode(SpeedMode::STANDARD_SPEED);
-  return _trackIo(Status::Ok());
+  status = _readManufacturerIdRaw(manufacturerId);
+  _finishOperation(status, OperationKind::NORMAL_IO, entryState);
+  return status;
 }
 
-Status Driver::isStandardSpeed(bool& enabled) {
-  enabled = false;
-
-  Status st = _checkInitialized();
-  if (!st.ok()) {
-    return st;
+Status Driver::setSpeedMode(SpeedMode mode) {
+  if (!isKnownSpeed(mode)) {
+    return Status::Error(Err::INVALID_PARAM);
   }
-  if (_detectedPart == PartType::AT21CS11) {
-    return Status::Error(Err::UNSUPPORTED_COMMAND, "AT21CS11 does not support Standard Speed");
+  const Status admission = _requireInitializedForIo();
+  if (!admission.ok()) {
+    return admission;
   }
-
-  st = _activateDevice();
-  if (!st.ok()) {
-    return _trackIo(st);
+  if (mode == SpeedMode::STANDARD_SPEED &&
+      _detectedPart == PartType::AT21CS11) {
+    return Status::Error(Err::UNSUPPORTED_COMMAND);
   }
 
-  bool ack = false;
-  st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, true, ack);
-  if (!st.ok()) {
-    return _trackIo(st);
+  Status status = _synchronizeBusState(false);
+  if (!status.ok()) {
+    return status;
+  }
+  if (!_speedKnown) {
+    return Status::Error(Err::INVALID_STATE);
+  }
+  if (mode == _activeSpeed) {
+    _config.startupSpeed = mode;
+    return Status::Ok();
   }
 
-  enabled = ack;
-  return _trackIo(Status::Ok());
+  const DriverState entryState = _state;
+  _enterOperation(DriverState::BUSY);
+  TransferResult transferResult{};
+  status = _setSpeedModeRaw(mode, transferResult);
+  if (status.ok()) {
+    _config.startupSpeed = mode;
+  }
+  _finishOperation(status, OperationKind::MUTATION, entryState);
+  return status;
 }
 
-uint8_t Driver::crc8_31(const uint8_t* data, size_t len) {
-  if (len == 0) {
+uint8_t Driver::crc8Maxim(const uint8_t* data, size_t length) {
+  if (data == nullptr && length != 0) {
     return 0;
   }
-  if (data == nullptr) {
-    return 0;
-  }
-
-  uint8_t crc = 0x00;
-  for (size_t i = 0; i < len; ++i) {
-    crc ^= data[i];
-    for (uint8_t bit = 0; bit < 8; ++bit) {
-      if ((crc & 0x01U) != 0U) {
-        crc = static_cast<uint8_t>((crc >> 1U) ^ 0x8CU);
-      } else {
-        crc = static_cast<uint8_t>(crc >> 1U);
-      }
+  uint8_t crc = 0;
+  for (size_t index = 0; index < length; ++index) {
+    crc = static_cast<uint8_t>(crc ^ data[index]);
+    for (uint8_t bit = 0; bit < 8u; ++bit) {
+      crc = (crc & 0x01u) != 0u
+                ? static_cast<uint8_t>((crc >> 1u) ^ 0x8Cu)
+                : static_cast<uint8_t>(crc >> 1u);
     }
   }
   return crc;
 }
 
-Status Driver::_trackIo(const Status& st) {
-  if (!_initialized) {
-    return st;
-  }
-
-  const uint32_t nowMs = _nowMs();
-  if (st.ok()) {
-    _lastOkMs = nowMs;
-    _lastError = Status::Ok();
-    _consecutiveFailures = 0;
-    incrementWrap(_totalSuccess);
-    if (_driverState != DriverState::SLEEPING) {
-      _driverState = DriverState::READY;
-    }
-    return st;
-  }
-
-  _lastErrorMs = nowMs;
-  _lastError = st;
-  incrementWrap(_totalFailures);
-  incrementWrap(_consecutiveFailures);
-
-  if (st.code == Err::PART_MISMATCH || st.code == Err::INVALID_CONFIG) {
-    _driverState = DriverState::FAULT;
-    return st;
-  }
-  if (st.code == Err::NOT_PRESENT) {
-    _driverState = DriverState::OFFLINE;
-    return st;
-  }
-
-  if (_consecutiveFailures >= _config.offlineThreshold) {
-    _driverState = DriverState::OFFLINE;
-  } else {
-    _driverState = DriverState::DEGRADED;
-  }
-
-  return st;
-}
-
-Status Driver::_checkInitialized(bool allowOffline) const {
-  if (!_initialized) {
-    return Status::Error(Err::NOT_INITIALIZED, "begin() must succeed before this operation");
-  }
-  if (!allowOffline && _driverState == DriverState::OFFLINE) {
-    return Status::Error(Err::INVALID_STATE, "Driver is offline; call recover()");
-  }
-  if (_driverState == DriverState::FAULT) {
-    return Status::Error(Err::INVALID_STATE, "Driver in FAULT state; call begin() to reinitialize");
-  }
-  if (_driverState == DriverState::SLEEPING) {
-    return Status::Error(Err::INVALID_STATE, "Driver is sleeping");
-  }
-  return Status::Ok();
-}
-
-bool Driver::_hasTransport() const {
-  return _config.transport != nullptr;
-}
-
-bool Driver::_hasPresenceIndicator() const {
-  if (_hasTransport() && _config.transport->presencePresent != nullptr) {
-    return true;
-  }
-  return _config.presencePin >= 0;
-}
-
 uint8_t Driver::_deviceAddress(uint8_t opcode, bool read) const {
-  const uint8_t rw = read ? 0x01U : 0x00U;
-  return static_cast<uint8_t>((opcode << 4U) | ((_config.addressBits & 0x07U) << 1U) | rw);
+  const uint8_t readBit = read ? 0x01u : 0x00u;
+  return static_cast<uint8_t>((static_cast<uint32_t>(opcode) << 4u) |
+                              (static_cast<uint32_t>(
+                                   _config.addressBits & 0x07u)
+                               << 1u) |
+                              readBit);
 }
 
-Status Driver::_activateDevice() {
-  const SpeedMode desiredSpeed = _speedMode;
-  Status st = Status::Error(Err::DISCOVERY_FAILED, "Discovery failed");
-  const uint16_t attempts = retryAttempts(_config.discoveryRetries);
-  for (uint16_t attempt = 0; attempt < attempts; ++attempt) {
-    st = _resetAndDiscoverRaw();
-    if (st.ok()) {
+bool Driver::_hasCurrentBusBinding() const {
+  if (!_bound || _bus == nullptr || !_seenBusBindingEpochValid) {
+    return false;
+  }
+  const BusSnapshot busState = _bus->snapshot();
+  return busState.bound && busState.bindingEpochValid &&
+         busState.bindingEpoch == _seenBusBindingEpoch;
+}
+
+bool Driver::_canUseNormalIo() const {
+  return _state == DriverState::READY || _state == DriverState::DEGRADED;
+}
+
+Status Driver::_requireBound() const {
+  if (!_bound || _bus == nullptr) {
+    return Status::Error(Err::NOT_BOUND);
+  }
+  const BusSnapshot busState = _bus->snapshot();
+  if (!busState.bound) {
+    return Status::Error(Err::NOT_BOUND);
+  }
+  if (!busState.bindingEpochValid) {
+    return Status::Error(Err::INVALID_STATE);
+  }
+  return Status::Ok();
+}
+
+Status Driver::_requireInitializedForIo() const {
+  const Status boundStatus = _requireBound();
+  if (!boundStatus.ok()) {
+    return boundStatus;
+  }
+  if (_state == DriverState::BUSY) {
+    return Status::Error(Err::BUSY);
+  }
+  if (_state == DriverState::UNINIT ||
+      (_state == DriverState::OFFLINE && !_initialized)) {
+    return Status::Error(Err::NOT_INITIALIZED);
+  }
+  if (!_canUseNormalIo()) {
+    return Status::Error(Err::INVALID_STATE);
+  }
+  if (!_initialized) {
+    return Status::Error(Err::NOT_INITIALIZED);
+  }
+  return Status::Ok();
+}
+
+void Driver::_setState(DriverState state, bool initialized) {
+  _state = state;
+  _initialized = initialized;
+}
+
+void Driver::_enterOperation(DriverState transient) {
+  _setState(transient, _initialized);
+}
+
+void Driver::_finishOperation(const Status& status,
+                              OperationKind kind,
+                              DriverState entryState) {
+  const uint64_t nowUs =
+      (_bus != nullptr && _bus->_transport.nowUs != nullptr)
+          ? _bus->_transport.nowUs(_bus->_transport.user)
+          : 0;
+
+  if (status.ok()) {
+    _lastStatusCode = Err::OK;
+    _lastStatusDetail = 0;
+    _lastOkUs = nowUs;
+    _consecutiveFailures = 0;
+    incrementSaturating(_totalSuccess);
+
+    const bool initialized =
+        kind == OperationKind::INITIALIZE || kind == OperationKind::RECOVER
+            ? true
+            : _initialized;
+    _setState(DriverState::READY, initialized);
+    return;
+  }
+
+  _lastStatusCode = status.code;
+  _lastStatusDetail = status.detail;
+  _lastErrorCode = status.code;
+  _lastErrorDetail = status.detail;
+  _lastErrorUs = nowUs;
+  incrementSaturating(_consecutiveFailures);
+  incrementSaturating(_totalFailures);
+
+  const bool lifecycleIdentityFailure =
+      status.code == Err::PART_MISMATCH &&
+      (kind == OperationKind::INITIALIZE || kind == OperationKind::RECOVER ||
+       kind == OperationKind::PROBE);
+  const bool definiteIdentityAbsence =
+      isManufacturerAddressNack(status) &&
+      (kind == OperationKind::INITIALIZE || kind == OperationKind::RECOVER ||
+       kind == OperationKind::PROBE);
+  const bool thresholdReached =
+      _config.offlineThreshold != 0u &&
+      _consecutiveFailures >= _config.offlineThreshold;
+  const DriverState healthState =
+      status.code == Err::NOT_PRESENT || definiteIdentityAbsence ||
+              thresholdReached
+          ? DriverState::OFFLINE
+          : DriverState::DEGRADED;
+
+  switch (kind) {
+    case OperationKind::INITIALIZE:
+      _setState(lifecycleIdentityFailure ? DriverState::FAULT : healthState,
+                false);
       break;
-    }
+    case OperationKind::RECOVER:
+      _setState(lifecycleIdentityFailure
+                    ? DriverState::FAULT
+                    : (entryState == DriverState::OFFLINE
+                           ? DriverState::OFFLINE
+                           : healthState),
+                false);
+      break;
+    case OperationKind::PROBE:
+      _setState(lifecycleIdentityFailure
+                    ? DriverState::FAULT
+                    : (entryState == DriverState::OFFLINE
+                           ? DriverState::OFFLINE
+                           : healthState),
+                lifecycleIdentityFailure ? false : _initialized);
+      break;
+    case OperationKind::NORMAL_IO:
+    case OperationKind::MUTATION:
+      _setState(healthState, _initialized);
+      break;
   }
-  if (!st.ok()) {
-    return st;
+}
+
+void Driver::_resetLocalState() {
+  _bus = nullptr;
+  _config = {};
+  _bound = false;
+  _setState(DriverState::UNINIT, false);
+  _detectedPart = PartType::UNKNOWN;
+  _manufacturerId = 0;
+  _siliconRevision = 0;
+  _activeSpeed = SpeedMode::HIGH_SPEED;
+  _speedKnown = false;
+  _seenBusBindingEpochValid = false;
+  _seenBusBindingEpoch = 0;
+  _seenBusGeneration = 0;
+  _lastStatusCode = Err::OK;
+  _lastStatusDetail = 0;
+  _lastErrorCode = Err::OK;
+  _lastErrorDetail = 0;
+  _lastOkUs = 0;
+  _lastErrorUs = 0;
+  _consecutiveFailures = 0;
+  _totalSuccess = 0;
+  _totalFailures = 0;
+}
+
+Status Driver::_synchronizeBusState(bool restoreConfiguredSpeed) {
+  const Status boundStatus = _requireBound();
+  if (!boundStatus.ok()) {
+    return boundStatus;
+  }
+  const BusSnapshot busState = _bus->snapshot();
+  if (!_seenBusBindingEpochValid ||
+      busState.bindingEpoch != _seenBusBindingEpoch) {
+    _speedKnown = false;
+    return Status::Error(Err::INVALID_STATE);
+  }
+  if (busState.generation == _seenBusGeneration) {
+    if (!_speedKnown) {
+      return Status::Error(Err::INVALID_STATE);
+    }
+    // A definitely rejected lazy restoration leaves High-Speed known and the
+    // configured Standard mode pending. Ambiguous failures clear speedKnown
+    // and are rejected above until explicit recovery.
+    if (restoreConfiguredSpeed &&
+        _config.startupSpeed == SpeedMode::STANDARD_SPEED &&
+        _detectedPart == PartType::AT21CS01 &&
+        _activeSpeed != SpeedMode::STANDARD_SPEED) {
+      TransferResult transferResult{};
+      return _setSpeedModeRaw(SpeedMode::STANDARD_SPEED, transferResult);
+    }
+    return Status::Ok();
+  }
+  if (!busState.resetEstablishedHighSpeed) {
+    _speedKnown = false;
+    return Status::Error(Err::INVALID_STATE);
   }
 
-  if (desiredSpeed == SpeedMode::STANDARD_SPEED) {
-    if (_detectedPart == PartType::AT21CS11) {
-      return Status::Error(Err::UNSUPPORTED_COMMAND, "AT21CS11 does not support Standard Speed");
-    }
-
-    bool ack = false;
-    st = _addressOnlyRaw(cmd::OPCODE_STANDARD_SPEED, false, ack);
-    if (!st.ok()) {
-      return st;
-    }
-    if (!ack) {
-      return Status::Error(Err::NACK_DEVICE_ADDRESS, "Standard Speed command NACK during activation");
-    }
-    _setSpeedMode(SpeedMode::STANDARD_SPEED);
+  _activeSpeed = SpeedMode::HIGH_SPEED;
+  _speedKnown = true;
+  _seenBusGeneration = busState.generation;
+  if (restoreConfiguredSpeed &&
+      _config.startupSpeed == SpeedMode::STANDARD_SPEED &&
+      _detectedPart == PartType::AT21CS01) {
+    TransferResult transferResult{};
+    return _setSpeedModeRaw(SpeedMode::STANDARD_SPEED, transferResult);
   }
-
   return Status::Ok();
 }
 
-Status Driver::_addressOnlyRaw(uint8_t opcode, bool read, bool& ack) {
-  _sendStart();
-  ack = txByte(_deviceAddress(opcode, read));
-  _sendStop();
-  return Status::Ok();
+Status Driver::_readRandomRaw(uint8_t opcode,
+                              uint8_t address,
+                              uint8_t* data,
+                              size_t length) {
+  if (data == nullptr || length == 0 ||
+      length > Bus::MAX_FRAME_DATA_BYTES) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  uint8_t scratch[Bus::MAX_FRAME_DATA_BYTES] = {};
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(opcode, false);
+  transfer.hasMemoryAddress = true;
+  transfer.memoryAddress = address;
+  transfer.hasRepeatedStart = true;
+  transfer.repeatedDeviceAddress = _deviceAddress(opcode, true);
+  transfer.rxData = scratch;
+  transfer.rxLength = length;
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  TransferResult result{};
+  const Status status = _bus->_execute(transfer, result);
+  if (status.ok()) {
+    std::memcpy(data, scratch, length);
+  }
+  return status;
 }
 
-Status Driver::_readRandomRaw(uint8_t opcode, uint8_t address, uint8_t* data, size_t len) {
-  _sendStart();
-  if (!txByte(_deviceAddress(opcode, false))) {
-    _sendStop();
-    return Status::Error(Err::NACK_DEVICE_ADDRESS, "Device address NACK");
+Status Driver::_readRandomRangeRaw(uint8_t opcode,
+                                   uint8_t address,
+                                   size_t capacity,
+                                   uint8_t* data,
+                                   size_t length) {
+  const size_t start = static_cast<size_t>(address);
+  if (data == nullptr || length == 0 || capacity == 0 ||
+      capacity > cmd::EEPROM_SIZE || !rangeFits(start, length, capacity)) {
+    return Status::Error(Err::INVALID_PARAM);
   }
 
-  if (!txByte(address)) {
-    _sendStop();
-    return Status::Error(Err::NACK_MEMORY_ADDRESS, "Memory address NACK");
-  }
-
-  _sendStart();
-  if (!txByte(_deviceAddress(opcode, true))) {
-    _sendStop();
-    return Status::Error(Err::NACK_DEVICE_ADDRESS, "Device address NACK");
-  }
-
-  for (size_t i = 0; i < len; ++i) {
-    const bool ack = (i + 1U) < len;
-    data[i] = rxByte(ack);
-  }
-
-  _sendStop();
-  return Status::Ok();
-}
-
-Status Driver::_writeRaw(uint8_t opcode, uint8_t address, const uint8_t* data, size_t len) {
-  _sendStart();
-  if (!txByte(_deviceAddress(opcode, false))) {
-    _sendStop();
-    return Status::Error(Err::NACK_DEVICE_ADDRESS, "Device address NACK");
-  }
-
-  if (!txByte(address)) {
-    _sendStop();
-    return Status::Error(Err::NACK_MEMORY_ADDRESS, "Memory address NACK");
-  }
-
-  for (size_t i = 0; i < len; ++i) {
-    if (!txByte(data[i])) {
-      _sendStop();
-      return Status::Error(Err::NACK_DATA, "Data byte NACK", static_cast<int32_t>(i));
+  uint8_t scratch[cmd::EEPROM_SIZE] = {};
+  size_t offset = 0;
+  while (offset < length) {
+    const size_t remaining = length - offset;
+    const size_t chunk = remaining < Bus::MAX_FRAME_DATA_BYTES
+                             ? remaining
+                             : Bus::MAX_FRAME_DATA_BYTES;
+    const Status status = _readRandomRaw(
+        opcode, static_cast<uint8_t>(start + offset), scratch + offset, chunk);
+    if (!status.ok()) {
+      return status;
     }
+    offset += chunk;
   }
 
-  _sendStop();
+  std::memcpy(data, scratch, length);
+  return Status::Ok();
+}
+
+Status Driver::_readDirectRaw(uint8_t opcode,
+                              uint8_t* data,
+                              size_t length) {
+  if (data == nullptr || length == 0 ||
+      length > Bus::MAX_FRAME_DATA_BYTES) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  uint8_t scratch[Bus::MAX_FRAME_DATA_BYTES] = {};
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(opcode, true);
+  transfer.rxData = scratch;
+  transfer.rxLength = length;
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  TransferResult result{};
+  const Status status = _bus->_execute(transfer, result);
+  if (status.ok()) {
+    std::memcpy(data, scratch, length);
+  }
+  return status;
+}
+
+Status Driver::_writePageRaw(uint8_t opcode,
+                             uint8_t address,
+                             const uint8_t* data,
+                             size_t length,
+                             WriteResult& result) {
+  result = WriteResult{};
+  if (data == nullptr || length == 0 || length > cmd::PAGE_SIZE ||
+      length > Bus::MAX_FRAME_DATA_BYTES) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(opcode, false);
+  transfer.hasMemoryAddress = true;
+  transfer.memoryAddress = address;
+  transfer.txData = data;
+  transfer.txLength = length;
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  WriteCycleResult writeCycle{};
+  const Status status = _bus->_executeWrite(transfer, writeCycle);
+  result.lastPageBytesAccepted =
+      writeCycle.frame.dataBytesTransferred <= length
+          ? writeCycle.frame.dataBytesTransferred
+          : 0u;
+  if (status.ok()) {
+    result.bytesCommitted = length;
+    result.lastPageEffect = WriteEffect::COMMITTED;
+  } else if (writeCycle.holdRequired) {
+    result.lastPageEffect = WriteEffect::MAY_HAVE_COMMITTED;
+  }
+  return status;
+}
+
+Status Driver::_writeRange(uint8_t opcode,
+                           uint8_t firstWritableAddress,
+                           uint8_t lastWritableAddress,
+                           uint8_t address,
+                           const uint8_t* data,
+                           size_t length,
+                           WriteResult& result) {
+  result = WriteResult{};
+  if (data == nullptr || length == 0 ||
+      firstWritableAddress > lastWritableAddress ||
+      address < firstWritableAddress) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+  const size_t capacity =
+      static_cast<size_t>(lastWritableAddress - firstWritableAddress) + 1u;
+  const size_t start = static_cast<size_t>(address - firstWritableAddress);
+  if (!rangeFits(start, length, capacity)) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  size_t offset = 0;
+  while (offset < length) {
+    const size_t absoluteAddress = static_cast<size_t>(address) + offset;
+    const size_t pageRemaining =
+        cmd::PAGE_SIZE - (absoluteAddress % cmd::PAGE_SIZE);
+    const size_t remaining = length - offset;
+    const size_t chunk = remaining < pageRemaining ? remaining : pageRemaining;
+
+    WriteResult pageResult{};
+    const Status status = _writePageRaw(
+        opcode, static_cast<uint8_t>(absoluteAddress), data + offset, chunk,
+        pageResult);
+    result.lastPageBytesAccepted = pageResult.lastPageBytesAccepted;
+    result.lastPageEffect = pageResult.lastPageEffect;
+    if (!status.ok()) {
+      return status;
+    }
+    result.bytesCommitted += pageResult.bytesCommitted;
+    offset += chunk;
+  }
+  return Status::Ok();
+}
+
+Status Driver::_readSecurityLockStateRaw(bool& locked) {
+  locked = false;
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(cmd::OPCODE_LOCK_SECURITY, false);
+  transfer.hasMemoryAddress = true;
+  transfer.memoryAddress = cmd::LOCK_SECURITY_ADDRESS;
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  TransferResult result{};
+  const Status status = _bus->_execute(transfer, result);
+  // The documented Check Lock sequence is 2h/W plus address 0x6X. A NACK on
+  // that address means locked; there is no separate status register read.
+  if (status.code == Err::NACK_MEMORY_ADDRESS &&
+      protocolDetailPhase(status.detail) == ProtocolPhase::MEMORY_ADDRESS) {
+    locked = true;
+    return Status::Ok();
+  }
+  return status;
+}
+
+Status Driver::_readRomZoneStateRaw(uint8_t zoneIndex, bool& enabled) {
+  enabled = false;
+  if (zoneIndex >= cmd::ROM_ZONE_REGISTER_COUNT) {
+    return Status::Error(Err::INVALID_PARAM);
+  }
+
+  uint8_t value = 0;
+  const Status status =
+      _readRandomRaw(cmd::OPCODE_ROM_ZONE,
+                     cmd::ROM_ZONE_REGISTERS[zoneIndex], &value, 1);
+  if (!status.ok()) {
+    return status;
+  }
+  if (value == 0) {
+    return Status::Ok();
+  }
+  if (value == cmd::ROM_ZONE_ROM_VALUE) {
+    enabled = true;
+    return Status::Ok();
+  }
+  return Status::Error(Err::VERIFY_MISMATCH,
+                       static_cast<int32_t>(value));
+}
+
+Status Driver::_observeFreezeStateRaw(bool& frozen) {
+  frozen = false;
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(cmd::OPCODE_FREEZE_ROM, false);
+  transfer.minimumPostTransferHighUs =
+      _activeSpeed == SpeedMode::HIGH_SPEED ? Bus::HIGH_SPEED_HTSS_US
+                                            : Bus::STANDARD_SPEED_HTSS_US;
+
+  TransferResult result{};
+  // DS20005857I observes Freeze with the 1h/W device-address response: ACK
+  // means unfrozen and NACK means frozen. There is no documented 1h/R query.
+  Status status = _bus->_execute(transfer, result);
+  if (status.ok()) {
+    return status;
+  }
+  if (status.code != Err::NACK_DEVICE_ADDRESS ||
+      protocolDetailPhase(status.detail) !=
+          ProtocolPhase::DEVICE_ADDRESS_WRITE) {
+    return status;
+  }
+
+  // A device-address NACK can also mean absence/wrong address. Confirm that
+  // the same identified part is alive before interpreting it as frozen.
+  uint32_t manufacturerId = 0;
+  status = _readManufacturerIdRaw(manufacturerId);
+  if (!status.ok()) {
+    return Status::Error(Err::INDETERMINATE, status.detail);
+  }
+  PartType part = PartType::UNKNOWN;
+  uint8_t revision = 0;
+  status = _classifyManufacturerIdRaw(manufacturerId, part, revision);
+  (void)revision;
+  if (!status.ok() || part != _detectedPart ||
+      _detectedPart == PartType::UNKNOWN) {
+    return Status::Error(Err::INDETERMINATE,
+                         static_cast<int32_t>(manufacturerId));
+  }
+  frozen = true;
   return Status::Ok();
 }
 
 Status Driver::_readManufacturerIdRaw(uint32_t& manufacturerId) {
-  _sendStart();
-  if (!txByte(_deviceAddress(cmd::OPCODE_MANUFACTURER_ID, true))) {
-    _sendStop();
-    return Status::Error(Err::NACK_DEVICE_ADDRESS, "Manufacturer ID command NACK");
+  manufacturerId = 0;
+  uint8_t bytes[3] = {};
+  const Status status =
+      _readDirectRaw(cmd::OPCODE_MANUFACTURER_ID, bytes, sizeof(bytes));
+  if (status.ok()) {
+    manufacturerId = (static_cast<uint32_t>(bytes[0]) << 16u) |
+                     (static_cast<uint32_t>(bytes[1]) << 8u) |
+                     static_cast<uint32_t>(bytes[2]);
+  }
+  return status;
+}
+
+Status Driver::_classifyManufacturerIdRaw(uint32_t manufacturerId,
+                                          PartType& part,
+                                          uint8_t& siliconRevision) {
+  part = PartType::UNKNOWN;
+  siliconRevision = static_cast<uint8_t>(
+      manufacturerId & cmd::MANUFACTURER_ID_REVISION_MASK);
+  const uint32_t partCode = manufacturerId & cmd::MANUFACTURER_ID_PART_MASK;
+  if (partCode == cmd::MANUFACTURER_ID_AT21CS01_BASE) {
+    part = PartType::AT21CS01;
+    return Status::Ok();
+  }
+  if (partCode == cmd::MANUFACTURER_ID_AT21CS11_BASE) {
+    part = PartType::AT21CS11;
+    return Status::Ok();
+  }
+  return Status::Error(Err::PART_MISMATCH,
+                       static_cast<int32_t>(manufacturerId));
+}
+
+Status Driver::_setSpeedModeRaw(SpeedMode mode,
+                                TransferResult& transferResult) {
+  transferResult = {};
+  if (!isKnownSpeed(mode)) {
+    return Status::Error(Err::INVALID_PARAM);
   }
 
-  const uint8_t b0 = rxByte(true);
-  const uint8_t b1 = rxByte(true);
-  const uint8_t b2 = rxByte(false);
+  SingleWireTransfer transfer{};
+  transfer.speed = _activeSpeed;
+  transfer.deviceAddress = _deviceAddress(
+      mode == SpeedMode::STANDARD_SPEED ? cmd::OPCODE_STANDARD_SPEED
+                                        : cmd::OPCODE_HIGH_SPEED,
+      false);
+  transfer.minimumPostTransferHighUs = Bus::SPEED_CHANGE_HOLD_US;
 
-  _sendStop();
-
-  manufacturerId =
-      (static_cast<uint32_t>(b0) << 16U) |
-      (static_cast<uint32_t>(b1) << 8U) |
-      static_cast<uint32_t>(b2);
-
-  return Status::Ok();
-}
-
-Status Driver::_readCurrentAddressRaw(uint8_t& value) {
-  _sendStart();
-  if (!txByte(_deviceAddress(cmd::OPCODE_EEPROM, true))) {
-    _sendStop();
-    return Status::Error(Err::NACK_DEVICE_ADDRESS, "Current address read NACK");
+  const Status status = _bus->_execute(transfer, transferResult);
+  if (status.ok()) {
+    _activeSpeed = mode;
+    _speedKnown = true;
+    return status;
   }
 
-  value = rxByte(false);
-  _sendStop();
-  return Status::Ok();
+  const bool definiteAddressNack =
+      status.code == Err::NACK_DEVICE_ADDRESS &&
+      protocolDetailPhase(status.detail) ==
+          ProtocolPhase::DEVICE_ADDRESS_WRITE;
+  const bool typedTransportFailure =
+      transferResult.code == TransportCode::TIMEOUT ||
+      transferResult.code == TransportCode::LINE_STUCK ||
+      transferResult.code == TransportCode::IO_ERROR;
+  const bool failedBeforeAddress =
+      typedTransportFailure &&
+      transferResult.phase == TransferPhase::START &&
+      !transferResult.firstDeviceAddressAcked &&
+      !transferResult.memoryAddressAcked &&
+      !transferResult.repeatedDeviceAddressAcked &&
+      transferResult.dataBytesTransferred == 0 &&
+      !transferResult.currentWriteByteMayBeAccepted;
+  if (!definiteAddressNack && !failedBeforeAddress) {
+    _speedKnown = false;
+  }
+  return status;
 }
 
-bool Driver::_isZoneIndexValid(uint8_t zoneIndex) {
-  return zoneIndex < cmd::ROM_ZONE_REGISTER_COUNT;
-}
+Status Driver::_runInitializationSequence() {
+  bool present = false;
+  TransferResult resetResult{};
+  Status status = _bus->_resetAndDiscover(present, resetResult);
+  if (!status.ok()) {
+    _speedKnown = false;
+    return status;
+  }
 
-bool Driver::_isSecurityUserAddressValid(uint8_t address) {
-  return address >= cmd::SECURITY_USER_MIN && address <= cmd::SECURITY_USER_MAX;
-}
+  const BusSnapshot busState = _bus->snapshot();
+  _seenBusBindingEpochValid = busState.bindingEpochValid;
+  _seenBusBindingEpoch = busState.bindingEpoch;
+  _seenBusGeneration = busState.generation;
+  _activeSpeed = SpeedMode::HIGH_SPEED;
+  _speedKnown = true;
+  if (_state == DriverState::PROBING) {
+    _setState(DriverState::INIT_CONFIG, false);
+  }
 
-void Driver::_setSpeedMode(SpeedMode mode) {
-  _speedMode = mode;
-  _timing = (mode == SpeedMode::STANDARD_SPEED) ? STANDARD_SPEED_TIMING : HIGH_SPEED_TIMING;
-}
+  uint32_t rawId = 0;
+  status = _readManufacturerIdRaw(rawId);
+  if (!status.ok()) {
+    return status;
+  }
 
-void Driver::_resetHealth() {
-  _lastOkMs = 0;
-  _lastErrorMs = 0;
-  _lastError = Status::Ok();
-  _consecutiveFailures = 0;
-  _totalFailures = 0;
-  _totalSuccess = 0;
+  PartType part = PartType::UNKNOWN;
+  uint8_t revision = 0;
+  status = _classifyManufacturerIdRaw(rawId, part, revision);
+  _manufacturerId = rawId;
+  _siliconRevision = revision;
+  _detectedPart = part;
+  if (!status.ok()) {
+    return status;
+  }
+  if (_config.expectedPart != PartType::UNKNOWN &&
+      part != _config.expectedPart) {
+    return Status::Error(Err::PART_MISMATCH,
+                         static_cast<int32_t>(rawId));
+  }
+
+  if (_config.startupSpeed == SpeedMode::STANDARD_SPEED) {
+    TransferResult speedResult{};
+    status = _setSpeedModeRaw(SpeedMode::STANDARD_SPEED, speedResult);
+  }
+  return status;
 }
 
 }  // namespace AT21CS

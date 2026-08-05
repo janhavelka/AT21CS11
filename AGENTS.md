@@ -1,5 +1,15 @@
 # AGENTS.md - AT21CS01/AT21CS11 Production Embedded Guidelines
 
+## PlatformIO
+
+Before editing, fetch remotes and fast-forward the newest intended working
+branch to its upstream. Stop and report dirty, divergent, or conflicted state;
+never overwrite work to force a sync.
+
+On Windows, use `.\scripts\pio.cmd <arguments>`; it selects the current user's
+VS Code-managed installation. Never install another PlatformIO Core; if the
+wrapper cannot find it, stop and report the missing installation.
+
 ## Role and Target
 You are a professional embedded software engineer building a production-grade driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs.
 
@@ -13,8 +23,13 @@ include/AT21CS/       - Public API headers only
   CommandTable.h
   Status.h
   Config.h
+  Types.h
+  Transport.h
+  Bus.h
   AT21CS.h
   Version.h           - Auto-generated (do not edit)
+  platform/esp32/
+    Esp32Transport.h  - Arduino-ESP32 Backend API
 src/                  - Implementation (.cpp)
 examples/
   01_*/ 02_*/         - Interactive demos
@@ -39,14 +54,41 @@ Rules:
 - No logging in library code; examples may log.
 - No exceptions.
 - No `delay()` in library code except bounded protocol timing/bit windows.
+- The library is synchronous and creates no task, queue, scheduler, or
+  application-facing mutex. A Backend may use private bounded critical
+  facilities for physical timing.
+- The safe firmware default is one task or loop owning all AT21CS instances and
+  calling them sequentially. Multiple tasks may own separate physical-wire
+  instances only after that Backend's simultaneous cross-instance timing has
+  been qualified; Drivers sharing one Bus always share one owner.
+- Hot-plug is explicit. `Esp32TransportConfig::presencePin == -1` disables the
+  optional detect input; an enabled input uses `presenceActiveHigh` to select
+  active-high or active-low logic. It is a raw Bus-wide hint, not chip identity.
+- Retain valid Backend/Bus/Driver bindings while a device is absent. Firmware
+  may debounce an enabled detect input or periodically call `probe()`/`recover()`
+  when no detect input exists. The library itself creates no poller, timer,
+  retry loop, interrupt handler, or background reconnect work.
 
 ## Protocol Rules (AT21CS)
 
 - Single-wire timed bit protocol, MSb-first.
 - Discovery handshake required after reset/power-up.
 - Preserve ACK/NACK phase granularity in errors.
-- During t_WR busy cycle, keep SI/O high and use bounded ready polling.
+- During t_WR busy cycle, keep SI/O released high continuously for the fixed
+  10 ms Bus write-high interval; do not ACK-poll before that deadline.
 - AT21CS11 is High-Speed only; Standard Speed requests must fail cleanly.
+
+## Irreversible Provisioning
+
+- Keep `permanentlyLockSecurity()`, `permanentlyEnableRomZone()`, and
+  `permanentlyFreezeRomZones()` out of ordinary runtime command paths.
+- Security Lock protects only Security-user bytes. ROM-zone enable protects one
+  32-byte EEPROM zone. ROM Freeze locks only the current zone configuration;
+  an unenabled zone remains writable forever after Freeze.
+- Provisioning must verify device identity and data first, enable and verify the
+  complete desired zone map, and Freeze only with explicit authorization.
+- Never automatically replay `MAY_HAVE_COMMITTED` or accepted-but-unverified
+  mutation evidence. See `docs/IRREVERSIBLE_OPERATIONS.md`.
 
 ## Driver State Model
 
@@ -95,16 +137,22 @@ Do not modify its technical content unless explicitly requested by the maintaine
 
 ---
 
-## Framework Boundary And ESP-IDF Examples
+## Framework Boundary And PioArduino
 
-- Public/core code must stay framework-neutral unless a platform-specific
-  single-wire timing path is explicitly documented and guarded.
-- Core code must not depend on Arduino runtime APIs.
-- Arduino examples may use Arduino APIs.
-- ESP-IDF examples must be native IDF programs using `app_main`, native driver
-  headers, `esp_timer`, `vTaskDelay`, and fixed C buffers.
-- ESP-IDF examples must not include Arduino CLI source or use
-  `ArduinoCompat`, `IdfArduinoCompat`, `Arduino.h`, `Wire.h`, `String`,
-  `Serial`, `TwoWire`, `HardwareSerial`, or Arduino-style facades.
-- Keep command parity through repo-local native command contracts/checks rather
-  than sharing Arduino implementation.
+- The currently supported firmware framework is Arduino on ESP32-S2/S3 through
+  this exact PioArduino platform pin:
+  `https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip`.
+- Public/core code must stay framework-neutral. A future framework may provide
+  another Backend without changing Bus or Driver, but native ESP-IDF support is
+  not implemented, built, tested, packaged, advertised, or required now.
+- Core code must not depend on Arduino runtime APIs, ESP-IDF, FreeRTOS, ESP32
+  GPIO headers, board pins, or scheduler policy.
+- The explicit ESP32 Arduino transport may use guarded Arduino-ESP32 low-level
+  SoC/FreeRTOS facilities supplied by PioArduino. It must compile only in
+  `framework = arduino` environments and must not create a parallel
+  `framework = espidf` path.
+- Do not install or select a standalone ESP-IDF SDK, download a PlatformIO
+  `framework-espidf` package, invoke `idf.py`, ship an ESP-IDF example/component,
+  or add native-IDF CI/package gates.
+- Keep exactly two shipped Arduino examples: one full single-device CLI and one
+  concise multi-device CLI.
