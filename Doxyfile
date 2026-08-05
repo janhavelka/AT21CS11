@@ -50,6 +50,7 @@ GENERATE_LATEX         = NO
 GENERATE_XML           = NO
 GENERATE_RTF           = NO
 GENERATE_MAN           = NO
+HAVE_DOT               = NO
 
 WARN_IF_UNDOCUMENTED   = NO
 WARN_NO_PARAMDOC       = NO

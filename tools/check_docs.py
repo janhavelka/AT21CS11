@@ -25,7 +25,9 @@ DATASHEET_URL = (
     "Data-Sheet-DS20005857.pdf"
 )
 PROTECTED_REPORT = ROOT / "docs" / "AT21CS01_AT21CS11_complete_driver_report.md"
-PROTECTED_SHA256 = "4B39CBD8437A6DC33EF1E0764FA3A4652F57E41ADC2174F420D1897006F96255"
+# Canonical LF hash. Git may materialize CRLF on Windows, but the protected
+# report's text must otherwise remain byte-for-byte identical across hosts.
+PROTECTED_SHA256 = "B5803C866DB21CB33961DD6D482C9E6860043740A6E76B3DB43506BDB3F18E8E"
 
 CONSUMER_DOCS = (
     ROOT / "README.md",
@@ -138,6 +140,11 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest().upper()
+
+
+def sha256_lf_text(path: Path) -> str:
+    content = path.read_text(encoding="utf-8")
+    return hashlib.sha256(content.encode("utf-8")).hexdigest().upper()
 
 
 def package_allowed(relative: str) -> bool:
@@ -311,6 +318,8 @@ def check_versions(failures: list[str]) -> None:
         failures.append("Doxyfile version mismatch")
     if "WARN_AS_ERROR          = YES" not in doxyfile:
         failures.append("Doxygen warnings are not fatal")
+    if "HAVE_DOT               = NO" not in doxyfile:
+        failures.append("Doxygen unexpectedly requires Graphviz")
     for document in (
         "docs/IRREVERSIBLE_OPERATIONS.md",
         "docs/HARDWARE_VALIDATION.md",
@@ -344,7 +353,10 @@ def check_artifacts(failures: list[str]) -> None:
             failures.append("authoritative datasheet size mismatch")
         if sha256(DATASHEET) != DATASHEET_SHA256:
             failures.append("authoritative datasheet hash mismatch")
-    if not PROTECTED_REPORT.is_file() or sha256(PROTECTED_REPORT) != PROTECTED_SHA256:
+    if (
+        not PROTECTED_REPORT.is_file()
+        or sha256_lf_text(PROTECTED_REPORT) != PROTECTED_SHA256
+    ):
         failures.append("protected complete-driver report hash mismatch")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
