@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -282,9 +283,12 @@ def validate_package_links(package: Path, members: set[str]) -> None:
             if target.startswith(("http://", "file://", "/")):
                 raise CheckFailure(f"unsafe package link in {relative_doc}: {target}")
             target = target.split("#", 1)[0].split("?", 1)[0]
-            resolved = (relative_doc.parent / target).as_posix()
-            normalized = PurePosixPath(resolved)
-            if ".." in normalized.parts or normalized.as_posix() not in members:
+            # normpath collapses "docs/../README.md" so a valid parent-relative
+            # link resolves to a real member instead of failing on its "..".
+            resolved = posixpath.normpath(
+                (relative_doc.parent / target).as_posix()
+            )
+            if resolved.startswith("..") or resolved not in members:
                 raise CheckFailure(f"broken package link in {relative_doc}: {target}")
 
 

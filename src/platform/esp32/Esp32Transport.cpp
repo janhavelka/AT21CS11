@@ -55,7 +55,9 @@ constexpr uint32_t RESET_RECOVERY_US = 10;
 constexpr uint32_t DISCOVERY_REQUEST_NS = 1200;
 constexpr uint32_t DISCOVERY_SAMPLE_FROM_FALL_NS = 4000;
 constexpr uint32_t DISCOVERY_RESPONSE_MAX_US = 24;
-constexpr uint32_t DISCOVERY_RELEASE_CHECK_US = 25;
+// Checked 6 us after the 24 us tDACK maximum so an in-spec slow SI/O rise
+// (tPUP) is not misreported as LINE_STUCK.
+constexpr uint32_t DISCOVERY_RELEASE_CHECK_US = 30;
 constexpr uint32_t DISCOVERY_RELEASE_CHECK_NS =
     DISCOVERY_RELEASE_CHECK_US * 1000u;
 constexpr uint32_t POST_DISCOVERY_HIGH_US = 160;

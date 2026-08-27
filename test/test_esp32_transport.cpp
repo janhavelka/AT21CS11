@@ -327,7 +327,7 @@ void test_esp32_reset_discovery_has_one_exact_request_and_release_check() {
       960, TestAccess::readCycle(transport, 0) -
                TestAccess::lineEventCycle(transport, discoveryLow));
   TEST_ASSERT_EQUAL_UINT32(
-      6000, TestAccess::readCycle(transport, 1) -
+      7200, TestAccess::readCycle(transport, 1) -
                 TestAccess::lineEventCycle(transport, discoveryLow));
   TEST_ASSERT_EQUAL_UINT32(
       38400, TestAccess::readCycle(transport, 2) -

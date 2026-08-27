@@ -1,8 +1,8 @@
-﻿# AT21CS01 / AT21CS11 -- complete driver implementation report (datasheet DS20005857D)
+﻿# AT21CS01 / AT21CS11 -- chip protocol reference (datasheet DS20005857I)
 
-This is a **driver-focused, datasheet-faithful** report for implementing **all features** of Microchip **AT21CS01** and **AT21CS11** single-wire, I/O-powered EEPROMs.
+This is a **datasheet-faithful chip reference** covering **all features** of Microchip **AT21CS01** and **AT21CS11** single-wire, I/O-powered EEPROMs. It describes the chip, not this library's API; see the README for the shipped driver design.
 
-- Datasheet: **Microchip DS20005857D** ((c)2020)
+- Datasheet: **Microchip DS20005857I** ((c)2026)
 - Devices: **AT21CS01** (Standard + High-Speed) and **AT21CS11** (High-Speed only)
 - Interface: **single-wire serial** with **I2C-like protocol structure** (Start/Stop + 8-bit bytes + ACK/NACK), but **timed bit frames on one wire**.
 
@@ -302,7 +302,7 @@ Sequence (Random/Sequential):
 The first 8 bytes of Security register:
 - Byte 0: product identifier **0xA0**
 - Bytes 1-6: 48-bit unique number
-- Byte 7: CRC of bytes 0-6 using polynomial **X^8 + X^5 + X^4 + 1** (CRC-8 poly 0x31)
+- Byte 7: **CRC-8/Maxim** of bytes 0-6 (poly 0x31 = X^8 + X^5 + X^4 + 1, reflected implementation 0x8C, init 0x00). Datasheet revision H replaced an earlier inadequate CRC description with the explicit CRC-8/Maxim algorithm.
 
 Recommended driver behavior:
 - Read exactly 8 bytes starting at security address **0x00**.
@@ -372,9 +372,9 @@ Device responses:
 - If already locked:
   - NACK indicates locked
 
-**Check Lock (non-destructive):**
-- Use opcode **2h** with **R/W=1**
-- Device returns:
+**Check Lock (non-destructive, per DS20005857I Sec. 7.5.2):**
+- Same sequence as the Lock command (opcode **2h**, **R/W=0**, memory address with A7..A4 = 0b0110), but only the device address byte and memory address byte are transmitted, followed by Stop.
+- Device response to the **memory address byte**:
   - ACK if **unlocked**
   - NACK if **locked**
 
@@ -440,58 +440,10 @@ If address != 0x55 or data != 0xAA:
 - Device NACKs and does not freeze.
 
 **Check frozen state (non-destructive):**
-- Start -> device address **1h + A2:A0 + R/W=1**
-- ACK if not frozen; NACK if frozen
+- DS20005857I documents no separate read-form query; the frozen state is observed from the device's response to the **1h + A2:A0 + R/W=0** device address byte (step 2 above): ACK if not frozen, NACK if frozen.
+- After an ACK, sending a Stop instead of the 0x55 address byte aborts the sequence without freezing.
 
 ### 13.4 Device response when writing inside ROM zone
 If EEPROM write targets an address in a ROM zone:
 - Device ACKs device address and word address,
 - **NACKs the data byte**, and becomes ready for new command.
-
----
-
-## 14) Recommended driver architecture notes (ESP32 / Arduino)
-
-1. **Timing is tight in High-Speed mode.** Do not bit-bang with slow GPIO APIs in a jittery loop.
-2. Implement a **timing-accurate PHY**:
-   - direct GPIO register access OR
-   - ESP32 RMT or another timing peripheral (optional)
-3. Avoid mid-byte interrupts:
-   - Use critical sections (disable interrupts briefly) around byte transfers.
-4. Treat writes as "rare but special":
-   - `write*()` does Stop and starts t_WR
-   - `waitReady()` polls for ACK by probing device address until it responds or timeout
-   - optionally provide a nonblocking state-machine wrapper around `waitReady()`
-5. For presence:
-   - Protocol-level presence is Reset+Discovery
-   - If your product needs "instant presence with no bus transaction", use a dedicated **presence pin** (recommended).
-
----
-
-## 15) Implementation checklist (all features)
-
-### Must-have low-level
-- [ ] drive low for exact microseconds
-- [ ] release line (Hi-Z)
-- [ ] read line
-- [ ] input bit frame (0/1)
-- [ ] output bit frame (read bit)
-- [ ] byte TX/RX with ACK/NACK
-- [ ] Start/Stop (t_HTSS high time)
-- [ ] Reset + Discovery (mandatory after reset/power-up)
-
-### Commands
-- [ ] EEPROM read: current, random, sequential
-- [ ] EEPROM write: byte, page
-- [ ] Security register read (random/sequential)
-- [ ] Security user area write (0x10-0x1F only)
-- [ ] Security lock + check lock
-- [ ] Serial number read + CRC check
-- [ ] Manufacturer ID read
-- [ ] ROM zone register read/write
-- [ ] Freeze ROM zones + check frozen
-- [ ] Speed: set/check High-Speed; set/check Standard (AT21CS01 only)
-
----
-
-*End of report.*

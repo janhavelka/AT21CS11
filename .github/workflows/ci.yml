@@ -48,7 +48,7 @@ jobs:
         run: |
           python -m platformio run -d test/consumer/phy_smoke/arduino -e phy_smoke_s2
           objdump="$(find "$HOME/.platformio/packages" -type f -name 'xtensa-esp32s2-elf-objdump' -print -quit)"
-          object="$(find test/consumer/phy_smoke/arduino/.pio/build/phy_smoke_s2 -type f -path '*/AT21CS11/platform/esp32/Esp32Transport.cpp.o' -print -quit)"
+          object="$(find test/consumer/phy_smoke/arduino/.pio/build/phy_smoke_s2 -type f -path '*/platform/esp32/Esp32Transport.cpp.o' -print -quit)"
           test -n "$objdump"
           test -n "$object"
           python tools/check_esp32_iram_sections.py --objdump "$objdump" --object "$object"
@@ -57,7 +57,7 @@ jobs:
         run: |
           python -m platformio run -d test/consumer/phy_smoke/arduino -e phy_smoke_s3
           objdump="$(find "$HOME/.platformio/packages" -type f -name 'xtensa-esp32s3-elf-objdump' -print -quit)"
-          object="$(find test/consumer/phy_smoke/arduino/.pio/build/phy_smoke_s3 -type f -path '*/AT21CS11/platform/esp32/Esp32Transport.cpp.o' -print -quit)"
+          object="$(find test/consumer/phy_smoke/arduino/.pio/build/phy_smoke_s3 -type f -path '*/platform/esp32/Esp32Transport.cpp.o' -print -quit)"
           test -n "$objdump"
           test -n "$object"
           python tools/check_esp32_iram_sections.py --objdump "$objdump" --object "$object"
