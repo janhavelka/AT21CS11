@@ -310,7 +310,6 @@ BusSnapshot Bus::snapshot() const {
   value.bindingEpoch = _bindingEpoch;
   value.generation = _generation;
   value.claimedAddressMask = _claimedAddressMask;
-  value.standardSpeedAddressMask = _standardSpeedAddressMask;
   value.resetEstablishedHighSpeed = _resetEstablishedHighSpeed;
   value.writeHighUntilUs = _writeHighUntilUs;
   value.previousTransfer = _previousTransfer;

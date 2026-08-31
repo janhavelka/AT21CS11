@@ -37,10 +37,13 @@ A page write consists of one bounded frame followed by the Bus-owned fixed
 needs predictable scheduling should prefer `Driver::writeEepromPage()` over a
 multi-page write and schedule other work after the call returns.
 
-In AT21CS01 Standard Speed, the ESP32 Backend keeps interrupts masked across a
-write frame so an inter-byte idle gap cannot commit a partial page. A maximum
-8-byte page frame masks interrupts for about 5.8 ms. High-Speed operation has
-substantially lower interrupt latency.
+In AT21CS01 Standard Speed, the ESP32 Backend keeps each uninterrupted
+protocol segment interrupt-masked. This prevents an inter-byte idle gap from
+aborting or reinterpreting a read or command, or from committing a partial
+page write. A repeated Start begins a new segment after its required released-
+high interval. The longest segment, a maximum 8-byte page-write frame, masks
+interrupts for about 5.8 ms. High-Speed operation has substantially lower
+interrupt latency.
 
 ## Object ownership
 

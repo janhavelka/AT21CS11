@@ -314,7 +314,6 @@ TransferResult Esp32Transport::_transfer(
     return failure(TransportCode::TIMEOUT, TransferPhase::START,
                    DEADLINE_DETAIL);
   }
-  const bool highSpeed = transfer.speed == SpeedMode::HIGH_SPEED;
   TransferResult result{};
   result.code = TransportCode::OK;
   SegmentClock clock{};
@@ -345,14 +344,6 @@ TransferResult Esp32Transport::_transfer(
       return false;
     }
     return true;
-  };
-  const auto finishStandardByte = [&]() AT21CS_ESP32_IRAM_ATTR {
-    // An interrupt-sized idle gap after a write-data ACK is a Stop and can
-    // commit a partial page. Keep every payload frame continuous; reads and
-    // address-only commands may still release interrupts between bytes.
-    if (!highSpeed && transfer.txLength == 0u) {
-      closeTiming();
-    }
   };
   const auto setFailure = [&](TransportCode code,
                               TransferPhase phase,
@@ -393,7 +384,6 @@ TransferResult Esp32Transport::_transfer(
     }
 
     const ReadBitResult ackBit = _readAck(timing, clock);
-    finishStandardByte();
     if (!ackBit.sampled) {
       closeTiming();
       setFailure(TransportCode::TIMEOUT, phase, DEADLINE_DETAIL,
@@ -501,7 +491,6 @@ TransferResult Esp32Transport::_transfer(
                  DEADLINE_DETAIL, false);
       break;
     }
-    finishStandardByte();
   }
 
   closeTiming();

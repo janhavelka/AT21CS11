@@ -27,8 +27,6 @@ struct BusSnapshot {
   uint64_t bindingEpoch = 0;
   uint64_t generation = 0;
   uint8_t claimedAddressMask = 0;
-  /// Zero or the sole address reserved for Standard-Speed operation.
-  uint8_t standardSpeedAddressMask = 0;
   bool resetEstablishedHighSpeed = false;
   /// 0 is inactive; UINT64_MAX is permanent post-write poison; all other
   /// values are finite deadlines.

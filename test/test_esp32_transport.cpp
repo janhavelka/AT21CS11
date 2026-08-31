@@ -694,6 +694,50 @@ void test_esp32_random_read_restarts_and_host_ack_policy_are_exact() {
   TEST_ASSERT_EQUAL_UINT32(
       42240, TestAccess::lineEventCycle(transport, lowIndices[18]) -
                  TestAccess::lineEventCycle(transport, lowIndices[17]));
+
+  const uint8_t standardExpected[8] = {0x00, 0xFF, 0xA5, 0x5A,
+                                        0x81, 0x7E, 0x18, 0xE7};
+  uint8_t standardOutput[8] = {};
+  transfer.speed = SpeedMode::STANDARD_SPEED;
+  transfer.rxData = standardOutput;
+  transfer.rxLength = sizeof(standardOutput);
+  transfer.minimumPostTransferHighUs = 650;
+
+  Esp32Transport standardTransport;
+  TestAccess::activateWithoutHardware(standardTransport, -1);
+  queueLevel(standardTransport, true);
+  queueLevel(standardTransport, false);
+  queueLevel(standardTransport, false);
+  queueLevel(standardTransport, true);
+  queueLevel(standardTransport, false);
+  for (uint8_t value : standardExpected) {
+    for (int bit = 7; bit >= 0; --bit) {
+      queueLevel(standardTransport,
+                 ((static_cast<uint32_t>(value) >>
+                   static_cast<uint32_t>(bit)) &
+                  0x01u) != 0u);
+    }
+  }
+  queueLevel(standardTransport, true);
+
+  const TransferResult standardResult =
+      TestAccess::transfer(standardTransport, transfer, 24000);
+  assertCodePhase(standardResult, TransportCode::OK,
+                  TransferPhase::STOP);
+  TEST_ASSERT_TRUE(standardResult.firstDeviceAddressAcked);
+  TEST_ASSERT_TRUE(standardResult.memoryAddressAcked);
+  TEST_ASSERT_TRUE(standardResult.repeatedDeviceAddressAcked);
+  TEST_ASSERT_EQUAL_UINT32(sizeof(standardOutput),
+                           standardResult.dataBytesTransferred);
+  TEST_ASSERT_TRUE(standardResult.stopCompleted);
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(standardExpected, standardOutput,
+                                sizeof(standardExpected));
+  TEST_ASSERT_EQUAL_UINT16(
+      2, TestAccess::criticalEnterCount(standardTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      2, TestAccess::criticalExitCount(standardTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      0, TestAccess::criticalDepth(standardTransport));
 }
 
 void test_esp32_maximum_frames_are_bounded_and_complete() {
@@ -782,6 +826,8 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
 
   SingleWireTransfer standardTransfer = addressOnly(
       SpeedMode::STANDARD_SPEED);
+  standardTransfer.hasMemoryAddress = true;
+  standardTransfer.memoryAddress = 0x20;
   standardTransfer.txData = writeData;
   standardTransfer.txLength = sizeof(writeData);
   standardTransfer.minimumPostTransferHighUs = 650;
@@ -789,6 +835,7 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
   Esp32Transport standardTransport;
   TestAccess::activateWithoutHardware(standardTransport, -1);
   queueLevel(standardTransport, true);
+  queueLevel(standardTransport, false);
   queueLevel(standardTransport, false);
   for (size_t index = 0; index < sizeof(writeData); ++index) {
     queueLevel(standardTransport, false);
@@ -821,12 +868,15 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
   Esp32Transport standardNackTransport;
   TestAccess::activateWithoutHardware(standardNackTransport, -1);
   queueLevel(standardNackTransport, true);
+  queueLevel(standardNackTransport, false);
   queueLevel(standardNackTransport, true);
   queueLevel(standardNackTransport, true);
   const TransferResult standardNack =
       TestAccess::transfer(standardNackTransport, standardTransfer, 9000);
   assertCodePhase(standardNack, TransportCode::NACK,
-                  TransferPhase::DEVICE_ADDRESS_WRITE);
+                  TransferPhase::MEMORY_ADDRESS);
+  TEST_ASSERT_TRUE(standardNack.firstDeviceAddressAcked);
+  TEST_ASSERT_FALSE(standardNack.memoryAddressAcked);
   TEST_ASSERT_EQUAL_UINT16(
       1, TestAccess::criticalEnterCount(standardNackTransport));
   TEST_ASSERT_EQUAL_UINT16(
@@ -838,8 +888,9 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
   TestAccess::activateWithoutHardware(standardTimeoutTransport, -1);
   queueLevel(standardTimeoutTransport, true);
   queueLevel(standardTimeoutTransport, false);
+  queueLevel(standardTimeoutTransport, false);
   const TransferResult standardTimeout =
-      TestAccess::transfer(standardTimeoutTransport, standardTransfer, 1500);
+      TestAccess::transfer(standardTimeoutTransport, standardTransfer, 2300);
   assertCodePhase(standardTimeout, TransportCode::TIMEOUT,
                   TransferPhase::DATA_WRITE);
   TEST_ASSERT_EQUAL_UINT16(
@@ -890,9 +941,9 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
   TEST_ASSERT_EQUAL_UINT16(
       0, TestAccess::timingLockDepth(standardReadTransport));
   TEST_ASSERT_EQUAL_UINT16(
-      9, TestAccess::criticalEnterCount(standardReadTransport));
+      1, TestAccess::criticalEnterCount(standardReadTransport));
   TEST_ASSERT_EQUAL_UINT16(
-      9, TestAccess::criticalExitCount(standardReadTransport));
+      1, TestAccess::criticalExitCount(standardReadTransport));
   TEST_ASSERT_EQUAL_UINT16(
       0, TestAccess::criticalDepth(standardReadTransport));
 }

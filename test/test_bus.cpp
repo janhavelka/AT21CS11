@@ -182,8 +182,6 @@ void assertBusSnapshotEqual(const BusSnapshot& expected,
   TEST_ASSERT_EQUAL_UINT64(expected.generation, actual.generation);
   TEST_ASSERT_EQUAL_UINT8(expected.claimedAddressMask,
                           actual.claimedAddressMask);
-  TEST_ASSERT_EQUAL_UINT8(expected.standardSpeedAddressMask,
-                          actual.standardSpeedAddressMask);
   TEST_ASSERT_EQUAL(expected.resetEstablishedHighSpeed,
                     actual.resetEstablishedHighSpeed);
   TEST_ASSERT_EQUAL_UINT64(expected.writeHighUntilUs,
@@ -305,7 +303,6 @@ void test_public_defaults_are_deterministic() {
   TEST_ASSERT_EQUAL_UINT64(0, bus.bindingEpoch);
   TEST_ASSERT_EQUAL_UINT64(0, bus.generation);
   TEST_ASSERT_EQUAL_UINT8(0, bus.claimedAddressMask);
-  TEST_ASSERT_EQUAL_UINT8(0, bus.standardSpeedAddressMask);
   TEST_ASSERT_FALSE(bus.resetEstablishedHighSpeed);
   TEST_ASSERT_EQUAL_UINT64(0, bus.writeHighUntilUs);
   assertTransferEqual(TransferResult{}, bus.previousTransfer);

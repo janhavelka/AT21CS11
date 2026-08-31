@@ -33,11 +33,12 @@ matrix coverage. Cached getters are covered by
 | Complete validation before I/O, including `SIZE_MAX` | EEPROM/Security boundary matrices; `test_read_boundaries_validate_complete_size_t_ranges`; `test_write_validation_is_complete_transactional_and_callback_free` |
 | Whole-frame callback and exact protocol phases | `test_one_callback_owns_complete_frame`; `test_transport_errors_remain_distinct`; public NACK matrices |
 | MSb-first timing, final host NACK and Reset/Discovery | `test_esp32_high_speed_frame_is_msb_first_and_samples_ack_absolutely`; `test_esp32_standard_frame_and_every_address_nack_phase_are_exact`; `test_esp32_reset_discovery_has_one_exact_request_and_release_check` |
+| Uninterrupted Standard-Speed protocol segments | `test_esp32_random_read_restarts_and_host_ack_policy_are_exact`; `test_esp32_maximum_frames_are_bounded_and_complete` |
 | Checked deadlines and stalled clocks | `test_checked_deadline_boundaries_are_exact`; `test_post_acceptance_hold_addition_handles_below_at_and_above_max`; `test_esp32_transfer_validation_and_wait_guards_are_bounded` |
 | Bus-wide released-high write hold | `test_write_hold_trace_has_no_intervening_frame_events`; `test_retained_hold_blocks_a_second_driver_before_its_frame` |
 | Conservative mutation evidence/no replay | `test_every_uncertain_data_ack_is_held_reported_and_never_replayed`; Security/ROM/Freeze ambiguity tests |
 | Address ownership and independent Buses | `test_address_claims_and_transactional_rebind`; `test_separate_buses_reuse_addresses_and_isolate_hold_and_lifecycle`; `test_esp32_instances_keep_descriptors_pins_and_line_state_independent` |
-| Shared Reset generation and lazy resynchronization | `test_reset_generation_is_shared`; `test_shared_reset_resynchronizes_each_device_without_cross_health`; `test_ambiguous_standard_transition_retains_exclusivity_until_reset` |
+| Shared Reset generation and resynchronization | `test_reset_generation_is_shared`; `test_shared_reset_resynchronizes_each_device_without_cross_health`; `test_ambiguous_standard_transition_retains_exclusivity_until_reset` |
 | State admission and saturating health | table-driven lifecycle/state tests; `test_health_saturates_and_last_error_persists_across_success` |
 | No v1/dead public surface | `test_v1_surface_is_absent`; static production-placeholder checker |
 | Example parser, hot-plug policy and fairness | `test_example_cli.cpp`; `test_example_policy.cpp`; `tools/check_cli_contract.py` |

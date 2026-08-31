@@ -8,8 +8,9 @@ All notable changes to this project are documented here.
 
 - Made AT21CS01 Standard Speed exclusive to one physical-wire Bus claim so
   mixed-speed multi-drop operation is rejected before device traffic.
-- Kept Standard-Speed write payloads in one interrupt-masked frame to prevent
-  an inter-byte idle gap from committing a partial page.
+- Kept each Standard-Speed protocol segment uninterrupted so an inter-byte
+  idle gap cannot abort or reinterpret a read or command, or commit a partial
+  page write.
 - Added a 24 ms Standard-Speed transfer deadline while retaining the 9 ms
   High-Speed and presence deadlines.
 - Corrected the chip reference's `t_RD` and `t_MRS` rise-time relations and

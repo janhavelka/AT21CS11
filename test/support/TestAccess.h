@@ -38,6 +38,10 @@ class TestAccess {
     bus._generation = value;
   }
 
+  static uint8_t standardSpeedAddressMask(const Bus& bus) {
+    return bus._standardSpeedAddressMask;
+  }
+
   static bool hasCurrentBusBinding(const Driver& driver) {
     return driver._hasCurrentBusBinding();
   }

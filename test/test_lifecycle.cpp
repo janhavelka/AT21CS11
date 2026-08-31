@@ -636,17 +636,17 @@ void test_standard_speed_claims_are_exclusive_and_transactional() {
   Driver highSecond;
   TEST_ASSERT_TRUE(standardFirst.bind(bus, standardConfig).ok());
   TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().claimedAddressMask);
-  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x01u, TestAccess::standardSpeedAddressMask(bus));
   assertStatus(Err::INVALID_CONFIG, highSecond.bind(bus, highConfig));
   TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().claimedAddressMask);
-  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x01u, TestAccess::standardSpeedAddressMask(bus));
   standardFirst.end();
 
   TEST_ASSERT_TRUE(highSecond.bind(bus, highConfig).ok());
   assertStatus(Err::INVALID_CONFIG,
                standardFirst.bind(bus, standardConfig));
   TEST_ASSERT_EQUAL_HEX8(0x02u, bus.snapshot().claimedAddressMask);
-  TEST_ASSERT_EQUAL_HEX8(0x00u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x00u, TestAccess::standardSpeedAddressMask(bus));
   highSecond.end();
 
   Driver sole;
@@ -656,14 +656,14 @@ void test_standard_speed_claims_are_exclusive_and_transactional() {
   TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
       addressOnlyOk(), expectedSpeedChange(expected::STANDARD_SPEED_OPCODE))));
   TEST_ASSERT_TRUE(sole.setSpeedMode(SpeedMode::STANDARD_SPEED).ok());
-  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x01u, TestAccess::standardSpeedAddressMask(bus));
   assertStatus(Err::INVALID_CONFIG, highSecond.bind(bus, highConfig));
 
   TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
       addressOnlyOk(), expectedSpeedChange(expected::HIGH_SPEED_OPCODE, 0u,
                                            SpeedMode::STANDARD_SPEED))));
   TEST_ASSERT_TRUE(sole.setSpeedMode(SpeedMode::HIGH_SPEED).ok());
-  TEST_ASSERT_EQUAL_HEX8(0x00u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x00u, TestAccess::standardSpeedAddressMask(bus));
   TEST_ASSERT_TRUE(highSecond.bind(bus, highConfig).ok());
   const SettingsSnapshot beforeRebind = sole.snapshot();
   assertStatus(Err::INVALID_CONFIG, sole.bind(bus, standardConfig));
@@ -674,7 +674,7 @@ void test_standard_speed_claims_are_exclusive_and_transactional() {
       static_cast<uint8_t>(beforeRebind.configuredSpeed),
       static_cast<uint8_t>(sole.snapshot().configuredSpeed));
   TEST_ASSERT_EQUAL_HEX8(0x03u, bus.snapshot().claimedAddressMask);
-  TEST_ASSERT_EQUAL_HEX8(0x00u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x00u, TestAccess::standardSpeedAddressMask(bus));
   const SettingsSnapshot beforeConflict = sole.snapshot();
   const size_t eventsBeforeConflict = fake.eventCount;
   assertStatus(Err::UNSUPPORTED_COMMAND,
@@ -748,7 +748,7 @@ void test_ambiguous_standard_transition_retains_exclusivity_until_reset() {
   assertStatus(Err::IO_ERROR,
                driver.setSpeedMode(SpeedMode::STANDARD_SPEED));
   TEST_ASSERT_FALSE(driver.isSpeedKnown());
-  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x01u, TestAccess::standardSpeedAddressMask(bus));
 
   Driver second;
   Config secondConfig = config;
@@ -756,7 +756,7 @@ void test_ambiguous_standard_transition_retains_exclusivity_until_reset() {
   assertStatus(Err::INVALID_CONFIG, second.bind(bus, secondConfig));
   queueInitialize(fake, CS01_ID);
   TEST_ASSERT_TRUE(driver.recover().ok());
-  TEST_ASSERT_EQUAL_HEX8(0x00u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x00u, TestAccess::standardSpeedAddressMask(bus));
   TEST_ASSERT_TRUE(second.bind(bus, secondConfig).ok());
   assertOracleClean(fake);
 }
