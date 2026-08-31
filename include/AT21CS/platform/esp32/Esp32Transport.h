@@ -197,6 +197,9 @@ class Esp32Transport {
   mutable uint16_t _testTimingLockDepth = 0;
   mutable uint16_t _testTimingLockAcquireCount = 0;
   mutable uint16_t _testTimingLockReleaseCount = 0;
+  mutable uint16_t _testCriticalDepth = 0;
+  mutable uint16_t _testCriticalEnterCount = 0;
+  mutable uint16_t _testCriticalExitCount = 0;
   mutable bool _testOverflow = false;
 #endif
 };

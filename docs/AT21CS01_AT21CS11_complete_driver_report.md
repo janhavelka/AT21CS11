@@ -135,8 +135,8 @@ Think of these as persistent "register-like" states:
 | Start/Stop high time | t_HTSS | min **600** | min **150** | us |
 | SI/O low time for logic 0 | t_LOW0 | **24-64** | **6-16** | us |
 | SI/O low time for logic 1 | t_LOW1 | **4-8** | **1-2** | us |
-| Master low time during read (strobe) | t_RD | **4-8** | **1-2** | us |
-| Master read strobe time (sample window relation) | t_MRS | t_RD + 8 (+t_PUP) | t_RD + 2 (+t_PUP) | us |
+| Master low time during read (strobe) | t_RD | **4 to (8 - t_PUP)** | **1 to (2 - t_PUP)** | us |
+| Master read strobe time (sample window relation) | t_MRS | **t_RD + t_PUP to 8** | **t_RD + t_PUP to 2** | us |
 | Data output hold time for logic 0 | t_HLD0 | **8-24** | **2-6** | us |
 | Slave recovery time | t_RCV | min **8** | min **2** | us |
 | Noise filtering capability | t_NOISE | min **0.5** | -- | us |

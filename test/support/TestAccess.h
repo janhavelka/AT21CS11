@@ -81,6 +81,9 @@ class TestAccess {
     transport._testTimingLockDepth = 0;
     transport._testTimingLockAcquireCount = 0;
     transport._testTimingLockReleaseCount = 0;
+    transport._testCriticalDepth = 0;
+    transport._testCriticalEnterCount = 0;
+    transport._testCriticalExitCount = 0;
     transport._testOverflow = false;
     transport._initialized = true;
   }
@@ -147,6 +150,18 @@ class TestAccess {
   static uint16_t timingLockReleaseCount(
       const Esp32Transport& transport) {
     return transport._testTimingLockReleaseCount;
+  }
+
+  static uint16_t criticalDepth(const Esp32Transport& transport) {
+    return transport._testCriticalDepth;
+  }
+
+  static uint16_t criticalEnterCount(const Esp32Transport& transport) {
+    return transport._testCriticalEnterCount;
+  }
+
+  static uint16_t criticalExitCount(const Esp32Transport& transport) {
+    return transport._testCriticalExitCount;
   }
 
   static bool queueLineLevel(Esp32Transport& transport, bool high) {

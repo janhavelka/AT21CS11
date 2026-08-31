@@ -347,7 +347,10 @@ TransferResult Esp32Transport::_transfer(
     return true;
   };
   const auto finishStandardByte = [&]() AT21CS_ESP32_IRAM_ATTR {
-    if (!highSpeed) {
+    // An interrupt-sized idle gap after a write-data ACK is a Stop and can
+    // commit a partial page. Keep every payload frame continuous; reads and
+    // address-only commands may still release interrupts between bytes.
+    if (!highSpeed && transfer.txLength == 0u) {
       closeTiming();
     }
   };
@@ -870,6 +873,8 @@ void Esp32Transport::_enterCritical() {
   portENTER_CRITICAL(&_timingMux);
 #elif defined(AT21CS_TESTING)
   ++_timingMux;
+  ++_testCriticalDepth;
+  ++_testCriticalEnterCount;
 #endif
 }
 
@@ -878,6 +883,12 @@ void Esp32Transport::_exitCritical() {
   portEXIT_CRITICAL(&_timingMux);
 #elif defined(AT21CS_TESTING)
   ++_timingMux;
+  if (_testCriticalDepth == 0u) {
+    _testOverflow = true;
+  } else {
+    --_testCriticalDepth;
+  }
+  ++_testCriticalExitCount;
 #endif
 }
 

@@ -258,12 +258,14 @@ class ScriptedTransport {
       self.transferDuringWriteHighHold = true;
       return scriptError();
     }
+    const uint64_t expectedTimeoutUs =
+        transfer.speed == SpeedMode::STANDARD_SPEED ? 24000u : 9000u;
     if (transfer.txLength > 8u || transfer.rxLength > 8u ||
         (transfer.txLength != 0u && transfer.txData == nullptr) ||
         (transfer.rxLength != 0u && transfer.rxData == nullptr) ||
         deadlineUs == std::numeric_limits<uint64_t>::max() ||
         deadlineUs < self.currentUs ||
-        deadlineUs - self.currentUs != 9000u) {
+        deadlineUs - self.currentUs != expectedTimeoutUs) {
       self.mismatch = true;
       self.mismatchFields |= 0x80000000u;
       return scriptError();

@@ -37,6 +37,11 @@ A page write consists of one bounded frame followed by the Bus-owned fixed
 needs predictable scheduling should prefer `Driver::writeEepromPage()` over a
 multi-page write and schedule other work after the call returns.
 
+In AT21CS01 Standard Speed, the ESP32 Backend keeps interrupts masked across a
+write frame so an inter-byte idle gap cannot commit a partial page. A maximum
+8-byte page frame masks interrupts for about 5.8 ms. High-Speed operation has
+substantially lower interrupt latency.
+
 ## Object ownership
 
 One physical SI/O wire has exactly one Backend and one Bus. One to eight
@@ -46,6 +51,11 @@ Drivers with unique three-bit addresses may share that Bus:
 SI/O pin -> Esp32Transport -> Bus -> Driver address 0
                                 -> Driver address 1
 ```
+
+A shared Bus is High-Speed only. AT21CS01 Standard Speed requires exactly one
+physically attached AT21CS01 and its sole Driver claim on the Bus. The Bus
+enforces exclusivity among claimed Drivers, but software cannot detect an
+attached chip for which firmware created no Driver.
 
 Two physical pins use two independent tuples and may both use address zero:
 
@@ -224,6 +234,11 @@ mutation.
 
 AT21CS11 supports High-Speed only; a Standard-Speed request fails before device
 I/O.
+
+Driver health counters record operations that provide device or lifecycle
+evidence. Validation failures and bus-silent no-ops are intentionally
+untracked; selecting an already-active speed therefore cannot clear a real
+failure or move a `DEGRADED` Driver back to `READY`.
 
 ## Permanent Security and ROM protection
 

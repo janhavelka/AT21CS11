@@ -72,8 +72,24 @@ Status Driver::bind(Bus& bus, const Config& config) {
 
   const bool keepsExistingClaim =
       _bound && _bus == &bus && _config.addressBits == config.addressBits;
-  if (!keepsExistingClaim) {
-    const Status claimStatus = bus._claimAddress(config.addressBits);
+  const bool replacesClaimOnSameBus =
+      _bound && _bus == &bus && !keepsExistingClaim;
+  const uint8_t replacedAddressMask =
+      replacesClaimOnSameBus
+          ? static_cast<uint8_t>(1u << _config.addressBits)
+          : static_cast<uint8_t>(0u);
+  if (keepsExistingClaim &&
+      config.startupSpeed == SpeedMode::STANDARD_SPEED) {
+    const Status reserveStatus = bus._reserveStandardSpeed(config.addressBits);
+    if (!reserveStatus.ok()) {
+      return Status::Error(Err::INVALID_CONFIG,
+                           static_cast<int32_t>(config.addressBits));
+    }
+  } else if (!keepsExistingClaim) {
+    const Status claimStatus = bus._claimAddress(
+        config.addressBits,
+        config.startupSpeed == SpeedMode::STANDARD_SPEED,
+        replacedAddressMask);
     if (!claimStatus.ok()) {
       return claimStatus;
     }
@@ -809,6 +825,13 @@ Status Driver::setSpeedMode(SpeedMode mode) {
   if (!_speedKnown) {
     return Status::Error(Err::INVALID_STATE);
   }
+  if (mode == SpeedMode::STANDARD_SPEED) {
+    const uint8_t ownAddress =
+        static_cast<uint8_t>(1u << _config.addressBits);
+    if (_bus->snapshot().claimedAddressMask != ownAddress) {
+      return Status::Error(Err::UNSUPPORTED_COMMAND);
+    }
+  }
   if (mode == _activeSpeed) {
     _config.startupSpeed = mode;
     return Status::Ok();
@@ -1345,6 +1368,13 @@ Status Driver::_setSpeedModeRaw(SpeedMode mode,
   if (!isKnownSpeed(mode)) {
     return Status::Error(Err::INVALID_PARAM);
   }
+  if (mode == SpeedMode::STANDARD_SPEED) {
+    const Status reserveStatus =
+        _bus->_reserveStandardSpeed(_config.addressBits);
+    if (!reserveStatus.ok()) {
+      return reserveStatus;
+    }
+  }
 
   SingleWireTransfer transfer{};
   transfer.speed = _activeSpeed;
@@ -1358,6 +1388,9 @@ Status Driver::_setSpeedModeRaw(SpeedMode mode,
   if (status.ok()) {
     _activeSpeed = mode;
     _speedKnown = true;
+    if (mode == SpeedMode::HIGH_SPEED) {
+      _bus->_releaseStandardSpeed(_config.addressBits);
+    }
     return status;
   }
 
@@ -1377,6 +1410,11 @@ Status Driver::_setSpeedModeRaw(SpeedMode mode,
       !transferResult.repeatedDeviceAddressAcked &&
       transferResult.dataBytesTransferred == 0 &&
       !transferResult.currentWriteByteMayBeAccepted;
+  if (mode == SpeedMode::STANDARD_SPEED &&
+      _config.startupSpeed != SpeedMode::STANDARD_SPEED &&
+      (definiteAddressNack || failedBeforeAddress)) {
+    _bus->_releaseStandardSpeed(_config.addressBits);
+  }
   if (!definiteAddressNack && !failedBeforeAddress) {
     _speedKnown = false;
   }

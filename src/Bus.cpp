@@ -276,6 +276,7 @@ Status Bus::end() {
 
   _transport = {};
   _bound = false;
+  _standardSpeedAddressMask = 0;
   _resetEstablishedHighSpeed = false;
   if (_bindingEpoch == std::numeric_limits<uint64_t>::max()) {
     _bindingEpochValid = false;
@@ -309,6 +310,7 @@ BusSnapshot Bus::snapshot() const {
   value.bindingEpoch = _bindingEpoch;
   value.generation = _generation;
   value.claimedAddressMask = _claimedAddressMask;
+  value.standardSpeedAddressMask = _standardSpeedAddressMask;
   value.resetEstablishedHighSpeed = _resetEstablishedHighSpeed;
   value.writeHighUntilUs = _writeHighUntilUs;
   value.previousTransfer = _previousTransfer;
@@ -337,8 +339,9 @@ Status Bus::_execute(const SingleWireTransfer& transfer, TransferResult& result)
   }
 
   const uint64_t nowUs = _transport.nowUs(_transport.user);
+  const uint32_t transferTimeoutUs = _transferTimeoutUs(transfer.speed);
   uint64_t deadlineUs = 0;
-  if (!checkedDeadlineAdd(nowUs, TRANSFER_TIMEOUT_US, deadlineUs)) {
+  if (!checkedDeadlineAdd(nowUs, transferTimeoutUs, deadlineUs)) {
     return Status::Error(Err::CLOCK_STALLED);
   }
 
@@ -373,14 +376,15 @@ Status Bus::_executeWrite(const SingleWireTransfer& transfer,
   }
 
   const uint64_t nowUs = _transport.nowUs(_transport.user);
+  const uint32_t transferTimeoutUs = _transferTimeoutUs(transfer.speed);
   uint64_t preflightEndUs = 0;
-  constexpr uint64_t REQUIRED_RANGE_US =
-      static_cast<uint64_t>(TRANSFER_TIMEOUT_US) + WRITE_HIGH_HOLD_US;
-  if (!checkedDeadlineAdd(nowUs, REQUIRED_RANGE_US, preflightEndUs)) {
+  const uint64_t requiredRangeUs =
+      static_cast<uint64_t>(transferTimeoutUs) + WRITE_HIGH_HOLD_US;
+  if (!checkedDeadlineAdd(nowUs, requiredRangeUs, preflightEndUs)) {
     return Status::Error(Err::CLOCK_STALLED);
   }
   (void)preflightEndUs;
-  const uint64_t deadlineUs = nowUs + TRANSFER_TIMEOUT_US;
+  const uint64_t deadlineUs = nowUs + transferTimeoutUs;
 
   result.frame = _transport.transfer(transfer, deadlineUs, _transport.user);
   _previousTransfer = _lastTransfer;
@@ -455,6 +459,7 @@ Status Bus::_resetAndDiscover(bool& present, TransferResult& result) {
     present = false;
     return status;
   }
+  _standardSpeedAddressMask = 0;
   if (!present) {
     return Status::Error(Err::NOT_PRESENT);
   }
@@ -508,7 +513,7 @@ Status Bus::_readPresence(bool& present, TransferResult& result) {
 
   const uint64_t nowUs = _transport.nowUs(_transport.user);
   uint64_t deadlineUs = 0;
-  if (!checkedDeadlineAdd(nowUs, TRANSFER_TIMEOUT_US, deadlineUs)) {
+  if (!checkedDeadlineAdd(nowUs, PRESENCE_TIMEOUT_US, deadlineUs)) {
     return Status::Error(Err::CLOCK_STALLED);
   }
   result = _transport.readPresence(present, deadlineUs, _transport.user);
@@ -525,19 +530,66 @@ Status Bus::_readPresence(bool& present, TransferResult& result) {
   return status;
 }
 
-Status Bus::_claimAddress(uint8_t addressBits) {
+Status Bus::_claimAddress(uint8_t addressBits,
+                          bool standardSpeed,
+                          uint8_t replacedAddressMask) {
   if (addressBits > 7u) {
     return Status::Error(Err::INVALID_PARAM, static_cast<int32_t>(addressBits));
   }
   if (!_bound || !_bindingEpochValid) {
     return Status::Error(Err::NOT_BOUND);
   }
+  if (replacedAddressMask != 0u &&
+      ((replacedAddressMask &
+        static_cast<uint8_t>(replacedAddressMask - 1u)) != 0u ||
+       (_claimedAddressMask & replacedAddressMask) == 0u)) {
+    return Status::Error(Err::INVALID_STATE);
+  }
+
   const uint8_t bit = static_cast<uint8_t>(1u << addressBits);
-  if ((_claimedAddressMask & bit) != 0u) {
+  if ((bit & replacedAddressMask) == 0u &&
+      (_claimedAddressMask & bit) != 0u) {
     return Status::Error(Err::INVALID_CONFIG, static_cast<int32_t>(addressBits));
   }
+
+  const uint8_t retainedClaims = static_cast<uint8_t>(
+      _claimedAddressMask & static_cast<uint8_t>(~replacedAddressMask));
+  const uint8_t retainedStandard = static_cast<uint8_t>(
+      _standardSpeedAddressMask & static_cast<uint8_t>(~replacedAddressMask));
+  if ((standardSpeed && retainedClaims != 0u) ||
+      (!standardSpeed && retainedStandard != 0u)) {
+    return Status::Error(Err::INVALID_CONFIG, static_cast<int32_t>(addressBits));
+  }
+
   _claimedAddressMask = static_cast<uint8_t>(_claimedAddressMask | bit);
+  if (standardSpeed) {
+    _standardSpeedAddressMask =
+        static_cast<uint8_t>(_standardSpeedAddressMask | bit);
+  }
   return Status::Ok();
+}
+
+Status Bus::_reserveStandardSpeed(uint8_t addressBits) {
+  if (addressBits > 7u) {
+    return Status::Error(Err::INVALID_PARAM, static_cast<int32_t>(addressBits));
+  }
+  const uint8_t bit = static_cast<uint8_t>(1u << addressBits);
+  if ((_claimedAddressMask & bit) == 0u) {
+    return Status::Error(Err::INVALID_STATE);
+  }
+  if (_claimedAddressMask != bit) {
+    return Status::Error(Err::UNSUPPORTED_COMMAND);
+  }
+  _standardSpeedAddressMask = bit;
+  return Status::Ok();
+}
+
+void Bus::_releaseStandardSpeed(uint8_t addressBits) {
+  if (addressBits <= 7u) {
+    const uint8_t bit = static_cast<uint8_t>(1u << addressBits);
+    _standardSpeedAddressMask = static_cast<uint8_t>(
+        _standardSpeedAddressMask & static_cast<uint8_t>(~bit));
+  }
 }
 
 void Bus::_releaseAddress(uint8_t addressBits) {
@@ -545,6 +597,8 @@ void Bus::_releaseAddress(uint8_t addressBits) {
     const uint8_t bit = static_cast<uint8_t>(1u << addressBits);
     _claimedAddressMask = static_cast<uint8_t>(_claimedAddressMask &
                                                static_cast<uint8_t>(~bit));
+    _standardSpeedAddressMask = static_cast<uint8_t>(
+        _standardSpeedAddressMask & static_cast<uint8_t>(~bit));
   }
 }
 

@@ -728,6 +728,11 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
       1, TestAccess::timingLockReleaseCount(writeTransport));
   TEST_ASSERT_EQUAL_UINT16(0,
                            TestAccess::timingLockDepth(writeTransport));
+  TEST_ASSERT_EQUAL_UINT16(1,
+                           TestAccess::criticalEnterCount(writeTransport));
+  TEST_ASSERT_EQUAL_UINT16(1,
+                           TestAccess::criticalExitCount(writeTransport));
+  TEST_ASSERT_EQUAL_UINT16(0, TestAccess::criticalDepth(writeTransport));
 
   uint8_t readData[8]{};
   const uint8_t expected[8] = {0x00, 0xFF, 0xA5, 0x5A,
@@ -769,6 +774,11 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
       1, TestAccess::timingLockReleaseCount(readTransport));
   TEST_ASSERT_EQUAL_UINT16(0,
                            TestAccess::timingLockDepth(readTransport));
+  TEST_ASSERT_EQUAL_UINT16(1,
+                           TestAccess::criticalEnterCount(readTransport));
+  TEST_ASSERT_EQUAL_UINT16(1,
+                           TestAccess::criticalExitCount(readTransport));
+  TEST_ASSERT_EQUAL_UINT16(0, TestAccess::criticalDepth(readTransport));
 
   SingleWireTransfer standardTransfer = addressOnly(
       SpeedMode::STANDARD_SPEED);
@@ -801,6 +811,43 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
       1, TestAccess::timingLockReleaseCount(standardTransport));
   TEST_ASSERT_EQUAL_UINT16(0,
                            TestAccess::timingLockDepth(standardTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      1, TestAccess::criticalEnterCount(standardTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      1, TestAccess::criticalExitCount(standardTransport));
+  TEST_ASSERT_EQUAL_UINT16(0,
+                           TestAccess::criticalDepth(standardTransport));
+
+  Esp32Transport standardNackTransport;
+  TestAccess::activateWithoutHardware(standardNackTransport, -1);
+  queueLevel(standardNackTransport, true);
+  queueLevel(standardNackTransport, true);
+  queueLevel(standardNackTransport, true);
+  const TransferResult standardNack =
+      TestAccess::transfer(standardNackTransport, standardTransfer, 9000);
+  assertCodePhase(standardNack, TransportCode::NACK,
+                  TransferPhase::DEVICE_ADDRESS_WRITE);
+  TEST_ASSERT_EQUAL_UINT16(
+      1, TestAccess::criticalEnterCount(standardNackTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      1, TestAccess::criticalExitCount(standardNackTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      0, TestAccess::criticalDepth(standardNackTransport));
+
+  Esp32Transport standardTimeoutTransport;
+  TestAccess::activateWithoutHardware(standardTimeoutTransport, -1);
+  queueLevel(standardTimeoutTransport, true);
+  queueLevel(standardTimeoutTransport, false);
+  const TransferResult standardTimeout =
+      TestAccess::transfer(standardTimeoutTransport, standardTransfer, 1500);
+  assertCodePhase(standardTimeout, TransportCode::TIMEOUT,
+                  TransferPhase::DATA_WRITE);
+  TEST_ASSERT_EQUAL_UINT16(
+      1, TestAccess::criticalEnterCount(standardTimeoutTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      1, TestAccess::criticalExitCount(standardTimeoutTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      0, TestAccess::criticalDepth(standardTimeoutTransport));
 
   uint8_t standardReadData[8]{};
   SingleWireTransfer standardRead{};
@@ -842,6 +889,12 @@ void test_esp32_maximum_frames_are_bounded_and_complete() {
       1, TestAccess::timingLockReleaseCount(standardReadTransport));
   TEST_ASSERT_EQUAL_UINT16(
       0, TestAccess::timingLockDepth(standardReadTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      9, TestAccess::criticalEnterCount(standardReadTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      9, TestAccess::criticalExitCount(standardReadTransport));
+  TEST_ASSERT_EQUAL_UINT16(
+      0, TestAccess::criticalDepth(standardReadTransport));
 }
 
 void test_esp32_instances_keep_descriptors_pins_and_line_state_independent() {

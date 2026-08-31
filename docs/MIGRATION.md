@@ -90,4 +90,5 @@ scratch storage and leave the caller buffer unchanged if any frame fails.
 
 The shipped adapter supports Arduino on ESP32-S2/S3 using the pinned PioArduino
 platform. Core headers remain framework-neutral; no other adapter is currently
-implemented, packaged or qualified.
+implemented, packaged or qualified. See the [README](../README.md) for the full
+current integration and ownership contract.

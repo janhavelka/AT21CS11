@@ -288,7 +288,11 @@ def validate_package_links(package: Path, members: set[str]) -> None:
             resolved = posixpath.normpath(
                 (relative_doc.parent / target).as_posix()
             )
-            if resolved.startswith("..") or resolved not in members:
+            if (
+                resolved == ".."
+                or resolved.startswith("../")
+                or resolved not in members
+            ):
                 raise CheckFailure(f"broken package link in {relative_doc}: {target}")
 
 

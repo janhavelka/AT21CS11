@@ -182,6 +182,8 @@ void assertBusSnapshotEqual(const BusSnapshot& expected,
   TEST_ASSERT_EQUAL_UINT64(expected.generation, actual.generation);
   TEST_ASSERT_EQUAL_UINT8(expected.claimedAddressMask,
                           actual.claimedAddressMask);
+  TEST_ASSERT_EQUAL_UINT8(expected.standardSpeedAddressMask,
+                          actual.standardSpeedAddressMask);
   TEST_ASSERT_EQUAL(expected.resetEstablishedHighSpeed,
                     actual.resetEstablishedHighSpeed);
   TEST_ASSERT_EQUAL_UINT64(expected.writeHighUntilUs,
@@ -303,6 +305,7 @@ void test_public_defaults_are_deterministic() {
   TEST_ASSERT_EQUAL_UINT64(0, bus.bindingEpoch);
   TEST_ASSERT_EQUAL_UINT64(0, bus.generation);
   TEST_ASSERT_EQUAL_UINT8(0, bus.claimedAddressMask);
+  TEST_ASSERT_EQUAL_UINT8(0, bus.standardSpeedAddressMask);
   TEST_ASSERT_FALSE(bus.resetEstablishedHighSpeed);
   TEST_ASSERT_EQUAL_UINT64(0, bus.writeHighUntilUs);
   assertTransferEqual(TransferResult{}, bus.previousTransfer);
@@ -1070,6 +1073,35 @@ void test_checked_deadline_boundaries_are_exact() {
     }
   }
   {
+    const uint64_t nowValues[] = {MAX - 24001u, MAX - 24000u,
+                                  MAX - 23999u};
+    const bool expectCallback[] = {true, false, false};
+    for (size_t index = 0; index < 3u; ++index) {
+      ScriptedTransport fake;
+      Bus bus;
+      bindBus(bus, fake);
+      TEST_ASSERT_TRUE(fake.queueNow(nowValues[index]));
+      SingleWireTransfer transfer = addressOnly();
+      transfer.speed = SpeedMode::STANDARD_SPEED;
+      transfer.minimumPostTransferHighUs = 650u;
+      if (expectCallback[index]) {
+        TransferScript script{};
+        script.expected = expected::withDeadline(
+            expected::addressOnly(0xA0u, SpeedMode::STANDARD_SPEED, 650u),
+            nowValues[index] + 24000u);
+        script.result = okFrame(transfer);
+        TEST_ASSERT_TRUE(fake.queueTransfer(script));
+      }
+      TransferResult result{};
+      const Status status = TestAccess::execute(bus, transfer, result);
+      assertErr(expectCallback[index] ? Err::OK : Err::CLOCK_STALLED,
+                status);
+      TEST_ASSERT_EQUAL_UINT32(expectCallback[index] ? 1u : 0u,
+                               fake.transferCalls);
+      TEST_ASSERT_FALSE(fake.mismatch);
+    }
+  }
+  {
     const uint64_t nowValues[] = {MAX - 5001u, MAX - 5000u,
                                   MAX - 4999u};
     const bool expectCallback[] = {true, false, false};
@@ -1116,6 +1148,45 @@ void test_checked_deadline_boundaries_are_exact() {
             expected::pageWrite(0xA0u, 0x20u, &value, 1u,
                                 SpeedMode::HIGH_SPEED, 160u),
             nowValues[index] + 9000u);
+        script.result = okFrame(transfer);
+        TEST_ASSERT_TRUE(fake.queueTransfer(script));
+        WaitScript wait{};
+        wait.result = okAux(TransferPhase::WAIT_HIGH);
+        wait.advanceToDeadline = true;
+        wait.verifyDeadline = true;
+        wait.expectedDeadlineUs = nowValues[index] + 10000u;
+        TEST_ASSERT_TRUE(fake.queueWait(wait));
+      }
+      WriteCycleResult result{};
+      const Status status =
+          TestAccess::executeWrite(bus, transfer, result);
+      assertErr(expectCallback[index] ? Err::OK : Err::CLOCK_STALLED,
+                status);
+      TEST_ASSERT_EQUAL_UINT32(expectCallback[index] ? 1u : 0u,
+                               fake.transferCalls);
+      TEST_ASSERT_FALSE(fake.mismatch);
+    }
+  }
+  {
+    const uint8_t value = 0x5Au;
+    SingleWireTransfer transfer = writeFrame(&value);
+    transfer.speed = SpeedMode::STANDARD_SPEED;
+    transfer.minimumPostTransferHighUs = 650u;
+    const uint64_t nowValues[] = {MAX - 34001u, MAX - 34000u,
+                                  MAX - 33999u};
+    const bool expectCallback[] = {true, false, false};
+    for (size_t index = 0; index < 3u; ++index) {
+      ScriptedTransport fake;
+      Bus bus;
+      bindBus(bus, fake);
+      TEST_ASSERT_TRUE(fake.queueNow(nowValues[index]));
+      if (expectCallback[index]) {
+        TEST_ASSERT_TRUE(fake.queueNow(nowValues[index]));
+        TransferScript script{};
+        script.expected = expected::withDeadline(
+            expected::pageWrite(0xA0u, 0x20u, &value, 1u,
+                                SpeedMode::STANDARD_SPEED, 650u),
+            nowValues[index] + 24000u);
         script.result = okFrame(transfer);
         TEST_ASSERT_TRUE(fake.queueTransfer(script));
         WaitScript wait{};

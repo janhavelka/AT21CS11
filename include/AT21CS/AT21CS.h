@@ -47,6 +47,10 @@ struct MutationResult {
   bool alreadyApplied = false;
 };
 
+/// Cached device-operation health and configuration state.
+///
+/// Validation failures and bus-silent no-ops are not device-health evidence
+/// and therefore do not update the status timestamps or success/failure counts.
 struct SettingsSnapshot {
   bool bound = false;
   bool initialized = false;
@@ -167,6 +171,11 @@ class Driver {
   /// before calling. Do not automatically retry ambiguous evidence.
   Status permanentlyFreezeRomZones(MutationResult& result);
 
+  /// Selects the configured device speed.
+  ///
+  /// Standard Speed requires an AT21CS01 to be the sole Driver claim and sole
+  /// physical device on its Bus. Selecting the already-active mode is bus
+  /// silent and does not count as device-health evidence.
   Status setSpeedMode(SpeedMode mode);
 
   static uint8_t crc8Maxim(const uint8_t* data, size_t length);

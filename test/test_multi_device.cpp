@@ -121,12 +121,11 @@ void test_shared_reset_resynchronizes_each_device_without_cross_health() {
   highConfig.expectedPart = PartType::AT21CS01;
   Config standardConfig = highConfig;
   standardConfig.addressBits = 1u;
-  standardConfig.startupSpeed = SpeedMode::STANDARD_SPEED;
   initializeDriver(high, bus, fake, highConfig, CS01_ID);
   initializeDriver(standard, bus, fake, standardConfig, CS01_ID);
   const SettingsSnapshot highBefore = high.snapshot();
 
-  queueInitialize(fake, CS01_ID, true, 1u);
+  queueInitialize(fake, CS01_ID, false, 1u);
   TEST_ASSERT_TRUE(standard.recover().ok());
   TEST_ASSERT_FALSE(high.isSpeedKnown());
   TEST_ASSERT_EQUAL_UINT32(highBefore.totalSuccess,
@@ -141,7 +140,7 @@ void test_shared_reset_resynchronizes_each_device_without_cross_health() {
   TEST_ASSERT_TRUE(high.isSpeedKnown());
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SpeedMode::HIGH_SPEED),
                           static_cast<uint8_t>(high.speedMode()));
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SpeedMode::STANDARD_SPEED),
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SpeedMode::HIGH_SPEED),
                           static_cast<uint8_t>(standard.speedMode()));
   assertOracleClean(fake);
 }

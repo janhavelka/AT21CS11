@@ -620,144 +620,145 @@ void test_shared_reset_generation_resynchronizes_without_reset_loop() {
   TEST_ASSERT_TRUE(first.isSpeedKnown());
 }
 
-void test_standard_speed_is_restored_lazily_after_shared_reset() {
+void test_standard_speed_claims_are_exclusive_and_transactional() {
   ScriptedTransport fake;
   Bus bus;
   bindBus(bus, fake);
-  Driver standard;
-  Driver resetter;
+
   Config standardConfig{};
   standardConfig.expectedPart = PartType::AT21CS01;
   standardConfig.startupSpeed = SpeedMode::STANDARD_SPEED;
-  Config resetterConfig{};
-  resetterConfig.addressBits = 1;
-  resetterConfig.expectedPart = PartType::AT21CS01;
-  initializeDriver(standard, bus, fake, standardConfig, CS01_ID);
-  initializeDriver(resetter, bus, fake, resetterConfig, CS01_ID);
-  const size_t captureBefore = fake.capturedCount;
-  const size_t resetsBefore = fake.resetCalls;
+  Config highConfig{};
+  highConfig.addressBits = 1u;
+  highConfig.expectedPart = PartType::AT21CS01;
+
+  Driver standardFirst;
+  Driver highSecond;
+  TEST_ASSERT_TRUE(standardFirst.bind(bus, standardConfig).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().claimedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().standardSpeedAddressMask);
+  assertStatus(Err::INVALID_CONFIG, highSecond.bind(bus, highConfig));
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().claimedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().standardSpeedAddressMask);
+  standardFirst.end();
+
+  TEST_ASSERT_TRUE(highSecond.bind(bus, highConfig).ok());
+  assertStatus(Err::INVALID_CONFIG,
+               standardFirst.bind(bus, standardConfig));
+  TEST_ASSERT_EQUAL_HEX8(0x02u, bus.snapshot().claimedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x00u, bus.snapshot().standardSpeedAddressMask);
+  highSecond.end();
+
+  Driver sole;
+  initializeDriver(sole, bus, fake, Config{0u, 5u, PartType::AT21CS01,
+                                           SpeedMode::HIGH_SPEED},
+                   CS01_ID);
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      addressOnlyOk(), expectedSpeedChange(expected::STANDARD_SPEED_OPCODE))));
+  TEST_ASSERT_TRUE(sole.setSpeedMode(SpeedMode::STANDARD_SPEED).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().standardSpeedAddressMask);
+  assertStatus(Err::INVALID_CONFIG, highSecond.bind(bus, highConfig));
 
   TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
-      addressOnlyOk(),
-      expectedSpeedChange(expected::STANDARD_SPEED_OPCODE))));
-  const uint8_t expected = 0x7Cu;
-  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
-      randomReadOk(&expected, 1u),
-      expectedEepromRead(0u, 0u, 1u,
-                         SpeedMode::STANDARD_SPEED))));
-  uint8_t value = 0;
-  TEST_ASSERT_TRUE(standard.readEeprom(0, &value, 1).ok());
-  TEST_ASSERT_EQUAL_UINT32(resetsBefore, fake.resetCalls);
-  TEST_ASSERT_EQUAL_UINT32(captureBefore + 2u, fake.capturedCount);
-  TEST_ASSERT_EQUAL_HEX8(0xD0u, fake.captured[captureBefore].deviceAddress);
-  TEST_ASSERT_EQUAL_UINT32(650u,
-                           fake.captured[captureBefore]
-                               .minimumPostTransferHighUs);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(SpeedMode::HIGH_SPEED),
-                          static_cast<uint8_t>(fake.captured[captureBefore].speed));
+      addressOnlyOk(), expectedSpeedChange(expected::HIGH_SPEED_OPCODE, 0u,
+                                           SpeedMode::STANDARD_SPEED))));
+  TEST_ASSERT_TRUE(sole.setSpeedMode(SpeedMode::HIGH_SPEED).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x00u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_TRUE(highSecond.bind(bus, highConfig).ok());
+  const SettingsSnapshot beforeRebind = sole.snapshot();
+  assertStatus(Err::INVALID_CONFIG, sole.bind(bus, standardConfig));
+  TEST_ASSERT_TRUE(sole.isInitialized());
+  TEST_ASSERT_EQUAL_UINT8(beforeRebind.addressBits,
+                          sole.snapshot().addressBits);
   TEST_ASSERT_EQUAL_UINT8(
-      static_cast<uint8_t>(SpeedMode::STANDARD_SPEED),
-      static_cast<uint8_t>(fake.captured[captureBefore + 1u].speed));
-
-  ScriptedTransport ambiguousFake;
-  Bus ambiguousBus;
-  bindBus(ambiguousBus, ambiguousFake);
-  Driver ambiguousStandard;
-  Driver ambiguousResetter;
-  initializeDriver(ambiguousStandard, ambiguousBus, ambiguousFake,
-                   standardConfig, CS01_ID);
-  initializeDriver(ambiguousResetter, ambiguousBus, ambiguousFake,
-                   resetterConfig, CS01_ID);
-  TransferScript ambiguousRestore = transferFailure(
-      TransportCode::IO_ERROR, TransferPhase::STOP, 1201);
-  ambiguousRestore.expected = expectedSpeedChange(
-      expected::STANDARD_SPEED_OPCODE);
-  ambiguousRestore.result.firstDeviceAddressAcked = true;
-  TEST_ASSERT_TRUE(ambiguousFake.queueTransfer(ambiguousRestore));
-  uint8_t blockedValue = 0;
-  assertStatus(Err::IO_ERROR,
-               ambiguousStandard.readEeprom(0, &blockedValue, 1));
-  TEST_ASSERT_FALSE(ambiguousStandard.isSpeedKnown());
-  const size_t ambiguousTransfers = ambiguousFake.transferCalls;
-  assertStatus(Err::INVALID_STATE,
-               ambiguousStandard.readEeprom(0, &blockedValue, 1));
-  TEST_ASSERT_EQUAL_UINT32(ambiguousTransfers, ambiguousFake.transferCalls);
-
-  ScriptedTransport retryFake;
-  Bus retryBus;
-  bindBus(retryBus, retryFake);
-  Driver retryStandard;
-  Driver retryResetter;
-  initializeDriver(retryStandard, retryBus, retryFake, standardConfig,
-                   CS01_ID);
-  initializeDriver(retryResetter, retryBus, retryFake, resetterConfig,
-                   CS01_ID);
-  const size_t retryResets = retryFake.resetCalls;
-  const size_t retryTransfers = retryFake.transferCalls;
-  const uint32_t retryFailures = retryStandard.snapshot().totalFailures;
-  TransferScript restoreNack{};
-  restoreNack.expected = expectedSpeedChange(
-      expected::STANDARD_SPEED_OPCODE);
-  restoreNack.result.code = TransportCode::NACK;
-  restoreNack.result.phase = TransferPhase::DEVICE_ADDRESS_WRITE;
-  TEST_ASSERT_TRUE(retryFake.queueTransfer(restoreNack));
-  assertStatus(Err::NACK_DEVICE_ADDRESS,
-               retryStandard.readEeprom(0, &blockedValue, 1));
-  TEST_ASSERT_TRUE(retryStandard.isSpeedKnown());
-  TEST_ASSERT_EQUAL_UINT64(retryBus.generation(),
-                           retryStandard.snapshot().seenBusGeneration);
-  TEST_ASSERT_EQUAL_UINT32(retryFailures + 1u,
-                           retryStandard.snapshot().totalFailures);
-  TEST_ASSERT_EQUAL_UINT32(retryTransfers + 1u, retryFake.transferCalls);
-
-  TransferScript restoreStartFailure = transferFailure(
-      TransportCode::TIMEOUT, TransferPhase::START, 1202);
-  restoreStartFailure.expected = expectedSpeedChange(
-      expected::STANDARD_SPEED_OPCODE);
-  restoreStartFailure.result.stopCompleted = true;
-  TEST_ASSERT_TRUE(retryFake.queueTransfer(restoreStartFailure));
-  assertStatus(Err::TRANSPORT_TIMEOUT,
-               retryStandard.readEeprom(0, &blockedValue, 1));
-  TEST_ASSERT_TRUE(retryStandard.isSpeedKnown());
-  TEST_ASSERT_EQUAL_UINT32(retryTransfers + 2u, retryFake.transferCalls);
-
-  TEST_ASSERT_TRUE(retryFake.queueTransfer(withExpected(
-      addressOnlyOk(),
-      expectedSpeedChange(expected::STANDARD_SPEED_OPCODE))));
-  const uint8_t retryValue = 0x63u;
-  TEST_ASSERT_TRUE(retryFake.queueTransfer(withExpected(
-      randomReadOk(&retryValue, 1u),
-      expectedEepromRead(0u, 0u, 1u,
-                         SpeedMode::STANDARD_SPEED))));
-  TEST_ASSERT_TRUE(retryStandard.readEeprom(0, &blockedValue, 1).ok());
-  TEST_ASSERT_EQUAL_HEX8(retryValue, blockedValue);
-  TEST_ASSERT_EQUAL_UINT32(retryTransfers + 4u, retryFake.transferCalls);
-  TEST_ASSERT_EQUAL_UINT32(retryResets, retryFake.resetCalls);
+      static_cast<uint8_t>(beforeRebind.configuredSpeed),
+      static_cast<uint8_t>(sole.snapshot().configuredSpeed));
+  TEST_ASSERT_EQUAL_HEX8(0x03u, bus.snapshot().claimedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x00u, bus.snapshot().standardSpeedAddressMask);
+  const SettingsSnapshot beforeConflict = sole.snapshot();
+  const size_t eventsBeforeConflict = fake.eventCount;
+  assertStatus(Err::UNSUPPORTED_COMMAND,
+               sole.setSpeedMode(SpeedMode::STANDARD_SPEED));
+  const SettingsSnapshot afterConflict = sole.snapshot();
+  TEST_ASSERT_EQUAL_UINT32(eventsBeforeConflict, fake.eventCount);
+  TEST_ASSERT_EQUAL_UINT32(beforeConflict.totalSuccess,
+                           afterConflict.totalSuccess);
+  TEST_ASSERT_EQUAL_UINT32(beforeConflict.totalFailures,
+                           afterConflict.totalFailures);
+  TEST_ASSERT_EQUAL_UINT8(beforeConflict.consecutiveFailures,
+                          afterConflict.consecutiveFailures);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(beforeConflict.state),
+                          static_cast<uint8_t>(afterConflict.state));
+  assertOracleClean(fake);
 }
 
-void test_set_high_after_shared_reset_skips_standard_restoration() {
+void test_same_speed_noop_is_bus_silent_and_not_health_evidence() {
   ScriptedTransport fake;
   Bus bus;
   bindBus(bus, fake);
-  Driver standard;
-  Driver resetter;
-  Config standardConfig{};
-  standardConfig.expectedPart = PartType::AT21CS01;
-  standardConfig.startupSpeed = SpeedMode::STANDARD_SPEED;
-  Config resetterConfig{};
-  resetterConfig.addressBits = 1;
-  resetterConfig.expectedPart = PartType::AT21CS01;
-  initializeDriver(standard, bus, fake, standardConfig, CS01_ID);
-  initializeDriver(resetter, bus, fake, resetterConfig, CS01_ID);
-  const size_t transfersBefore = fake.transferCalls;
-  const uint32_t successesBefore = standard.snapshot().totalSuccess;
+  Driver driver;
+  Config config{};
+  config.expectedPart = PartType::AT21CS01;
+  initializeDriver(driver, bus, fake, config, CS01_ID);
 
-  TEST_ASSERT_TRUE(standard.setSpeedMode(SpeedMode::HIGH_SPEED).ok());
-  TEST_ASSERT_EQUAL_UINT32(transfersBefore, fake.transferCalls);
-  TEST_ASSERT_EQUAL_UINT32(successesBefore, standard.snapshot().totalSuccess);
+  TransferScript startFailure = transferFailure(
+      TransportCode::TIMEOUT, TransferPhase::START, 1202);
+  startFailure.expected = expectedSpeedChange(
+      expected::STANDARD_SPEED_OPCODE);
+  startFailure.result.stopCompleted = true;
+  TEST_ASSERT_TRUE(fake.queueTransfer(startFailure));
+  assertStatus(Err::TRANSPORT_TIMEOUT,
+               driver.setSpeedMode(SpeedMode::STANDARD_SPEED));
+  TEST_ASSERT_TRUE(driver.isSpeedKnown());
+  const SettingsSnapshot before = driver.snapshot();
+  const size_t eventsBefore = fake.eventCount;
+
+  TEST_ASSERT_TRUE(driver.setSpeedMode(SpeedMode::HIGH_SPEED).ok());
+  const SettingsSnapshot after = driver.snapshot();
+  TEST_ASSERT_EQUAL_UINT32(eventsBefore, fake.eventCount);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(before.state),
+                          static_cast<uint8_t>(after.state));
+  TEST_ASSERT_EQUAL_UINT8(before.consecutiveFailures,
+                          after.consecutiveFailures);
+  TEST_ASSERT_EQUAL_UINT32(before.totalSuccess, after.totalSuccess);
+  TEST_ASSERT_EQUAL_UINT32(before.totalFailures, after.totalFailures);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(before.lastStatusCode),
+                          static_cast<uint8_t>(after.lastStatusCode));
+  TEST_ASSERT_EQUAL_UINT64(before.lastOkUs, after.lastOkUs);
   TEST_ASSERT_EQUAL_UINT8(
       static_cast<uint8_t>(SpeedMode::HIGH_SPEED),
-      static_cast<uint8_t>(standard.snapshot().configuredSpeed));
+      static_cast<uint8_t>(after.configuredSpeed));
+  assertOracleClean(fake);
+}
+
+void test_ambiguous_standard_transition_retains_exclusivity_until_reset() {
+  ScriptedTransport fake;
+  Bus bus;
+  bindBus(bus, fake);
+  Driver driver;
+  Config config{};
+  config.expectedPart = PartType::AT21CS01;
+  initializeDriver(driver, bus, fake, config, CS01_ID);
+
+  TransferScript ambiguous = transferFailure(
+      TransportCode::IO_ERROR, TransferPhase::STOP, 1203);
+  ambiguous.expected = expectedSpeedChange(expected::STANDARD_SPEED_OPCODE);
+  ambiguous.result.firstDeviceAddressAcked = true;
+  TEST_ASSERT_TRUE(fake.queueTransfer(ambiguous));
+  assertStatus(Err::IO_ERROR,
+               driver.setSpeedMode(SpeedMode::STANDARD_SPEED));
+  TEST_ASSERT_FALSE(driver.isSpeedKnown());
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().standardSpeedAddressMask);
+
+  Driver second;
+  Config secondConfig = config;
+  secondConfig.addressBits = 1u;
+  assertStatus(Err::INVALID_CONFIG, second.bind(bus, secondConfig));
+  queueInitialize(fake, CS01_ID);
+  TEST_ASSERT_TRUE(driver.recover().ok());
+  TEST_ASSERT_EQUAL_HEX8(0x00u, bus.snapshot().standardSpeedAddressMask);
+  TEST_ASSERT_TRUE(second.bind(bus, secondConfig).ok());
+  assertOracleClean(fake);
 }
 
 void test_speed_failure_evidence_controls_speed_knowledge() {

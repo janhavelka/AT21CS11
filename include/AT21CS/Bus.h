@@ -27,6 +27,8 @@ struct BusSnapshot {
   uint64_t bindingEpoch = 0;
   uint64_t generation = 0;
   uint8_t claimedAddressMask = 0;
+  /// Zero or the sole address reserved for Standard-Speed operation.
+  uint8_t standardSpeedAddressMask = 0;
   bool resetEstablishedHighSpeed = false;
   /// 0 is inactive; UINT64_MAX is permanent post-write poison; all other
   /// values are finite deadlines.
@@ -67,12 +69,20 @@ class Bus {
 #endif
 
   static constexpr size_t MAX_FRAME_DATA_BYTES = 8;
-  static constexpr uint32_t TRANSFER_TIMEOUT_US = 9000;
+  static constexpr uint32_t HIGH_SPEED_TRANSFER_TIMEOUT_US = 9000;
+  static constexpr uint32_t STANDARD_SPEED_TRANSFER_TIMEOUT_US = 24000;
+  static constexpr uint32_t PRESENCE_TIMEOUT_US = 9000;
   static constexpr uint32_t RESET_TIMEOUT_US = 5000;
   static constexpr uint32_t WRITE_HIGH_HOLD_US = 10000;
   static constexpr uint32_t HIGH_SPEED_HTSS_US = 160;
   static constexpr uint32_t STANDARD_SPEED_HTSS_US = 650;
   static constexpr uint32_t SPEED_CHANGE_HOLD_US = 650;
+
+  static constexpr uint32_t _transferTimeoutUs(SpeedMode speed) {
+    return speed == SpeedMode::STANDARD_SPEED
+               ? STANDARD_SPEED_TRANSFER_TIMEOUT_US
+               : HIGH_SPEED_TRANSFER_TIMEOUT_US;
+  }
 
   Status _execute(const SingleWireTransfer& transfer, TransferResult& result);
   Status _executeWrite(const SingleWireTransfer& transfer,
@@ -80,7 +90,11 @@ class Bus {
   Status _resetAndDiscover(bool& present, TransferResult& result);
   Status _completeWriteHighHold(TransferResult& result);
   Status _readPresence(bool& present, TransferResult& result);
-  Status _claimAddress(uint8_t addressBits);
+  Status _claimAddress(uint8_t addressBits,
+                       bool standardSpeed,
+                       uint8_t replacedAddressMask);
+  Status _reserveStandardSpeed(uint8_t addressBits);
+  void _releaseStandardSpeed(uint8_t addressBits);
   void _releaseAddress(uint8_t addressBits);
   Status _mapTransferFailure(const TransferResult& result) const;
 
@@ -90,6 +104,7 @@ class Bus {
   uint64_t _bindingEpoch = 0;
   uint64_t _generation = 0;
   uint8_t _claimedAddressMask = 0;
+  uint8_t _standardSpeedAddressMask = 0;
   bool _resetEstablishedHighSpeed = false;
   uint64_t _writeHighUntilUs = 0;
   TransferResult _previousTransfer{};

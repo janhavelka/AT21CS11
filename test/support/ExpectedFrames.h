@@ -19,7 +19,9 @@ inline constexpr uint8_t LOCK_SECURITY_OPCODE = 0x02u;
 inline constexpr uint32_t HIGH_SPEED_POST_HIGH_US = 160u;
 inline constexpr uint32_t STANDARD_SPEED_POST_HIGH_US = 650u;
 inline constexpr uint32_t SPEED_CHANGE_POST_HIGH_US = 650u;
-inline constexpr uint32_t TRANSFER_TIMEOUT_US = 9000u;
+inline constexpr uint32_t HIGH_SPEED_TRANSFER_TIMEOUT_US = 9000u;
+inline constexpr uint32_t STANDARD_SPEED_TRANSFER_TIMEOUT_US = 24000u;
+inline constexpr uint32_t PRESENCE_TIMEOUT_US = 9000u;
 inline constexpr uint32_t RESET_TIMEOUT_US = 5000u;
 inline constexpr uint32_t WRITE_HIGH_HOLD_US = 10000u;
 

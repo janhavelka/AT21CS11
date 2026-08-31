@@ -27,7 +27,7 @@ DATASHEET_URL = (
 PROTECTED_REPORT = ROOT / "docs" / "AT21CS01_AT21CS11_complete_driver_report.md"
 # Canonical LF hash. Git may materialize CRLF on Windows, but the protected
 # report's text must otherwise remain byte-for-byte identical across hosts.
-PROTECTED_SHA256 = "580067D3A7C26E28518B9299399C8B20AF24C9FFB0D67831C69B99D13FF58951"
+PROTECTED_SHA256 = "274C934F7F828111A2E536E50B1D5C85D25B09158D6C9F7B6F273D1AD8C2A2A9"
 
 CONSUMER_DOCS = (
     ROOT / "README.md",
