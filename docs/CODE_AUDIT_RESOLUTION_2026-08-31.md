@@ -103,3 +103,16 @@ The final source and exported package were checked with:
 No hardware-in-the-loop run was performed. The Standard-Speed changes are
 covered by deterministic native protocol and Backend timing tests plus both
 target-family compile and IRAM checks.
+
+## 2026-09-01 Standard-Speed reservation addendum
+
+A follow-up audit found that the P1 reservation lifecycle above was incomplete
+in two cases: a same-address rebind from Standard to High Speed retained stale
+ownership, while a successful Bus Reset discarded a still-configured Standard
+owner's reservation. The mask now represents configuration entitlement only;
+Reset changes observed device speed but not entitlement. A High-Speed-configured
+Driver releases any conservative transition reservation when it observes the
+new Reset generation. Three focused lifecycle regressions cover both rebind
+directions, Reset retention, and release during Driver resynchronization. This
+addendum corrects the P1 design record without rewriting the original audit
+history.

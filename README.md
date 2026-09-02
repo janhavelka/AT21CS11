@@ -45,6 +45,33 @@ high interval. The longest segment, a maximum 8-byte page-write frame, masks
 interrupts for about 5.8 ms. High-Speed operation has substantially lower
 interrupt latency.
 
+### ESP32 pull-up and rise-time envelope
+
+The ESP32 Backend uses fixed read sample points. After it releases SI/O, the
+board must raise the line within 0.60 microseconds in High Speed or 1.00
+microsecond in Standard Speed:
+
+| Mode | Host read-low time | Sample point from falling edge | Rise-time budget |
+|---|---:|---:|---:|
+| High Speed | 1.2 microseconds | 1.8 microseconds | 0.60 microseconds |
+| Standard Speed | 6.0 microseconds | 7.0 microseconds | 1.00 microsecond |
+
+At a 3.3 V pull-up supply, a useful first-order estimate from 0.5 V to the
+0.7-V_PUP input threshold is `tPUP ~= 1.04 * R_PUP * C_BUS`. The High-Speed
+budget therefore gives these approximate maximum pull-up resistances:
+
+| Total `C_BUS` | Approximate maximum `R_PUP` for High Speed |
+|---:|---:|
+| 100 pF | 5.8 kOhm |
+| 330 pF | 1.7 kOhm |
+| 1000 pF | 0.58 kOhm |
+
+Boards near the datasheet's maximum bus capacitance or pull-up resistance need
+a stronger pull-up than the datasheet limits alone might suggest. Include
+connector, cable, device and probe capacitance, and verify the released-high
+waveform on the actual board; the datasheet's 100 pF, 1 kOhm AC-characterization
+condition is comfortably inside this Backend envelope.
+
 ## Object ownership
 
 One physical SI/O wire has exactly one Backend and one Bus. One to eight

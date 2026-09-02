@@ -20,7 +20,7 @@ evidence; the exact physical scope is recorded in
 | Identity and CRC | `test_serial_crc_product_and_diagnostics_are_independent`; `test_manufacturer_revisions_and_part_mismatch_are_exact`; `test_status_messages_and_crc_vectors_are_independent_literals` |
 | ROM-zone state/enable | `test_rom_zone_read_mappings_and_invalid_values_are_exact`; `test_rom_zone_mutation_outcomes_and_one_health_update_are_exact`; `test_rom_postcheck_mismatch_and_failure_preserve_accepted` |
 | ROM-zone Freeze | `test_freeze_observation_liveness_confirms_only_matching_part`; `test_freeze_complete_frame_and_confirmed_postcheck_are_exact`; `test_freeze_accepted_postcheck_mismatch_and_failures_stay_accepted`; `test_freeze_first_data_nack_has_no_hold_or_effect`; `test_freeze_uncertain_payload_is_held_ambiguous_and_not_replayed` |
-| Speed | `test_standard_speed_claims_are_exclusive_and_transactional`; `test_ambiguous_standard_transition_retains_exclusivity_until_reset`; `test_same_speed_noop_is_bus_silent_and_not_health_evidence`; `test_speed_failure_evidence_controls_speed_knowledge`; `test_at21cs11_standard_rejection_is_silent_and_untracked`; `test_lifecycle_and_speed_transport_fault_matrix_tracks_once` |
+| Speed | `test_standard_speed_claims_are_exclusive_and_transactional`; `test_same_address_high_rebind_releases_standard_entitlement`; `test_successful_reset_preserves_standard_entitlement`; `test_high_config_resynchronization_releases_conservative_entitlement`; `test_ambiguous_standard_transition_retains_exclusivity_until_reset`; `test_same_speed_noop_is_bus_silent_and_not_health_evidence`; `test_speed_failure_evidence_controls_speed_knowledge`; `test_at21cs11_standard_rejection_is_silent_and_untracked`; `test_lifecycle_and_speed_transport_fault_matrix_tracks_once` |
 
 Every transport-using public group also has NACK/timeout/line-stuck/I/O fault
 matrix coverage. Cached getters are covered by
@@ -38,7 +38,7 @@ matrix coverage. Cached getters are covered by
 | Bus-wide released-high write hold | `test_write_hold_trace_has_no_intervening_frame_events`; `test_retained_hold_blocks_a_second_driver_before_its_frame` |
 | Conservative mutation evidence/no replay | `test_every_uncertain_data_ack_is_held_reported_and_never_replayed`; Security/ROM/Freeze ambiguity tests |
 | Address ownership and independent Buses | `test_address_claims_and_transactional_rebind`; `test_separate_buses_reuse_addresses_and_isolate_hold_and_lifecycle`; `test_esp32_instances_keep_descriptors_pins_and_line_state_independent` |
-| Shared Reset generation and resynchronization | `test_reset_generation_is_shared`; `test_shared_reset_resynchronizes_each_device_without_cross_health`; `test_ambiguous_standard_transition_retains_exclusivity_until_reset` |
+| Shared Reset generation and resynchronization | `test_reset_generation_is_shared`; `test_shared_reset_resynchronizes_each_device_without_cross_health`; `test_successful_reset_preserves_standard_entitlement`; `test_high_config_resynchronization_releases_conservative_entitlement`; `test_ambiguous_standard_transition_retains_exclusivity_until_reset` |
 | State admission and saturating health | table-driven lifecycle/state tests; `test_health_saturates_and_last_error_persists_across_success` |
 | No v1/dead public surface | `test_v1_surface_is_absent`; static production-placeholder checker |
 | Example parser, hot-plug policy and fairness | `test_example_cli.cpp`; `test_example_policy.cpp`; `tools/check_cli_contract.py` |
