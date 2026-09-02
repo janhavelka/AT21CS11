@@ -692,6 +692,112 @@ void test_standard_speed_claims_are_exclusive_and_transactional() {
   assertOracleClean(fake);
 }
 
+void test_same_address_high_rebind_releases_standard_entitlement() {
+  ScriptedTransport fake;
+  Bus bus;
+  bindBus(bus, fake);
+
+  Config standardConfig{};
+  standardConfig.expectedPart = PartType::AT21CS01;
+  standardConfig.startupSpeed = SpeedMode::STANDARD_SPEED;
+  Config highConfig = standardConfig;
+  highConfig.startupSpeed = SpeedMode::HIGH_SPEED;
+
+  Driver first;
+  Driver second;
+  TEST_ASSERT_TRUE(first.bind(bus, standardConfig).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().claimedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x01u,
+                         TestAccess::standardSpeedAddressMask(bus));
+
+  TEST_ASSERT_TRUE(first.bind(bus, highConfig).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().claimedAddressMask);
+  TEST_ASSERT_EQUAL_HEX8(0x00u,
+                         TestAccess::standardSpeedAddressMask(bus));
+
+  highConfig.addressBits = 1u;
+  TEST_ASSERT_TRUE(second.bind(bus, highConfig).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x03u, bus.snapshot().claimedAddressMask);
+  assertOracleClean(fake);
+}
+
+void test_successful_reset_preserves_standard_entitlement() {
+  ScriptedTransport fake;
+  Bus bus;
+  bindBus(bus, fake);
+
+  Config standardConfig{};
+  standardConfig.expectedPart = PartType::AT21CS01;
+  standardConfig.startupSpeed = SpeedMode::STANDARD_SPEED;
+  Driver standard;
+  TEST_ASSERT_TRUE(standard.bind(bus, standardConfig).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x01u,
+                         TestAccess::standardSpeedAddressMask(bus));
+
+  queueResetOk(fake);
+  bool present = false;
+  TransferResult resetResult{};
+  TEST_ASSERT_TRUE(
+      TestAccess::resetAndDiscover(bus, present, resetResult).ok());
+  TEST_ASSERT_TRUE(present);
+  TEST_ASSERT_EQUAL_HEX8(0x01u,
+                         TestAccess::standardSpeedAddressMask(bus));
+
+  Config highConfig{};
+  highConfig.addressBits = 1u;
+  highConfig.expectedPart = PartType::AT21CS01;
+  Driver high;
+  assertStatus(Err::INVALID_CONFIG, high.bind(bus, highConfig));
+  TEST_ASSERT_EQUAL_HEX8(0x01u, bus.snapshot().claimedAddressMask);
+  assertOracleClean(fake);
+}
+
+void test_high_config_resynchronization_releases_conservative_entitlement() {
+  ScriptedTransport fake;
+  Bus bus;
+  bindBus(bus, fake);
+
+  Config config{};
+  config.expectedPart = PartType::AT21CS01;
+  Driver first;
+  initializeDriver(first, bus, fake, config, CS01_ID);
+
+  TransferScript ambiguous =
+      transferFailure(TransportCode::IO_ERROR, TransferPhase::STOP, 1204);
+  ambiguous.expected = expectedSpeedChange(expected::STANDARD_SPEED_OPCODE);
+  ambiguous.result.firstDeviceAddressAcked = true;
+  TEST_ASSERT_TRUE(fake.queueTransfer(ambiguous));
+  assertStatus(Err::IO_ERROR,
+               first.setSpeedMode(SpeedMode::STANDARD_SPEED));
+  TEST_ASSERT_FALSE(first.isSpeedKnown());
+  TEST_ASSERT_EQUAL_HEX8(0x01u,
+                         TestAccess::standardSpeedAddressMask(bus));
+
+  queueResetOk(fake);
+  bool present = false;
+  TransferResult resetResult{};
+  TEST_ASSERT_TRUE(
+      TestAccess::resetAndDiscover(bus, present, resetResult).ok());
+  TEST_ASSERT_TRUE(present);
+  TEST_ASSERT_EQUAL_HEX8(0x01u,
+                         TestAccess::standardSpeedAddressMask(bus));
+
+  const uint8_t expected = 0x6Bu;
+  TEST_ASSERT_TRUE(fake.queueTransfer(withExpected(
+      randomReadOk(&expected, 1u), expectedEepromRead())));
+  uint8_t value = 0u;
+  TEST_ASSERT_TRUE(first.readEeprom(0u, &value, 1u).ok());
+  TEST_ASSERT_EQUAL_HEX8(expected, value);
+  TEST_ASSERT_EQUAL_HEX8(0x00u,
+                         TestAccess::standardSpeedAddressMask(bus));
+
+  config.addressBits = 1u;
+  Driver second;
+  TEST_ASSERT_TRUE(second.bind(bus, config).ok());
+  TEST_ASSERT_EQUAL_HEX8(0x03u, bus.snapshot().claimedAddressMask);
+  assertOracleClean(fake);
+}
+
 void test_same_speed_noop_is_bus_silent_and_not_health_evidence() {
   ScriptedTransport fake;
   Bus bus;

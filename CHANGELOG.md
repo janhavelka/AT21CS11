@@ -8,6 +8,8 @@ All notable changes to this project are documented here.
 
 - Made AT21CS01 Standard Speed exclusive to one physical-wire Bus claim so
   mixed-speed multi-drop operation is rejected before device traffic.
+- Corrected Standard-Speed reservation ownership across same-address rebinds
+  and Bus resets, and documented the ESP32 Backend's pull-up/rise-time envelope.
 - Kept each Standard-Speed protocol segment uninterrupted so an inter-byte
   idle gap cannot abort or reinterpret a read or command, or commit a partial
   page write.

@@ -458,7 +458,6 @@ Status Bus::_resetAndDiscover(bool& present, TransferResult& result) {
     present = false;
     return status;
   }
-  _standardSpeedAddressMask = 0;
   if (!present) {
     return Status::Error(Err::NOT_PRESENT);
   }

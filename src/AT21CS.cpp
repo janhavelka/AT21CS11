@@ -78,14 +78,18 @@ Status Driver::bind(Bus& bus, const Config& config) {
       replacesClaimOnSameBus
           ? static_cast<uint8_t>(1u << _config.addressBits)
           : static_cast<uint8_t>(0u);
-  if (keepsExistingClaim &&
-      config.startupSpeed == SpeedMode::STANDARD_SPEED) {
-    const Status reserveStatus = bus._reserveStandardSpeed(config.addressBits);
-    if (!reserveStatus.ok()) {
-      return Status::Error(Err::INVALID_CONFIG,
-                           static_cast<int32_t>(config.addressBits));
+  if (keepsExistingClaim) {
+    if (config.startupSpeed == SpeedMode::STANDARD_SPEED) {
+      const Status reserveStatus =
+          bus._reserveStandardSpeed(config.addressBits);
+      if (!reserveStatus.ok()) {
+        return Status::Error(Err::INVALID_CONFIG,
+                             static_cast<int32_t>(config.addressBits));
+      }
+    } else {
+      bus._releaseStandardSpeed(config.addressBits);
     }
-  } else if (!keepsExistingClaim) {
+  } else {
     const Status claimStatus = bus._claimAddress(
         config.addressBits,
         config.startupSpeed == SpeedMode::STANDARD_SPEED,
@@ -1065,6 +1069,9 @@ Status Driver::_synchronizeBusState(bool restoreConfiguredSpeed) {
   _activeSpeed = SpeedMode::HIGH_SPEED;
   _speedKnown = true;
   _seenBusGeneration = busState.generation;
+  if (_config.startupSpeed != SpeedMode::STANDARD_SPEED) {
+    _bus->_releaseStandardSpeed(_config.addressBits);
+  }
   if (restoreConfiguredSpeed &&
       _config.startupSpeed == SpeedMode::STANDARD_SPEED &&
       _detectedPart == PartType::AT21CS01) {
@@ -1436,6 +1443,9 @@ Status Driver::_runInitializationSequence() {
   _seenBusGeneration = busState.generation;
   _activeSpeed = SpeedMode::HIGH_SPEED;
   _speedKnown = true;
+  if (_config.startupSpeed != SpeedMode::STANDARD_SPEED) {
+    _bus->_releaseStandardSpeed(_config.addressBits);
+  }
   if (_state == DriverState::PROBING) {
     _setState(DriverState::INIT_CONFIG, false);
   }

@@ -75,6 +75,11 @@ temperature, physical package marking, rise time, open-drain waveform and
 protocol timing margins were not recorded. These electrical and waveform
 properties are not qualified by this run.
 
+For new board validation, apply the ESP32 Backend's documented
+[pull-up and rise-time envelope](../README.md#esp32-pull-up-and-rise-time-envelope)
+in addition to the datasheet limits, and measure the actual released-high
+waveform with the complete bus loading fitted.
+
 No ESP32-S3/AT21CS01, shared-wire multi-address, two-independent-wire physical
 hot-plug, or optional presence-pin fixture was run. Those setups are not needed
 for the recorded single-device board with `presencePin == -1`, and no claim is
