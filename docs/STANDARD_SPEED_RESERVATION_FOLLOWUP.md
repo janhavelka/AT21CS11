@@ -1,5 +1,11 @@
 # Follow-up: Standard-Speed reservation defects and one documentation gap
 
+**Resolved in commit `5d70e510`.** Both reservation defects were fixed, all
+three regression tests were added, and the tPUP envelope was published in
+[README.md](../README.md#esp32-pull-up-and-rise-time-envelope). The `native`
+and `native_sanitize` suites passed 134/134 tests each. The body below is the
+historical task record; its 131/131 baseline describes the pre-fix state.
+
 **Task for an AI coder.** Independently verify each finding below, then fix the
 two confirmed defects and close the documentation gap. Do not re-litigate the
 work already accepted in [`CODE_AUDIT_RESOLUTION_2026-08-31.md`](CODE_AUDIT_RESOLUTION_2026-08-31.md)

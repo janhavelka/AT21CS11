@@ -1,5 +1,12 @@
 # AT21CS01/AT21CS11 library review — 2026-08-26
 
+**Status: resolved.** Every F1–F4 and P1–P4 item has been dispositioned, with
+accepted follow-up corrections implemented in commits `bad1091`, `b154e78`
+and `5d70e510`. The authoritative disposition record is
+[`CODE_AUDIT_RESOLUTION_2026-08-31.md`](CODE_AUDIT_RESOLUTION_2026-08-31.md),
+including its [2026-09-01 addendum](CODE_AUDIT_RESOLUTION_2026-08-31.md#2026-09-01-standard-speed-reservation-addendum).
+The findings below remain the historical review record.
+
 Scope: full review of the core library (`include/AT21CS/`, `src/`), the ESP32
 Backend, examples, test support and tooling, verified line-by-line against the
 authoritative datasheet **DS20005857I** (the hash-pinned PDF in `docs/`).
@@ -16,11 +23,15 @@ subtle cases (Check Lock via `2h/W` + `0x6X` with NACK-on-memory-address
 meaning locked; Freeze observation via the `1h/W` device-address ACK/NACK with
 a liveness cross-check; conservative `MAY_HAVE_COMMITTED` evidence; the
 Bus-wide post-write hold gating all traffic). No functional bug was found in
-the Bus or Driver state machines.
+the Bus or Driver state machines. **Superseded for Standard Speed:** the
+subsequent disposition confirmed P1–P3 as real Standard-Speed behavioral
+defects; see the authoritative resolution above.
 
 Findings F1–F4 were simple and unambiguous and are already fixed in the tree.
-P1–P4 involve a policy or margin choice, so they are written up with a concrete
-proposed patch and left for a decision.
+P1–P4 were subsequently dispositioned: P1–P3 were corrected, and P4's proposal
+was rejected because a bus-silent no-op supplies no device-health evidence
+and must not clear real failure counters. The reasoning is recorded in the
+authoritative resolution above; the original proposals remain below.
 
 All of P1–P4 are confined to **Standard Speed**, which only the AT21CS01
 supports and which no shipped example or validated setup uses (the qualified
@@ -109,7 +120,7 @@ rejected. Verified against valid parent links, escapes, and non-members.
 
 ---
 
-## Findings with proposals (not applied)
+## Historical findings and proposals (subsequently dispositioned)
 
 ### P1. Standard-Speed mode on a shared (multi-device) Bus is unsafe — add a sole-claimant guard
 
@@ -314,9 +325,9 @@ operation. No functional consequence; flagged for consistency only.
   `configure_native_sanitizers.py` were reviewed and are correct;
   `check_docs.py`'s LF-normalized hashing is cross-platform sound.
 
-## Gate status after this review
+## Gate status at the original review (2026-08-26)
 
 `native` and `native_sanitize` (130/130 each), `check_docs.py`,
 `check_cli_contract.py`, `check_core_timing_guard.py`,
 `check_no_production_placeholders.py`, `check_package.py --inspect` and
-`generate_version.py --check` all pass locally.
+`generate_version.py --check` all passed locally at review time.
