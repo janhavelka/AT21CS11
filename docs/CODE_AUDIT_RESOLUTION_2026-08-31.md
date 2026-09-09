@@ -6,11 +6,12 @@ The repository was fetched and checked before editing. `main` was clean,
 matched `origin/main`, and was the newest remote branch at commit `a980c77`
 (`refactor: update CI checks and documentation for accuracy and clarity`).
 
-The requested `docs/CODE_AUDIT.md` does not exist in the checked-out tree or
-in any fetched Git revision. The only audit report is
-[`CODE_REVIEW_2026-08-26.md`](CODE_REVIEW_2026-08-26.md), introduced by that
-newest commit, so it was treated as the intended source. This resolution keeps
-that report unchanged as a historical review record.
+At the time of the initial resolution, the requested `docs/CODE_AUDIT.md`
+path did not yet exist in the checked-out tree or fetched Git history. The
+only audit report, introduced by that newest commit, was therefore treated
+as the intended source; it was later renamed to
+[`CODE_AUDIT.md`](CODE_AUDIT.md). This resolution preserves that report's
+findings as a historical review record.
 
 Every F1–F4 and P1–P4 item was compared with the current implementation,
 tests, documentation, package tooling, and the hash-pinned Microchip
