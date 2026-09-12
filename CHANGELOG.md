@@ -59,6 +59,12 @@ All notable changes to this project are documented here.
 
 ## Earlier releases
 
-The detailed 1.x history remains available in the repository's earlier tags.
+The published 1.x history is available in the release notes for
+[v1.1.0](https://github.com/janhavelka/AT21CS11/releases/tag/v1.1.0),
+[v1.1.1](https://github.com/janhavelka/AT21CS11/releases/tag/v1.1.1),
+[v1.1.2](https://github.com/janhavelka/AT21CS11/releases/tag/v1.1.2),
+[v1.2.0](https://github.com/janhavelka/AT21CS11/releases/tag/v1.2.0),
+[v1.2.1](https://github.com/janhavelka/AT21CS11/releases/tag/v1.2.1), and
+[v1.3.0](https://github.com/janhavelka/AT21CS11/releases/tag/v1.3.0).
 Version 2 is intentionally API-breaking and provides no v1 compatibility
 wrapper; see [migration notes](docs/MIGRATION.md).
