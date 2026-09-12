@@ -1,4 +1,15 @@
-# Migrating from v1 to v2
+# Migration
+
+## From v2.0.0 To Unreleased
+
+The latest published release is `v2.0.0`. Current development retains its
+synchronous Backend/Bus/Driver ownership model, but fixes Standard-Speed
+reservation and timing behavior. Standard Speed now requires an exclusive
+physical-wire Bus claim; mixed-speed multi-drop configurations are rejected
+before device traffic. Review the current Backend pull-up/rise-time envelope
+and the [Unreleased changelog](../CHANGELOG.md#unreleased) when upgrading.
+
+## Earlier Migration From v1 To v2.0.0
 
 Version 2 is intentionally API-breaking. It has one synchronous production
 path and no compatibility facade. Refactor ownership once instead of wrapping
