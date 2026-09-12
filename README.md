@@ -8,6 +8,12 @@ ESP32-S2 with an AT21CS11; waveform/electrical qualification and other physical
 topologies are not claimed. See
 [hardware validation](docs/HARDWARE_VALIDATION.md).
 
+The latest published release is
+[v2.0.0](https://github.com/janhavelka/AT21CS11/releases/tag/v2.0.0). This README
+describes the current source, including the [Unreleased fixes](CHANGELOG.md#unreleased).
+Use the documentation at that tag for the released behavior, and review
+[migration from v2.0.0](docs/MIGRATION.md) before adopting current development.
+
 The core API is framework-neutral. The shipped hardware Backend supports
 Arduino on ESP32-S2 and ESP32-S3 through PioArduino
 `platform-espressif32` 55.03.311 (Arduino-ESP32 3.3.11). No second firmware
