@@ -14,6 +14,11 @@
   ],
   "authors": [
     {
+      "name": "THYMOS Solution s.r.o.",
+      "email": "info@thymos.cz",
+      "url": "https://www.thymos.cz"
+    },
+    {
       "name": "Jan Havelka",
       "email": "info@thymos.cz",
       "url": "https://www.thymos.cz",

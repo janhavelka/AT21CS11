@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Unified author, copyright and contact metadata: THYMOS Solution s.r.o., Jan Havelka, info@thymos.cz.
+
 ### Fixed
 
 - Made AT21CS01 Standard Speed exclusive to one physical-wire Bus claim so
