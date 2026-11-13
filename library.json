@@ -29,6 +29,7 @@
     "type": "git",
     "url": "https://github.com/janhavelka/AT21CS11.git"
   },
+  "homepage": "https://github.com/janhavelka/AT21CS11",
   "license": "MIT",
   "frameworks": [
     "arduino"
