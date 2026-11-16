@@ -7,6 +7,9 @@ All notable changes to this project are documented here.
 ### Changed
 
 - Unified author, copyright and contact metadata: THYMOS Solution s.r.o., Jan Havelka, info@thymos.cz.
+- Planned native ESP-IDF support with a native example in a three-prompt set
+  under `docs/prompts/`; no driver, Backend, example, package or CI behavior
+  changed yet.
 
 ### Fixed
 

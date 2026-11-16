@@ -17,7 +17,9 @@ Use the documentation at that tag for the released behavior, and review
 The core API is framework-neutral. The shipped hardware Backend supports
 Arduino on ESP32-S2 and ESP32-S3 through PioArduino
 `platform-espressif32` 55.03.311 (Arduino-ESP32 3.3.11). No second firmware
-framework is shipped or supported.
+framework is shipped or supported. Native ESP-IDF support is planned in the
+[native ESP-IDF promptset](https://github.com/janhavelka/AT21CS11/blob/main/docs/prompts/README.md)
+and is not implemented yet.
 
 The authoritative protocol source is Microchip DS20005857I:
 

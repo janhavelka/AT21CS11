@@ -185,3 +185,10 @@ Do not modify its technical content unless explicitly requested by the maintaine
   or add native-IDF CI/package gates.
 - Keep exactly two shipped Arduino examples: one full single-device CLI and one
   concise multi-device CLI.
+- Planned scope change: on 2026-11-16 the owner elected native ESP-IDF support
+  with a native example. The promptset in [`docs/prompts/`](docs/prompts/README.md)
+  plans that work. Executing it authorizes exactly the AGENTS, README, docs,
+  checker, CI and package changes its prompts list; until a prompt makes them,
+  the rules above still apply. From the start of a prompt of that set, the
+  actions it lists, including `C:\esp\idf.cmd 6.0.1` builds, are authorized
+  before its AGENTS edits land.
