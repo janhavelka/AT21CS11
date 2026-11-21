@@ -192,3 +192,9 @@ Do not modify its technical content unless explicitly requested by the maintaine
   the rules above still apply. From the start of a prompt of that set, the
   actions it lists, including `C:\esp\idf.cmd 6.0.1` builds, are authorized
   before its AGENTS edits land.
+
+## Commit and pull request attribution
+
+Credit human contributors for their work. Omit AI co-author trailers, AI-generated
+signatures or sign-offs, generated-by footers, session links, and other AI
+attribution from commit messages and pull request titles and descriptions.
