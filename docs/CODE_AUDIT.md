@@ -52,10 +52,10 @@ to the pinned revision **I**:
   defines it as the Lock sequence (`2h/W` + memory address `0110_XXXXb`)
   truncated after the memory address byte; the memory-address ACK/NACK carries
   the lock state. The code already implemented the rev-I form
-  ([AT21CS.cpp:1221](../src/AT21CS.cpp#L1221)); only the doc was wrong.
+  ([AT21CS.cpp:1221](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/src/AT21CS.cpp#L1221)); only the doc was wrong.
 - A **`1h/R` "check frozen" query** was described. Rev I documents no such
   read form; frozen state is observed from the `1h/W` device-address ACK/NACK.
-  Again the code was already correct ([AT21CS.cpp:1268](../src/AT21CS.cpp#L1268)).
+  Again the code was already correct ([AT21CS.cpp:1268](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/src/AT21CS.cpp#L1268)).
 - The **serial-number CRC** was described only by polynomial. Datasheet rev H
   explicitly replaced that "inadequate CRC formula" with **CRC-8/Maxim**
   (poly 0x31, reflected 0x8C, init 0). `Driver::crc8Maxim()` implements
@@ -74,7 +74,7 @@ is self-contained and the RC process metadata no longer ships.
 
 ### F2. Discovery release check had <1 µs margin over tDACK max
 
-[Esp32Transport.cpp](../src/platform/esp32/Esp32Transport.cpp): the discovery
+[Esp32Transport.cpp](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/src/platform/esp32/Esp32Transport.cpp): the discovery
 sequence verified that the device released SI/O **25 µs** after the discovery
 fall. The device may legally drive low until **tDACK max = 24 µs**, and the
 released line then needs tPUP to rise, leaving under 1 µs of margin. On an
@@ -82,13 +82,13 @@ in-spec but slower-rising bus (higher C_BUS / weaker pull-up) a present,
 healthy device could be misreported as `LINE_STUCK`. The check now runs at
 **30 µs** (still well before the 160 µs post-discovery high, so no protocol
 impact); the cycle-exact assertion in
-[test_esp32_transport.cpp:330](../test/test_esp32_transport.cpp#L330) was
+[test_esp32_transport.cpp:330](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/test/test_esp32_transport.cpp#L330) was
 updated (6000 → 7200 cycles). All 130 native tests pass, sanitized and plain.
 
 ### F3. CI IRAM gate silently depended on the checkout directory name
 
-[.github/workflows/ci.yml:51](../.github/workflows/ci.yml#L51) and
-[:60](../.github/workflows/ci.yml#L60) located the compiled Backend object with
+[.github/workflows/ci.yml:51](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/.github/workflows/ci.yml#L51) and
+[:60](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/.github/workflows/ci.yml#L60) located the compiled Backend object with
 `-path '*/AT21CS11/platform/esp32/Esp32Transport.cpp.o'`. PlatformIO
 materializes the `symlink://../../../..` dependency under a directory named
 after **the folder the repository is cloned into**, not the `library.json` name
@@ -104,7 +104,7 @@ unique within that build tree (the phy_smoke consumer compiles only its own
 
 ### F4. Package link checker rejected valid parent-relative links
 
-[tools/check_package.py:285](../tools/check_package.py#L285) resolved a
+[tools/check_package.py:285](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/tools/check_package.py#L285) resolved a
 markdown link with `PurePosixPath`, which does **not** collapse `..`. A valid
 link such as `../README.md` from `docs/MIGRATION.md` became
 `docs/../README.md`, retained a `..` component, and was reported as a "broken
@@ -174,7 +174,7 @@ working and closes the unsafe combination with four lines.
 **Severity: low (Standard Speed only, requires a >100 µs ISR landing in an
 inter-byte gap while the scheduler is suspended).**
 
-In [Esp32Transport.cpp](../src/platform/esp32/Esp32Transport.cpp) `_transfer`,
+In [Esp32Transport.cpp](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/src/platform/esp32/Esp32Transport.cpp) `_transfer`,
 `finishStandardByte()` exits the critical section after **every** byte in
 Standard-Speed mode to bound interrupt-off time. Between *data bytes of a
 write frame* that is exactly the window DS20005857I §4.1.3.3 warns about: an
@@ -216,7 +216,7 @@ pathological ISR latency.
 **Severity: medium (Standard Speed only), and it compounds P2.**
 
 `Bus::TRANSFER_TIMEOUT_US` is a single 9000 µs budget applied to every frame
-regardless of speed ([Bus.h:70](../include/AT21CS/Bus.h#L70), used in
+regardless of speed ([Bus.h:70](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/include/AT21CS/Bus.h#L70), used in
 `_execute()` and `_executeWrite()`). Computed from the shipped timing
 constants (9 bit frames per byte; Standard tBIT = 64 µs, tHTSS = 650 µs):
 
@@ -268,7 +268,7 @@ with it.
 
 **Severity: cosmetic.**
 
-[AT21CS.cpp:812](../src/AT21CS.cpp#L812): when the requested mode already
+[AT21CS.cpp:812](https://github.com/janhavelka/AT21CS11/blob/75b7b2401323161d7a818b2cb5effd07882c725b/src/AT21CS.cpp#L812): when the requested mode already
 matches `_activeSpeed`, the method updates `_config.startupSpeed` and returns
 `Ok()` without `_finishOperation()`, so `lastStatus()`, `lastOkUs` and
 `totalSuccess` are not updated for this successful call, unlike every other

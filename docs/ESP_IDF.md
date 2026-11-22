@@ -6,15 +6,34 @@ The packaged component requires ESP-IDF 6.0.1 or later. Builds cover version
 
 `library.json` lists `espidf` because the package ships the ESP-IDF component and native example; PlatformIO `framework = espidf` builds are not tested (only `idf.py` 6.0.1 for esp32s3/esp32s2).
 
-Example 01's command engine is framework-neutral. Its shell provides a
-millisecond clock, a non-blocking character reader and a bounded output sink.
+## Add the component
+
+Place the extracted package or checkout in your project's
+`components/AT21CS01_AT21CS11/`. A component that uses the library privately
+can declare `PRIV_REQUIRES AT21CS01_AT21CS11` in its own `idf_component_register`.
+Use `REQUIRES AT21CS01_AT21CS11` if its public headers include this library.
+
+If the library lives outside the project, give it a fixed component name with
+a one-line wrapper at `components/AT21CS01_AT21CS11/CMakeLists.txt`. Adjust
+the include path to the location of the checkout.
+
+```cmake
+include("${CMAKE_CURRENT_LIST_DIR}/../../path/to/checkout/CMakeLists.txt")
+```
+
+The root CMake file resolves its sources and public include directory relative
+to itself, exports C++17 and declares
+`PRIV_REQUIRES esp_driver_gpio esp_hal_gpio esp_pm esp_timer`. The common IDF
+components supply the public header's IRAM attribute and FreeRTOS types.
+The Backend selects the same hardware implementation in both builds with
+`defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM)`.
 
 ## Native example
 
-`examples/esp_idf/basic/` runs example 01's 14 commands. Start in the source
-checkout or extracted package root in an ESP-IDF 6.0.1 shell. Use one build
-directory and one sdkconfig per target so switching boards preserves each
-configuration.
+The single-device CLI uses the same 14 commands and hot-plug logic as Arduino
+example 01. For the initial build, start at the checkout or extracted package
+root in an ESP-IDF 6.0.1 shell. Change directory, then run the command for
+your target.
 
 ```sh
 cd examples/esp_idf/basic
@@ -38,10 +57,9 @@ The runtime stack high-water mark has not been measured.
 
 Provide an external SI/O pull-up. After release, allow at most 0.60
 microseconds in High Speed or 1.00 microsecond in Standard Speed for the
-line to rise. At 3.3 V the approximate High-Speed resistance limits are
-5.8 kOhm at 100 pF, 1.7 kOhm at 330 pF and 0.58 kOhm at 1000 pF. Hardware
-wiring, board overrides and first-session commands are in the packaged
-`examples/esp_idf/basic/README.md`. A native build is not hardware validation.
+line to rise. A native build is not hardware validation. For pull-up values,
+board overrides, flashing and first-session commands, see the
+[native example README](../examples/esp_idf/basic/README.md).
 
 ## Build evidence
 
@@ -63,27 +81,6 @@ exact file list and exports it with its SHA-256 checksum. `package-idf`
 verifies that checksum and builds the packaged CLI in a fresh `consumer/`
 directory with no checkout. A build from an extracted archive reports
 `unknown` for both the source commit and working-tree status.
-
-## Add the component
-
-Place the extracted package or checkout in your project's `components/AT21CS01_AT21CS11/`.
-A component that uses the library privately can declare
-`PRIV_REQUIRES AT21CS01_AT21CS11` in its own `idf_component_register`.
-If the component lives elsewhere, create a fixed-name wrapper at
-`components/AT21CS01_AT21CS11/CMakeLists.txt` containing one line.
-Adjust the relative path to its root.
-
-```cmake
-include("${CMAKE_CURRENT_LIST_DIR}/../../path/to/checkout/CMakeLists.txt")
-```
-
-The wrapper supplies the component name even when the checkout directory is
-renamed. The root CMake file resolves its sources and public include directory
-relative to itself. It requires C++17 or later and declares
-`PRIV_REQUIRES esp_driver_gpio esp_hal_gpio esp_pm esp_timer`. The common IDF
-components supply the public header's IRAM attribute and FreeRTOS types.
-The Backend selects the same hardware implementation in both builds with
-`defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM)`.
 
 ## Timing and task ownership
 
@@ -109,8 +106,8 @@ segments of a frame or discovery and around the final cycle-count wait.
 Backend object, including emitted transfer lambdas.
 
 With PM enabled, the compiler emits calls to `_acquireTimingLock()` and
-`_releaseTimingLock()` from the IRAM timing code. The initial ESP32-S3 link
-placed these wrappers in flash. The component maps both wrappers into IRAM.
+`_releaseTimingLock()` from the IRAM timing code. The component maps both
+wrappers into IRAM.
 For each PM build, pass `--elf` followed by the linked `at21cs_phy_smoke.elf`
 to the object checker. It verifies both wrappers reside in `.iram0.text` in
 the final ELF.

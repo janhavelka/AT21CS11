@@ -1,6 +1,8 @@
 # 01: ESP-IDF component and shared ESP32 Backend
 
-**Status: NOT STARTED.** Prerequisite: none. Successor:
+**Status: DONE.** The original implementation requirements follow.
+
+Prerequisite: none. Successor:
 [02](02_SHARED_CLI_AND_NATIVE_EXAMPLE.md). Preparation anchor `9dc5b144`;
 record the fetched `main` HEAD. Read [the index](README.md) first; its shared
 rules are part of this prompt.

@@ -42,38 +42,25 @@ matrix coverage. Cached getters are covered by
 | State admission and saturating health | table-driven lifecycle/state tests; `test_health_saturates_and_last_error_persists_across_success` |
 | No v1/dead public surface | `test_v1_surface_is_absent`; static production-placeholder checker |
 | Example parser, hot-plug policy and fairness | `test_example_cli.cpp`; `test_example_policy.cpp`; `tools/check_cli_contract.py` |
-| Single-device CLI console bytes and validation before I/O | Host recording sink checks help, dispatch errors, invalid arguments, absent startup, presence, shutdown and output truncation. Backend line-event counts cover rejected arguments. |
+| Single-device CLI console bytes and validation before I/O | [test_bringup_cli.cpp](test_bringup_cli.cpp) records output for help, dispatch errors, invalid arguments, absent startup, presence, shutdown and truncation. It checks Backend line-event counts for rejected arguments. |
 
 ## Build and documentation gates
 
-- `native` and `native_sanitize` execute all registered host tests through
-  production core paths and the fixed-capacity scripted Backend.
-- `ex_cli_s2`, `ex_cli_s3`, `ex_multi_s2`, and `ex_multi_s3` build the two
-  shipped examples against the pinned Arduino platform.
-- `phy_smoke_s2` and `phy_smoke_s3` compile the production ESP32 Backend; IRAM
-  checks verify placement of timing-critical methods and emitted lambdas.
-- `esp-idf-example` links the example 01 ESP-IDF 6.0.1 images for both targets with PM disabled.
-  Their Backend objects pass the IRAM and undefined-reference checks.
-  `tools/check_cli_contract.py` checks shared command ownership and shell delegation.
-  `tools/check_idf_example_contract.py` checks the wrapper, console, yield,
-  defaults, guides and native CI jobs. Its mutations cover missing S3 receive-driver
-  setup and loss of the first S2 input byte. Native hardware and runtime stack
-  high-water marks are unmeasured.
-- `esp-idf-smoke` links the native ESP-IDF 6.0.1 smoke consumer on ESP32-S2 and ESP32-S3
-  with PM off and on. CI checks the generated 240 MHz, 1000 Hz and size-optimization
-  settings. Check all four Backend objects for IRAM placement and
-  undefined GPIO, timer, ROM delay and scheduler references. Only the PM
-  objects reference PM lock acquire/release. Compare out-of-line IRAM
-  callees to the corresponding Arduino build. These checks provide
-  build evidence only. Standard-Speed segments can mask interrupts for up to
-  about 5.8 ms on AT21CS01.
-- `tools/check_docs.py` validates public links, API/default records, the
-  authoritative datasheet hash, irreversible-operation guidance, and Doxygen.
-- `tools/check_package.py` verifies the exact export allowlist and builds clean
-  platform-neutral, Arduino and native ESP-IDF consumers outside the checkout.
-  In CI, `package-payload` exports the validated archive and its SHA-256.
-  `package-idf` verifies the checksum and builds the extracted CLI on both
-  targets without a repository checkout.
+| Check | What it verifies |
+|---|---|
+| `native`, `native_sanitize` | Registered host tests exercise production core paths and scripted Backend responses. |
+| `ex_cli_s2`, `ex_cli_s3`, `ex_multi_s2`, `ex_multi_s3` | Both examples compile on the pinned Arduino platform for each target. |
+| `phy_smoke_s2`, `phy_smoke_s3` | Both Arduino Backend objects place timing-critical methods and emitted lambdas in IRAM. |
+| `esp-idf-example` | Example 01 links with ESP-IDF 6.0.1 and power management (PM) disabled on ESP32-S2 and ESP32-S3. Its Backend objects pass IRAM and SDK symbol checks. |
+| `esp-idf-smoke` | Both targets link with PM off and on at 240 MHz, a 1000 Hz tick and size optimization. Each object references the GPIO, timer, ROM delay and scheduler APIs. Only PM-enabled objects reference the PM locks, and their wrappers are checked in the linked ELF. |
+| `docs-contract` | Checks example command ownership, native shell setup, build defaults, documentation links, API names, the datasheet hash and Doxygen. Source mutations exercise missing S3 receive-driver setup and missing S2 input-byte preservation. |
+| Package checks | `tools/check_package.py` validates the export allowlist and builds clean consumers. `package-payload` exports the archive and SHA-256. `package-idf` verifies the checksum and builds the extracted native CLI on both targets without a checkout. |
+
+During the native port audit, the timing routines' out-of-line calls were
+compared against the Arduino objects. The additional PM lock wrappers linked
+in IRAM. Native runtime stack high-water marks and the AT21CS01 Standard-Speed
+interrupt-masking interval of up to about 5.8 ms per segment remain unmeasured
+on hardware. See the [native build matrix](../docs/ESP_IDF.md#build-evidence).
 
 ## Physical result boundary
 

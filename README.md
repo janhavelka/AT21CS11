@@ -1,39 +1,32 @@
 # AT21CS01 / AT21CS11 synchronous driver
 
 `AT21CS01_AT21CS11` is a fixed-state C++ driver for the Microchip AT21CS01 and
-AT21CS11 1-Kbit single-wire EEPROMs. Version `2.0.0` is the stable,
-API-breaking synchronous release. Its software gates run on the host and pinned
-ESP32-S2/S3 Arduino builds. One destructive functional run passed on an
-ESP32-S2 with an AT21CS11; waveform/electrical qualification and other physical
-topologies are not claimed. See
-[hardware validation](docs/HARDWARE_VALIDATION.md).
+AT21CS11 1-Kbit single-wire EEPROMs. The core API is framework-neutral.
+ESP32-S2 and ESP32-S3 share one Backend with two build options.
 
-The latest published release is
-[v2.0.0](https://github.com/janhavelka/AT21CS11/releases/tag/v2.0.0). This README
-describes the current source, including the [Unreleased fixes](CHANGELOG.md#unreleased).
-Use the documentation at that tag for the released behavior, and review
-[migration from v2.0.0](docs/MIGRATION.md) before adopting current development.
+| Framework | Build-tested configuration | Getting started |
+|---|---|---|
+| Arduino-ESP32 | Arduino 3.3.11, PioArduino `platform-espressif32` 55.03.311 | [Minimal Arduino setup](#minimal-arduino-setup), [example environments](#examples-and-configuration) |
+| Native ESP-IDF | `idf.py` 6.0.1 | [Component integration](docs/ESP_IDF.md), [single-device CLI](examples/esp_idf/basic/README.md) |
 
-The core API is framework-neutral. One ESP32 Backend serves Arduino-ESP32
-3.3.11 on PioArduino `platform-espressif32` 55.03.311 and native ESP-IDF
-6.0.1 on ESP32-S2 and ESP32-S3. On both targets, CI builds the native CLI
-from source and from the extracted package and links the component with power
-management enabled and disabled. See the [ESP-IDF integration guide](docs/ESP_IDF.md).
+Native ESP-IDF support and the latest Standard-Speed fixes are in the current
+source. The published [v2.0.0 release](https://github.com/janhavelka/AT21CS11/releases/tag/v2.0.0)
+predates these changes. See the [Unreleased changelog](CHANGELOG.md)
+and [migration notes](docs/MIGRATION.md).
 
 `library.json` lists `espidf` because the package ships the ESP-IDF component and native example; PlatformIO `framework = espidf` builds are not tested (only `idf.py` 6.0.1 for esp32s3/esp32s2).
 
-The authoritative protocol source is Microchip DS20005857I:
-
-- [AT21CS01/AT21CS11 datasheet](https://ww1.microchip.com/downloads/aemDocuments/documents/MPD/ProductDocuments/DataSheets/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf)
-- verified local size: `2247216` bytes
-- verified local SHA-256:
-  `704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5`
+The recorded hardware run passed 85 checks on one ESP32-S2 and AT21CS11
+using Arduino. Native ESP-IDF evidence covers compilation, linking and IRAM
+placement. Waveform and electrical qualification remain open. See the
+[hardware validation record](docs/HARDWARE_VALIDATION.md) for the board and
+device tested.
 
 ## Operating model
 
-Every library call is synchronous: it validates its complete input, performs
-bounded work and returns a `Status` plus any documented result evidence. Once a
-call starts, firmware cannot asynchronously cancel it.
+Device operations validate their inputs, perform bounded work synchronously
+and return a `Status` plus any documented result evidence. Once a call starts,
+firmware cannot asynchronously cancel it.
 
 The library creates no task, queue, scheduler, application-facing mutex, retry
 loop, hot-plug poller, logger or persistence service. The ESP32 Backend uses
@@ -307,21 +300,21 @@ qualified.
 
 ## Examples and configuration
 
-- **01, single-device CLI.** The [Arduino shell](examples/01_basic_bringup_cli/main.cpp)
-  and [native ESP-IDF shell](examples/esp_idf/basic/main/main.cpp) share the same
-  [14-command engine](examples/common/BringupCli.h) and hot-plug service.
-- **02, two-wire/two-device CLI.** The [Arduino example](examples/02_multi_device_cli/main.cpp)
-  services two independent wires from a single owner.
+| Program | Arduino build environment | Native ESP-IDF |
+|---|---|---|
+| [01. Single-device CLI](examples/01_basic_bringup_cli/main.cpp) | `ex_cli_s2`, `ex_cli_s3` | [Wiring, build and first session](examples/esp_idf/basic/README.md) |
+| [02. Two-wire CLI](examples/02_multi_device_cli/main.cpp) | `ex_multi_s2`, `ex_multi_s3` | Arduino only |
+
+Both shells for example 01 use the same [14-command engine](examples/common/BringupCli.h)
+and hot-plug service. Example 02 services two independent wires from one owner.
+From a Windows checkout, this command builds example 01 for ESP32-S3. Use
+the environment from the table for another target or example.
+
+```powershell
+.\scripts\pio.cmd run -e ex_cli_s3
+```
 
 Both programs use the same [board settings](examples/common/BoardConfig.h).
-To build the native shell, start in the checkout or extracted package root
-in an ESP-IDF 6.0.1 environment.
-
-```sh
-cd examples/esp_idf/basic
-idf.py -B ../../../build-example-s2 -D SDKCONFIG=../../../sdkconfig.esp32s2 set-target esp32s2 build
-idf.py -B ../../../build-example-s3 -D SDKCONFIG=../../../sdkconfig.esp32s3 set-target esp32s3 build
-```
 
 | Setting | Primary | Secondary | Committed default |
 |---|---|---|---|
@@ -335,44 +328,23 @@ Override these with PlatformIO `build_flags` or native
 `target_compile_definitions` on the example's main component. Enabled detect
 pins require the external bias described above.
 
-Build environments are `ex_cli_s3`, `ex_cli_s2`, `ex_multi_s3` and
-`ex_multi_s2`.
-
 ## Package and development checks
 
-`library.json` is the version source of truth. `Version.h` is generated
-deterministically:
+The package contains the public headers, sources, ESP-IDF component, both
+example programs and consumer guides. CI checks the archive file list, the
+manifest bytes and clean consumer builds. For native ESP-IDF, it builds the
+CLI from the checkout and from the checksum-verified archive on both targets.
+Separate smoke builds exercise the Backend with power management enabled and
+disabled. The [contribution guide](https://github.com/janhavelka/AT21CS11/blob/main/CONTRIBUTING.md)
+lists the host, static, build and package checks, including how to regenerate
+`Version.h` from `library.json`.
 
-```text
-python scripts/generate_version.py
-python scripts/generate_version.py --check
-```
+## Protocol reference
 
-The package ships the ESP-IDF component, public headers, sources, consumer
-documentation, metadata and both example programs. Archive validation checks
-the file list and compares the component manifest byte for byte with Git.
-Run the following checks from a checkout.
-
-```text
-.\scripts\pio.cmd test -e native
-.\scripts\pio.cmd test -e native_sanitize
-python tools/check_cli_contract.py
-python tools/check_idf_example_contract.py
-python tools/test_check_idf_example_contract.py
-python tools/check_docs.py
-python tools/check_package.py --inspect
-python tools/check_package.py --build-platform-neutral
-python tools/check_package.py --build-arduino
-python tools/check_package.py --build-idf --out C:\esp\build\at21cs11-pkg --target esp32s2 --idf-command "C:\esp\idf.cmd 6.0.1"
-python tools/check_package.py --build-idf --out C:\esp\build\at21cs11-pkg --target esp32s3 --idf-command "C:\esp\idf.cmd 6.0.1"
-```
-
-See [migration notes](docs/MIGRATION.md),
-[irreversible-operation guidance](docs/IRREVERSIBLE_OPERATIONS.md),
-[hardware validation](docs/HARDWARE_VALIDATION.md), [changelog](CHANGELOG.md), the
-[contribution guide](https://github.com/janhavelka/AT21CS11/blob/main/CONTRIBUTING.md)
-and [security policy](https://github.com/janhavelka/AT21CS11/blob/main/SECURITY.md).
+The [AT21CS01/AT21CS11 datasheet](https://ww1.microchip.com/downloads/aemDocuments/documents/MPD/ProductDocuments/DataSheets/AT21CS01-AT21CS11-1-Kbit-Serial-EEPROM-Data-Sheet-DS20005857.pdf)
+is Microchip DS20005857I. The verified PDF is `2247216` bytes with SHA-256
+`704577264C3B6C60B2D14BE83A229F34C86433CC8951516641FB1DE9EC5DB1A5`.
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+The library uses the [MIT license](LICENSE). See the [security policy](https://github.com/janhavelka/AT21CS11/blob/main/SECURITY.md) to report a vulnerability.

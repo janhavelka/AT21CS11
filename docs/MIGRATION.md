@@ -1,21 +1,27 @@
 # Migration
 
-## From v2.0.0 To Unreleased
+## From v2.0.0 to Unreleased
 
-The latest published release is `v2.0.0`. Current development retains its
-synchronous Backend/Bus/Driver ownership model, but fixes Standard-Speed
-reservation and timing behavior. Standard Speed now requires an exclusive
-physical-wire Bus claim; mixed-speed multi-drop configurations are rejected
-before device traffic. Review the current Backend pull-up/rise-time envelope
-and the [Unreleased changelog](../CHANGELOG.md#unreleased) when upgrading.
+- **Arduino.** Keep the existing PioArduino platform and Backend, Bus and
+  Driver bindings. Both Arduino examples retain their commands and output.
+- **Native ESP-IDF.** The component and single-device CLI use the same
+  ESP32 Backend. The manifest requires ESP-IDF 6.0.1 or later. Builds cover
+  6.0.1 on ESP32-S2 and ESP32-S3. Pin the owner task to one core.
+  [ESP-IDF integration guide](ESP_IDF.md)
+- **AT21CS01 Standard Speed.** Give each Standard-Speed device an exclusive
+  Bus claim on its physical wire. Budget up to about 5.8 ms of interrupt
+  masking for one segment and check that the external pull-up meets the
+  [rise-time limits](../README.md#esp32-pull-up-and-rise-time-envelope).
 
-## Earlier Migration From v1 To v2.0.0
+The [Unreleased changelog](../CHANGELOG.md) lists the fixes since v2.0.0.
+
+## From v1 to v2.0.0
 
 Version 2 is intentionally API-breaking. It has one synchronous production
 path and no compatibility facade. Refactor ownership once instead of wrapping
 the removed API.
 
-## Ownership
+### Ownership
 
 The v1 Driver owned pins and transport behavior. Version 2 separates these
 responsibilities:
@@ -58,18 +64,19 @@ if (status.ok()) {
 Shutdown is `Driver::end()`, successful `Bus::end()`, then
 `Esp32Transport::end()`. Keep the Backend alive while Bus shutdown is pending.
 
-## Removed behavior
+### Removed behavior
 
 There is no `tick()`, current-address read, ready poll, scan, hidden discovery
 retry, internal reconnect loop or pin-owning Driver constructor in v2. Reads
-are address-explicit. Writes return only after the bounded frame and Bus-owned
-fixed 10 ms released-high hold.
+are address-explicit. If a device accepted or may have accepted a payload byte,
+the Bus holds SI/O released high for 10 ms. If the hold fails, the Bus retains
+it and must complete it before the next transfer.
 
 Use `Driver::probe()` for one explicit liveness check and `Driver::recover()`
 for one explicit Reset/Discovery recovery attempt. Firmware owns their cadence
 and any retry/backoff.
 
-## Hot-plug
+### Hot-plug
 
 An initialization absence retains valid bindings and the address claim. Leave
 `presencePin == -1` for a fixed device or when no detect signal exists. Polling
@@ -77,14 +84,14 @@ is optional firmware policy and is needed only when the application wants to
 detect hot-plug without a separate signal. See the README's hot-plug section
 for detect polarity, debounce and explicit `probe()`/`recover()` guidance.
 
-## RTOS applications
+### RTOS applications
 
 Use one firmware task or cooperative loop as the default owner of every AT21CS
 object. Drivers sharing a Bus must share the same owner. The README describes
 the supported synchronous ownership model; the library ships no asynchronous
 wrapper.
 
-## Status and mutation handling
+### Status and mutation handling
 
 All fallible APIs return `Status`. Keep validation failures, NACK phase and
 transport failures distinct. Do not infer success from state alone.
@@ -96,12 +103,3 @@ Freeze, follow [the irreversible-operation guide](IRREVERSIBLE_OPERATIONS.md).
 
 EEPROM and Security reads are whole-call transactional. They use fixed-size
 scratch storage and leave the caller buffer unchanged if any frame fails.
-
-## Supported integration
-
-Existing Arduino applications keep their PioArduino platform and their
-Backend, Bus and Driver bindings. The packaged native component uses the
-same Backend and requires ESP-IDF 6.0.1 or later. CI builds with 6.0.1 on
-ESP32-S2 and ESP32-S3. For native use, pin the owner task to one core and
-budget up to about 5.8 ms of interrupt masking per AT21CS01 Standard-Speed
-segment. See the [ESP-IDF integration guide](ESP_IDF.md).

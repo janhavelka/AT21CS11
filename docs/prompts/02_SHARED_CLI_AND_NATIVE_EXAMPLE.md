@@ -1,6 +1,8 @@
 # 02: Shared CLI engine and native ESP-IDF port of example 01
 
-**Status: NOT STARTED.** Prerequisite: [01](01_IDF_COMPONENT_AND_BACKEND.md)
+**Status: DONE.** The original implementation requirements follow.
+
+Prerequisite: [01](01_IDF_COMPONENT_AND_BACKEND.md)
 committed and synced, with its recorded `PRIV_REQUIRES`, IRAM evidence and
 smoke builds; inspect its final diff first. Successor:
 [03](03_CI_PACKAGE_AND_CHECKPOINT.md). Read [the index](README.md); its shared

@@ -1,6 +1,8 @@
 # 03: CI, package and consumer rules, final docs and the remote-CI checkpoint
 
-**Status: NOT STARTED.** Prerequisites: [01](01_IDF_COMPONENT_AND_BACKEND.md)
+**Status: DONE.** The original implementation requirements follow.
+
+Prerequisites: [01](01_IDF_COMPONENT_AND_BACKEND.md)
 and [02](02_SHARED_CLI_AND_NATIVE_EXAMPLE.md) committed and synced; inspect
 their final diffs and handoffs first. This is the set's only remote-CI
 checkpoint. Read [the index](README.md); its shared rules are part of this

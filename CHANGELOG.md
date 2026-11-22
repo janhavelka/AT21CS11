@@ -6,29 +6,25 @@ All notable changes to this project are documented here.
 
 ### Added
 
-- Shipped the ESP-IDF component and example 01 in the package. CI builds
-  the native CLI on ESP32-S2 and ESP32-S3 from both the checkout and a
-  checksum-verified package archive. Native CI also checks Backend IRAM
-  placement in the example and both power-management configurations of the
-  smoke consumer.
-- Added the native ESP-IDF shell for example 01. The same 14 commands and
-  hot-plug policy run over USB CDC on ESP32-S2 and USB Serial/JTAG on ESP32-S3.
-  Both ESP-IDF 6.0.1 images link and pass the Backend IRAM object check.
-  Native hardware and runtime stack measurements were not run.
-- Added a native component requiring ESP-IDF 6.0.1 or later. Only 6.0.1 is
-  build-tested on ESP32-S2 and ESP32-S3. Local
-  smoke images link with power management off and on. The [integration
-  guide](docs/ESP_IDF.md) covers the build and the AT21CS01 Standard-Speed
-  interrupt-masking budget of up to about 5.8 ms per segment.
+- Packaged a native ESP-IDF component and the single-device CLI for ESP32-S2
+  and ESP32-S3. The component requires ESP-IDF 6.0.1 or later. The example
+  uses USB CDC on S2 and USB Serial/JTAG on S3. An AT21CS01 Standard-Speed
+  segment can mask interrupts for up to about 5.8 ms. [Integration guide](docs/ESP_IDF.md)
+- Added CI builds for both targets using ESP-IDF 6.0.1, the only SDK version
+  tested for the native component. CI builds the CLI from the checkout and a
+  checksum-verified archive, and checks Backend IRAM placement in the CLI and
+  in smoke builds with power management off and on. Testing the native shell
+  on hardware and measuring its stack usage remain open.
+  [Verified CI run for the native port](https://github.com/janhavelka/AT21CS11/actions/runs/45073025774)
 
 ### Changed
 
-- Extracted example 01's 14-command CLI and hot-plug service into an
-  example-only engine. Both Arduino programs retain their console output,
-  including the original CRLF and LF line endings.
-- Unified author, copyright and contact metadata: THYMOS Solution s.r.o., Jan Havelka, info@thymos.cz.
-- Widened the ESP32 Backend guard to include native ESP-IDF. The Arduino
-  Backend disassembly is unchanged on both targets.
+- Arduino and ESP-IDF now share one ESP32 Backend. The Arduino Backend
+  disassembly matched the previous implementation on both targets.
+- Both single-device shells use the same 14 commands and hot-plug policy.
+  Both Arduino examples preserve their original console bytes and line endings.
+- Unified author, copyright and contact metadata for THYMOS Solution s.r.o.
+  and Jan Havelka (info@thymos.cz).
 
 ### Fixed
 
@@ -37,19 +33,20 @@ All notable changes to this project are documented here.
   and preserves the first input byte.
 - Preserved the packaged component manifest's committed bytes on Windows.
   Native component exports exclude generated target configurations and logs.
-  Archive validation rejects unexpected directories, and a failed checksum
-  replacement restores the previous export.
-- Made AT21CS01 Standard Speed exclusive to one physical-wire Bus claim so
-  mixed-speed multi-drop operation is rejected before device traffic.
-- Corrected Standard-Speed reservation ownership across same-address rebinds
-  and Bus resets, and documented the ESP32 Backend's pull-up/rise-time envelope.
+  Package tools reject unexpected archive directories and export destinations
+  inside packaged source directories. A failed checksum replacement restores
+  the previous export.
+- Made AT21CS01 Standard Speed exclusive to one address claim on a physical
+  wire, including across same-address rebinds and Bus resets. Mixed-speed
+  multi-drop requests fail before device traffic.
 - Kept each Standard-Speed protocol segment uninterrupted so an inter-byte
   idle gap cannot abort or reinterpret a read or command, or commit a partial
   page write.
 - Added a 24 ms Standard-Speed transfer deadline while retaining the 9 ms
   High-Speed and presence deadlines.
 - Corrected the chip reference's `t_RD` and `t_MRS` rise-time relations and
-  made package parent-link escape detection exact.
+  documented the ESP32 Backend's pull-up and rise-time limits.
+- Corrected detection of document links that escape the package.
 
 ## [2.0.0] - 2026-08-05
 

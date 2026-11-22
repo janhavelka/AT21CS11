@@ -1,7 +1,9 @@
 # Hardware validation record
 
-This document records only hardware behavior that was actually observed. Host
-tests and successful firmware builds are separate software evidence.
+The physical results below cover one AT21CS11 on ESP32-S2 with Arduino-ESP32.
+Native ESP-IDF 6.0.1 has build coverage on ESP32-S2 and ESP32-S3. The native
+port has had no board or hardware-in-the-loop run. Its build matrix is in the
+[ESP-IDF integration guide](ESP_IDF.md).
 
 ## 2026-08-05 destructive ESP32-S2 / AT21CS11 run
 
@@ -80,13 +82,6 @@ For new board validation, apply the ESP32 Backend's documented
 in addition to the datasheet limits, and measure the actual released-high
 waveform with the complete bus loading fitted.
 
-No ESP32-S3/AT21CS01, shared-wire multi-address, two-independent-wire physical
-hot-plug, or optional presence-pin fixture was run. Those setups are not needed
-for the recorded single-device board with `presencePin == -1`, and no claim is
-made for them. Their software paths remain covered by host tests and S2/S3
-build checks.
-
-The application does not need a detect pin when the device is fixed. If future
-hardware must support physical hot-plug without one, firmware may make one
-bounded `probe()` or `recover()` call at its chosen polling event as described
-in the README; the library creates no poller.
+ESP32-S3, AT21CS01 Standard Speed, shared-wire multi-address operation,
+two-wire physical hot-plug and the optional presence input also await hardware
+validation. The recorded board had a fixed device and no detect input.

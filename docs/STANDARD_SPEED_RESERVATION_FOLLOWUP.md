@@ -5,11 +5,7 @@ three regression tests were added, and the tPUP envelope was published in
 [README.md](../README.md#esp32-pull-up-and-rise-time-envelope). The `native`
 and `native_sanitize` suites passed 134/134 tests each. The body below is the
 historical task record; its 131/131 baseline describes the pre-fix state.
-
-**Task for an AI coder.** Independently verify each finding below, then fix the
-two confirmed defects and close the documentation gap. Do not re-litigate the
-work already accepted in [`CODE_AUDIT_RESOLUTION_2026-08-31.md`](CODE_AUDIT_RESOLUTION_2026-08-31.md)
-— it was re-checked and is correct except where this document says otherwise.
+The final reservation behavior is recorded in the [September addendum](CODE_AUDIT_RESOLUTION_2026-08-31.md#2026-09-01-standard-speed-reservation-addendum).
 
 Baseline for this review: `main` at `b154e78` ("fix: complete audit
 follow-up"), clean and level with `origin/main`; native suite 131/131 green.
@@ -33,7 +29,7 @@ Verified against the code and the hash-pinned DS20005857I datasheet:
 
 **Confirmed by execution, not inspection.**
 
-`Driver::bind()` ([src/AT21CS.cpp:81-96](../src/AT21CS.cpp#L81)) handles the
+`Driver::bind()` ([src/AT21CS.cpp:81-96](https://github.com/janhavelka/AT21CS11/blob/b154e78cb8033999b1875469cd6a0240cd8a40c4/src/AT21CS.cpp#L81)) handles the
 same-Bus/same-address rebind path as:
 
 ```cpp
@@ -65,7 +61,7 @@ rather than an unsafe admission — but it is silent and hard to diagnose.
 **Confirmed by execution.**
 
 `Bus::_resetAndDiscover()` clears the reservation on success
-([src/Bus.cpp:461](../src/Bus.cpp#L461)) because a reset returns every device
+([src/Bus.cpp:461](https://github.com/janhavelka/AT21CS11/blob/b154e78cb8033999b1875469cd6a0240cd8a40c4/src/Bus.cpp#L461)) because a reset returns every device
 to High Speed. But the reservation also encodes *which Driver is entitled to
 Standard Speed*, and that entitlement is unchanged by a reset. Between the
 reset and the owning Driver's next operation, a second Driver can bind:
@@ -104,11 +100,11 @@ each symptom.
 Make the mask mean **entitlement only**:
 
 1. **`Bus::_resetAndDiscover()`** — delete `_standardSpeedAddressMask = 0;` at
-   [src/Bus.cpp:461](../src/Bus.cpp#L461). A reset must not alter entitlement.
+   [src/Bus.cpp:461](https://github.com/janhavelka/AT21CS11/blob/b154e78cb8033999b1875469cd6a0240cd8a40c4/src/Bus.cpp#L461). A reset must not alter entitlement.
 2. **`Driver::_synchronizeBusState()`** — in the new-generation branch (after
    `_activeSpeed = SpeedMode::HIGH_SPEED; _speedKnown = true;` near
-   [src/AT21CS.cpp:1067](../src/AT21CS.cpp#L1067)) and at the matching point in
-   `_runInitializationSequence()` ([src/AT21CS.cpp:1436](../src/AT21CS.cpp#L1436)),
+   [src/AT21CS.cpp:1067](https://github.com/janhavelka/AT21CS11/blob/b154e78cb8033999b1875469cd6a0240cd8a40c4/src/AT21CS.cpp#L1067)) and at the matching point in
+   `_runInitializationSequence()` ([src/AT21CS.cpp:1436](https://github.com/janhavelka/AT21CS11/blob/b154e78cb8033999b1875469cd6a0240cd8a40c4/src/AT21CS.cpp#L1436)),
    release the reservation **only when this Driver is not Standard-configured**:
 
    ```cpp

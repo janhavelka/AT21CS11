@@ -1,5 +1,10 @@
 # Code audit resolution — 2026-08-31
 
+The August review and its September follow-up are complete. The addendum
+below records the final Standard-Speed reservation behavior. The follow-up
+includes the two reproductions and their regression tests.
+[Standard-Speed follow-up](STANDARD_SPEED_RESERVATION_FOLLOWUP.md)
+
 ## Scope and source
 
 The repository was fetched and checked before editing. `main` was clean,
@@ -76,7 +81,7 @@ highlight should be read with the Backend's explicit tPUP envelope noted above.
   address, write and read bytes, while retaining safe repeated-Start and Stop
   boundaries.
 - Added test-only critical-section counters and lifecycle/deadline regression
-  coverage. The native suite now contains 131 tests.
+  coverage. The native suite contained 131 tests at this checkpoint.
 - Corrected the two remaining datasheet timing claims, hardened package-link
   escape detection, and updated README, migration, coverage, and changelog
   documentation.

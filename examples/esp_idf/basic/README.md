@@ -1,5 +1,8 @@
 # Single-device CLI for ESP-IDF
 
+<!--! @page md_examples_2esp__idf_2basic_2_r_e_a_d_m_e Single-device CLI for ESP-IDF
+-->
+
 This ESP-IDF 6.0.1 project runs the same 14 commands as Arduino example 01
 on ESP32-S2 and ESP32-S3.
 
@@ -37,8 +40,8 @@ the total capacitance.
 
 ## Build and connect
 
-From the checkout root in an ESP-IDF 6.0.1 environment, select your target
-and build its image.
+From the checkout or extracted package root in an ESP-IDF 6.0.1 shell,
+change directory, then run the initial build command for your target.
 
 ```sh
 cd examples/esp_idf/basic
@@ -46,11 +49,15 @@ idf.py -B ../../../build-example-s2 -D SDKCONFIG=../../../sdkconfig.esp32s2 set-
 idf.py -B ../../../build-example-s3 -D SDKCONFIG=../../../sdkconfig.esp32s3 set-target esp32s3 build
 ```
 
+Each target has its own build directory and sdkconfig. For subsequent builds,
+reuse that directory with `idf.py -B ../../../build-example-s2 build` or
+`idf.py -B ../../../build-example-s3 build`. Repeating `set-target` resets
+the target configuration.
+
 Connect the board's native USB port. ESP32-S2 uses USB CDC and ESP32-S3
-uses USB Serial/JTAG. Both use unbuffered stdio with non-blocking input.
-LF passthrough preserves the engine's CRLF and LF output. The input parser
-accepts CR, LF and CRLF. To flash and open the monitor, substitute the board's
-port for `PORT` and run the line for your target.
+uses USB Serial/JTAG. To flash and open the monitor, stay in the example
+directory, substitute the board's port for `PORT`, and run the line for your
+target.
 
 ```sh
 idf.py -B ../../../build-example-s2 -p PORT flash monitor
@@ -72,9 +79,11 @@ manufacturer
 read-eeprom 0 8
 ```
 
-`presence` reports the optional detect input. With detection disabled, use
-`probe` to check whether the device responds. `write-page` changes EEPROM
-data and requires the exact confirmation token `CONFIRM_EEPROM_OVERWRITE`.
+`presence` reports `presence: disabled` with the default wiring. `probe`
+checks device liveness. If the EEPROM was absent at startup, attach it and
+use `recover` to run Reset/Discovery, then `serial` to read its identity.
+`write-page` changes EEPROM data and requires the exact confirmation token
+`CONFIRM_EEPROM_OVERWRITE`.
 Irreversible provisioning is outside the CLI. See the
 [provisioning guide](../../../docs/IRREVERSIBLE_OPERATIONS.md).
 
