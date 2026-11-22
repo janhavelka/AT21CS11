@@ -52,23 +52,26 @@ matrix coverage. Cached getters are covered by
   shipped examples against the pinned Arduino platform.
 - `phy_smoke_s2` and `phy_smoke_s3` compile the production ESP32 Backend; IRAM
   checks verify placement of timing-critical methods and emitted lambdas.
-- The example 01 ESP-IDF 6.0.1 images link for both targets with PM disabled.
+- `esp-idf-example` links the example 01 ESP-IDF 6.0.1 images for both targets with PM disabled.
   Their Backend objects pass the IRAM and undefined-reference checks.
   `tools/check_cli_contract.py` checks shared command ownership and shell delegation.
   `tools/check_idf_example_contract.py` checks the wrapper, console, yield,
-  defaults and guides. Its mutation suite exercises rejected configurations
+  defaults, guides and native CI jobs. Its mutation suite exercises rejected configurations
   on temporary copies. Native hardware and runtime stack high-water marks are unmeasured.
-- The native ESP-IDF 6.0.1 smoke consumer links on ESP32-S2 and ESP32-S3
+- `esp-idf-smoke` links the native ESP-IDF 6.0.1 smoke consumer on ESP32-S2 and ESP32-S3
   with PM off and on. Check all four Backend objects for IRAM placement and
   undefined GPIO, timer, ROM delay and scheduler references. Only the PM
   objects reference PM lock acquire/release. Compare out-of-line IRAM
-  callees to the corresponding Arduino build. These local gates provide
+  callees to the corresponding Arduino build. These checks provide
   build evidence only. Standard-Speed segments can mask interrupts for up to
   about 5.8 ms on AT21CS01.
 - `tools/check_docs.py` validates public links, API/default records, the
   authoritative datasheet hash, irreversible-operation guidance, and Doxygen.
 - `tools/check_package.py` verifies the exact export allowlist and builds clean
-  platform-neutral and Arduino consumers outside the checkout.
+  platform-neutral, Arduino and native ESP-IDF consumers outside the checkout.
+  In CI, `package-payload` exports the validated archive and its SHA-256.
+  `package-idf` verifies the checksum and builds the extracted CLI on both
+  targets without a repository checkout.
 
 ## Physical result boundary
 

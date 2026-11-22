@@ -188,9 +188,59 @@ def check(root: Path) -> None:
     check_docs(project, root)
 
 
+def check_workflow(path: Path) -> None:
+    # Check each contract in its own job. An action pin or target mentioned in
+    # another job must not satisfy a missing native build or package gate.
+    workflow = path.read_text(encoding="utf-8")
+    jobs = dict(re.findall(r"^  ([\w-]+):\n((?:    [^\n]*\n|\n)*)", workflow, re.M))
+    idf = "espressif/esp-idf-ci-action@e6f5c74232b1ccd4c97ed641f1e48553853f1fd5"
+    upload = "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+    download = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+    native_build = (
+        f"uses: {idf}", "esp_idf_version: v6.0.1", "target: ${{ matrix.target }}",
+        "target: [esp32s3, esp32s2]", "fail-fast: false", "if: always()",
+        f"uses: {upload}", "idf.py ", 'set-target "$IDF_TARGET" build',
+    )
+    iram = ("check_esp32_iram_sections.py", "xtensa-$IDF_TARGET-elf-objdump", "--require-undefined")
+    contracts = {
+        "esp-idf-example": (*native_build, *iram, "path: examples/esp_idf/basic"),
+        "esp-idf-smoke": (
+            *native_build, *iram, "path: test/consumer/phy_smoke/idf", "profile: [default, pm]",
+            "sdkconfig.defaults;sdkconfig.pm", "esp_pm_lock_acquire esp_pm_lock_release",
+            "--elf build/at21cs_phy_smoke.elf",
+        ),
+        "package-payload": (
+            "python tools/check_package.py --export-archive payload", f"uses: {upload}",
+            "name: package-payload", "path: payload/", "if-no-files-found: error",
+        ),
+        "package-idf": (
+            *native_build, "needs: package-payload", f"uses: {download}", "name: package-payload",
+            "path: payload", "sha256sum --check --strict SHA256SUMS", "tar -xzf", "-C consumer",
+            "path: consumer/examples/esp_idf/basic", 'test -f "$file"', "exit 1", *REQUIRED_FILES,
+        ),
+        "docs-contract": ("python tools/check_idf_example_contract.py", "python tools/test_check_idf_example_contract.py"),
+    }
+    for name, tokens in contracts.items():
+        if name not in jobs:
+            raise ContractError(f"CI: missing {name} job")
+        body = re.sub(r"(?:^|[ \t]+)#[^\n]*", "", jobs[name], flags=re.M)
+        for token in tokens:
+            if ": " in token:
+                if not re.search(rf"^\s*(?:- )?{re.escape(token)}\s*$", body, re.M):
+                    raise ContractError(f"CI {name}: missing {token}")
+            elif token in REQUIRED_FILES:
+                if not re.search(rf"(?<![\w/.-]){re.escape(token)}(?![\w/.-])", body):
+                    raise ContractError(f"CI {name}: missing {token}")
+            else:
+                require(body, token, f"CI {name}")
+        if name == "package-idf" and "actions/checkout@" in body:
+            raise ContractError("CI package-idf must build the downloaded archive without checkout")
+
+
 if __name__ == "__main__":
     try:
         check(ROOT)
+        check_workflow(ROOT / ".github/workflows/ci.yml")
     except (ValueError, OSError) as exc:
         sys.exit(f"IDF example contract FAILED: {exc}")
     print("IDF example contract PASSED")

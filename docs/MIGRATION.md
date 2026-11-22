@@ -99,9 +99,9 @@ scratch storage and leave the caller buffer unchanged if any frame fails.
 
 ## Supported integration
 
-The same ESP32 Backend builds with the pinned PioArduino platform and as a
-native ESP-IDF 6.0.1 component on ESP32-S2/S3. Existing Arduino applications
-keep their Backend, Bus and Driver bindings. For native use, pin the owner
-task to one core and budget up to about 5.8 ms of interrupt masking per
-AT21CS01 Standard-Speed segment. Native evidence covers local builds. The
-native example and CI are pending. See the [ESP-IDF integration guide](ESP_IDF.md).
+Existing Arduino applications keep their PioArduino platform and their
+Backend, Bus and Driver bindings. The packaged native component uses the
+same Backend and requires ESP-IDF 6.0.1 or later. CI builds with 6.0.1 on
+ESP32-S2 and ESP32-S3. For native use, pin the owner task to one core and
+budget up to about 5.8 ms of interrupt masking per AT21CS01 Standard-Speed
+segment. See the [ESP-IDF integration guide](ESP_IDF.md).

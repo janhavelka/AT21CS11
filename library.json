@@ -1,7 +1,7 @@
 {
   "name": "AT21CS01_AT21CS11",
   "version": "2.0.0",
-  "description": "Arduino/PlatformIO driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs on ESP32-S2/S3.",
+  "description": "Microchip AT21CS01 and AT21CS11 single-wire EEPROM driver for Arduino-ESP32 and native ESP-IDF on ESP32-S2/S3.",
   "keywords": [
     "microchip",
     "at21cs01",
@@ -10,7 +10,8 @@
     "eeprom",
     "esp32",
     "arduino",
-    "platformio"
+    "platformio",
+    "esp-idf"
   ],
   "authors": [
     {
@@ -32,7 +33,8 @@
   "homepage": "https://github.com/janhavelka/AT21CS11",
   "license": "MIT",
   "frameworks": [
-    "arduino"
+    "arduino",
+    "espidf"
   ],
   "platforms": [
     "espressif32"
@@ -49,6 +51,8 @@
       "include/AT21CS/**",
       "src/**",
       "library.json",
+      "CMakeLists.txt",
+      "idf_component.yml",
       "LICENSE",
       "README.md",
       "CHANGELOG.md",
@@ -58,7 +62,16 @@
       "docs/HARDWARE_VALIDATION.md",
       "examples/01_basic_bringup_cli/**",
       "examples/02_multi_device_cli/**",
-      "examples/common/**"
+      "examples/common/**",
+      "examples/esp_idf/basic/CMakeLists.txt",
+      "examples/esp_idf/basic/README.md",
+      "examples/esp_idf/basic/sdkconfig.defaults",
+      "examples/esp_idf/basic/sdkconfig.defaults.esp32s2",
+      "examples/esp_idf/basic/sdkconfig.defaults.esp32s3",
+      "examples/esp_idf/basic/components/AT21CS01_AT21CS11/CMakeLists.txt",
+      "examples/esp_idf/basic/main/CMakeLists.txt",
+      "examples/esp_idf/basic/main/GenerateBuildIdentity.cmake",
+      "examples/esp_idf/basic/main/main.cpp"
     ]
   }
 }

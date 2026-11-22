@@ -1,18 +1,20 @@
 # Native ESP-IDF integration
 
 The repository root is an ESP-IDF component for the AT21CS01 and AT21CS11.
-Use a source checkout for native integration. The current PlatformIO package
-ships the Arduino examples and this guide. Native CI and component packaging
-are pending.
+The packaged component requires ESP-IDF 6.0.1 or later. Builds cover version
+6.0.1 on ESP32-S2 and ESP32-S3.
+
+`library.json` lists `espidf` because the package ships the ESP-IDF component and native example; PlatformIO `framework = espidf` builds are not tested (only `idf.py` 6.0.1 for esp32s3/esp32s2).
 
 Example 01's command engine is framework-neutral. Its shell provides a
 millisecond clock, a non-blocking character reader and a bounded output sink.
 
 ## Native example
 
-`examples/esp_idf/basic/` runs example 01's 14 commands. Build it from the
-source checkout in an ESP-IDF 6.0.1 shell. Use one build directory and one
-sdkconfig per target so switching boards preserves each configuration.
+`examples/esp_idf/basic/` runs example 01's 14 commands. Start in the source
+checkout or extracted package root in an ESP-IDF 6.0.1 shell. Use one build
+directory and one sdkconfig per target so switching boards preserves each
+configuration.
 
 ```sh
 cd examples/esp_idf/basic
@@ -35,15 +37,15 @@ Provide an external SI/O pull-up. After release, allow at most 0.60
 microseconds in High Speed or 1.00 microsecond in Standard Speed for the
 line to rise. At 3.3 V the approximate High-Speed resistance limits are
 5.8 kOhm at 100 pF, 1.7 kOhm at 330 pF and 0.58 kOhm at 1000 pF. Hardware
-wiring, board overrides and first-session commands are in the example's
-`README.md`. A native build is not hardware validation.
+wiring, board overrides and first-session commands are in the packaged
+`examples/esp_idf/basic/README.md`. A native build is not hardware validation.
 
 ## Build evidence
 
-| ESP-IDF 6.0.1 target | PM disabled | `CONFIG_PM_ENABLE=y` |
-|---|---|---|
-| ESP32-S2 | Image linked | Image linked |
-| ESP32-S3 | Image linked | Image linked |
+| ESP-IDF 6.0.1 target | Smoke, PM disabled | Smoke, `CONFIG_PM_ENABLE=y` | CLI from checkout | CLI from package |
+|---|---|---|---|---|
+| ESP32-S2 | Image linked | Image linked | Image linked | Image linked |
+| ESP32-S3 | Image linked | Image linked | Image linked | Image linked |
 
 These results are build evidence only. The Backend objects have IRAM timing
 symbols and reference the GPIO, timer, ROM delay and FreeRTOS scheduler APIs.
@@ -51,14 +53,22 @@ Only the PM-enabled objects reference the PM lock calls. Hardware and light
 sleep were not run. PlatformIO's ESP-IDF framework, other targets and other
 SDK versions are untested.
 
+`esp-idf-example` builds the checked-out CLI and checks its Backend object
+for IRAM placement. `esp-idf-smoke` checks the default and PM-enabled smoke
+images and their SDK references. `package-payload` validates the archive's
+exact file list and exports it with its SHA-256 checksum. `package-idf`
+verifies that checksum and builds the packaged CLI in a fresh `consumer/`
+directory with no checkout. A build from an extracted archive reports
+`unknown` for both the source commit and working-tree status.
+
 ## Add the component
 
-Place the source checkout in your project's `components/AT21CS01_AT21CS11/`.
+Place the extracted package or checkout in your project's `components/AT21CS01_AT21CS11/`.
 A component that uses the library privately can declare
 `PRIV_REQUIRES AT21CS01_AT21CS11` in its own `idf_component_register`.
-If the checkout lives elsewhere, create a fixed-name wrapper at
+If the component lives elsewhere, create a fixed-name wrapper at
 `components/AT21CS01_AT21CS11/CMakeLists.txt` containing one line.
-Adjust the relative path to your checkout.
+Adjust the relative path to its root.
 
 ```cmake
 include("${CMAKE_CURRENT_LIST_DIR}/../../path/to/checkout/CMakeLists.txt")

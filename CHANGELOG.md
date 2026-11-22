@@ -6,11 +6,17 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Shipped the ESP-IDF component and example 01 in the package. CI builds
+  the native CLI on ESP32-S2 and ESP32-S3 from both the checkout and a
+  checksum-verified package archive. Native CI also checks Backend IRAM
+  placement in the example and both power-management configurations of the
+  smoke consumer.
 - Added the native ESP-IDF shell for example 01. The same 14 commands and
   hot-plug policy run over USB CDC on ESP32-S2 and USB Serial/JTAG on ESP32-S3.
   Both ESP-IDF 6.0.1 images link and pass the Backend IRAM object check.
-  Hardware and runtime stack measurements are pending.
-- Added a native ESP-IDF 6.0.1 component for ESP32-S2 and ESP32-S3. Local
+  Native hardware and runtime stack measurements were not run.
+- Added a native component requiring ESP-IDF 6.0.1 or later. Only 6.0.1 is
+  build-tested on ESP32-S2 and ESP32-S3. Local
   smoke images link with power management off and on. The [integration
   guide](docs/ESP_IDF.md) covers the build and the AT21CS01 Standard-Speed
   interrupt-masking budget of up to about 5.8 ms per segment.

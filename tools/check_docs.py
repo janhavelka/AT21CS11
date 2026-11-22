@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import unquote
 
+from check_package import CheckFailure, package_path_allowed, validate_framework_text
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "2.0.0"
@@ -41,6 +42,7 @@ CONSUMER_DOCS = (
     ROOT / "docs" / "HARDWARE_VALIDATION.md",
 )
 PACKAGED_DOCS = {
+    ROOT / "examples" / "esp_idf" / "basic" / "README.md",
     ROOT / "README.md",
     ROOT / "CHANGELOG.md",
     ROOT / "docs" / "ESP_IDF.md",
@@ -48,23 +50,6 @@ PACKAGED_DOCS = {
     ROOT / "docs" / "IRREVERSIBLE_OPERATIONS.md",
     ROOT / "docs" / "HARDWARE_VALIDATION.md",
 }
-PACKAGE_ROOT_FILES = {
-    "library.json",
-    "LICENSE",
-    "README.md",
-    "CHANGELOG.md",
-    "docs/ESP_IDF.md",
-    "docs/MIGRATION.md",
-    "docs/IRREVERSIBLE_OPERATIONS.md",
-    "docs/HARDWARE_VALIDATION.md",
-}
-PACKAGE_PREFIXES = (
-    "include/AT21CS/",
-    "src/",
-    "examples/01_basic_bringup_cli/",
-    "examples/02_multi_device_cli/",
-    "examples/common/",
-)
 
 EXAMPLES = (
     "examples/esp_idf/basic",
@@ -111,7 +96,6 @@ FORBIDDEN_ACTIVE_TEXT = (
     "driverState(",
     "getSettings(",
     "LoadCellMap",
-    "framework = espidf",
     "ChannelRequest",
     "ChannelResult",
     "CachedChannelStatus",
@@ -151,10 +135,6 @@ def sha256_lf_text(path: Path) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest().upper()
 
 
-def package_allowed(relative: str) -> bool:
-    return relative in PACKAGE_ROOT_FILES or relative.startswith(PACKAGE_PREFIXES)
-
-
 def check_links(failures: list[str]) -> None:
     root = ROOT.resolve()
     for document in CONSUMER_DOCS:
@@ -162,6 +142,12 @@ def check_links(failures: list[str]) -> None:
             failures.append(f"missing consumer document: {document.relative_to(ROOT)}")
             continue
         text = document.read_text(encoding="utf-8")
+        # Permanent exception: only README.md and docs/ESP_IDF.md may carry
+        # the single approved sentence about PlatformIO's ESP-IDF framework.
+        try:
+            validate_framework_text(document.relative_to(ROOT).as_posix(), text)
+        except CheckFailure as error:
+            failures.append(str(error))
         for raw in LINK.findall(text):
             target = raw.strip().split(maxsplit=1)[0].strip("<>")
             if target.startswith(("https://", "mailto:", "#")):
@@ -179,7 +165,7 @@ def check_links(failures: list[str]) -> None:
                 continue
             if document in PACKAGED_DOCS:
                 relative = resolved.relative_to(root).as_posix()
-                if not package_allowed(relative):
+                if not package_path_allowed(relative):
                     failures.append(
                         f"packaged document links outside package: "
                         f"{document.relative_to(ROOT)} -> {relative}"

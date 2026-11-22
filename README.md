@@ -16,9 +16,11 @@ Use the documentation at that tag for the released behavior, and review
 
 The core API is framework-neutral. One ESP32 Backend serves Arduino-ESP32
 3.3.11 on PioArduino `platform-espressif32` 55.03.311 and native ESP-IDF
-6.0.1 on ESP32-S2 and ESP32-S3. Native evidence covers local component
-builds with power management enabled and disabled, and linked images of the
-single-device CLI on both targets. See the [ESP-IDF integration guide](docs/ESP_IDF.md).
+6.0.1 on ESP32-S2 and ESP32-S3. On both targets, CI builds the native CLI
+from source and from the extracted package and links the component with power
+management enabled and disabled. See the [ESP-IDF integration guide](docs/ESP_IDF.md).
+
+`library.json` lists `espidf` because the package ships the ESP-IDF component and native example; PlatformIO `framework = espidf` builds are not tested (only `idf.py` 6.0.1 for esp32s3/esp32s2).
 
 The authoritative protocol source is Microchip DS20005857I:
 
@@ -306,14 +308,14 @@ qualified.
 ## Examples and configuration
 
 - **01, single-device CLI.** The [Arduino shell](examples/01_basic_bringup_cli/main.cpp)
-  and native ESP-IDF shell in `examples/esp_idf/basic/` share the same
+  and [native ESP-IDF shell](examples/esp_idf/basic/main/main.cpp) share the same
   [14-command engine](examples/common/BringupCli.h) and hot-plug service.
 - **02, two-wire/two-device CLI.** The [Arduino example](examples/02_multi_device_cli/main.cpp)
   services two independent wires from a single owner.
 
 Both programs use the same [board settings](examples/common/BoardConfig.h).
-The current package ships the Arduino shells. To build the native shell from
-a source checkout, run these commands in an ESP-IDF 6.0.1 environment.
+To build the native shell, start in the checkout or extracted package root
+in an ESP-IDF 6.0.1 environment.
 
 ```sh
 cd examples/esp_idf/basic
@@ -346,17 +348,22 @@ python scripts/generate_version.py
 python scripts/generate_version.py --check
 ```
 
-The package export contains only public headers, sources, metadata, current
-consumer documentation and the two examples. The principal local gates are:
+The package ships the ESP-IDF component, public headers, sources, consumer
+documentation, metadata and both example programs. Run the following checks
+from a checkout.
 
 ```text
 .\scripts\pio.cmd test -e native
 .\scripts\pio.cmd test -e native_sanitize
 python tools/check_cli_contract.py
+python tools/check_idf_example_contract.py
+python tools/test_check_idf_example_contract.py
 python tools/check_docs.py
 python tools/check_package.py --inspect
 python tools/check_package.py --build-platform-neutral
 python tools/check_package.py --build-arduino
+python tools/check_package.py --build-idf --out C:\esp\build\at21cs11-pkg --target esp32s2 --idf-command "C:\esp\idf.cmd 6.0.1"
+python tools/check_package.py --build-idf --out C:\esp\build\at21cs11-pkg --target esp32s3 --idf-command "C:\esp\idf.cmd 6.0.1"
 ```
 
 See [migration notes](docs/MIGRATION.md),

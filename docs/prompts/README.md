@@ -2,8 +2,8 @@
 
 Prepared 2026-11-16 on `main` at `9dc5b144` (clean; equal to the local
 `origin/main` ref, not re-fetched while writing).
-**Status: IN PROGRESS.** These files are executable instructions for a later
-coder. Writing them changed no driver, Backend, example, package, checker or CI
+**Status: EXECUTED (historical requirements, not open work); hardware NOT RUN.**
+These files record the original instructions. Writing them changed no driver, Backend, example, package, checker or CI
 behavior. The SHA is an evidence anchor, not an instruction to reset; record
 the fetched `main` HEAD when a prompt starts and re-read anything that moved.
 
@@ -71,7 +71,7 @@ restore, merge, cherry-pick or resume any of it; build fresh on the current core
 |---:|---|---|---|---|
 | 01 | [ESP-IDF component and shared ESP32 Backend](01_IDF_COMPONENT_AND_BACKEND.md) | none | software, SDK build | DONE |
 | 02 | [Shared CLI engine and native port of example 01](02_SHARED_CLI_AND_NATIVE_EXAMPLE.md) | 01 synced | software, SDK build | DONE |
-| 03 | [CI, package, final docs and the remote-CI checkpoint](03_CI_PACKAGE_AND_CHECKPOINT.md) | 01, 02 synced | software, CI | NOT STARTED |
+| 03 | [CI, package, final docs and the remote-CI checkpoint](03_CI_PACKAGE_AND_CHECKPOINT.md) | 01, 02 synced | software, CI | DONE |
 
 After execution this folder stays in `docs/prompts/` as executed historical
 requirements (TUSB32x precedent); never delete or archive it. The last prompt

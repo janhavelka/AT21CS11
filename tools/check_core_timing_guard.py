@@ -298,9 +298,9 @@ def main() -> int:
     else:
         check_idf_component(metadata.get("version", ""), errors)
         frameworks = metadata.get("frameworks", [])
-        if frameworks != ["arduino"]:
+        if frameworks != ["arduino", "espidf"]:
             errors.append(
-                "library.json frameworks must contain only arduino: "
+                "library.json frameworks must be [\"arduino\", \"espidf\"]: "
                 f"{frameworks!r}"
             )
 

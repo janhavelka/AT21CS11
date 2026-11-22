@@ -184,7 +184,11 @@ Do not modify its technical content unless explicitly requested by the maintaine
   Never install PlatformIO's `framework-espidf` package.
 - Both shells for example 01 delegate to `examples/common/BringupCli.h`.
   Keep the native shell in `examples/esp_idf/basic/` and example 02 Arduino-only.
-- Native CI and package work is tracked in [the promptset](docs/prompts/README.md).
+- Keep the native component and example in the package's exact file allowlist.
+  CI builds the checkout with `esp-idf-example` and `esp-idf-smoke` on ESP32-S2
+  and ESP32-S3. Check Backend IRAM placement, SDK references and linked PM
+  wrappers. `package-payload` exports the validated archive and checksum.
+  `package-idf` builds the extracted example on both targets without a checkout.
 
 ## Commit and pull request attribution
 
