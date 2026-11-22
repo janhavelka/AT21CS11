@@ -1,0 +1,4 @@
+# Use the native ESP32-S3 USB Serial/JTAG port for input and output.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Route the CLI through its primary port only.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

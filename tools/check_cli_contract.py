@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import configparser
+import glob
 import pathlib
 import re
 import sys
+
+import check_idf_example_contract as native_example
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -18,6 +22,7 @@ EXPECTED_EXAMPLE_FILES = {
     "common/CommandContract.h",
     "common/StatusText.h",
     "common/WireInstance.h",
+    *(f"esp_idf/basic/{name}" for name in native_example.REQUIRED_FILES),
 }
 
 BOARD_DEFAULTS = {
@@ -152,12 +157,15 @@ def cpp_source(path: pathlib.Path) -> str:
     return re.sub(r"//[^\n]*|/\*.*?\*/", "", read_text(path), flags=re.S)
 
 
+def example_sources():
+    return native_example.source_files(ROOT / native_example.EXAMPLE, ROOT / "examples")
+
+
 def check_layout() -> None:
     examples = ROOT / "examples"
     actual = {
         path.relative_to(examples).as_posix()
-        for path in examples.rglob("*")
-        if path.is_file()
+        for path in example_sources()
     }
     if actual != EXPECTED_EXAMPLE_FILES:
         fail(
@@ -166,7 +174,6 @@ def check_layout() -> None:
             f"extra={sorted(actual - EXPECTED_EXAMPLE_FILES)}"
         )
     for obsolete in (
-        ROOT / "tools" / "check_idf_example_contract.py",
         ROOT / "test" / "consumer" / "firmware_owner",
         ROOT / "tools" / "run_firmware_owner_fixture.py",
     ):
@@ -330,6 +337,7 @@ def check_command_contract() -> None:
     single = cpp_source(ROOT / "examples" / "common" / "BringupCli.h")
     multi = cpp_source(ROOT / "examples" / "02_multi_device_cli" / "main.cpp")
     check_shell(ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp", "setup", "loop")
+    check_shell(ROOT / native_example.EXAMPLE / "main/main.cpp", "app_main", "app_main")
     if not re.search(r"\bdispatch\(\s*REGISTRATIONS\s*,", function_body(single, "step")):
         fail("BringupCli must dispatch its single-device registration table")
     if registrations(single, "SINGLE") != SINGLE_REGISTRATIONS:
@@ -367,13 +375,19 @@ def check_sources() -> None:
         for token in ("Arduino.h", "Serial.", "millis(", "delay("):
             if token in source:
                 fail(f"framework token in shared CLI code: {path.name}: {token!r}")
-    combined = "\n".join(
-        read_text(path)
-        for path in (ROOT / "examples").rglob("*")
-        if path.is_file()
-    )
+    texts = []
+    for path in example_sources():
+        source = read_text(path)
+        texts.append(source)
+        if ROOT / native_example.EXAMPLE in path.parents:
+            tokens = native_example.ARDUINO_TOKENS if path.suffix in (".h", ".cpp") else ()
+        else:
+            tokens = ("app_main", "freertos/task.h", "gpio_set_level", "String ")
+        for token in tokens:
+            if token in source:
+                fail(f"{path.relative_to(ROOT)}: forbidden framework token {token!r}")
+    combined = "\n".join(texts)
     for token in (
-        "String ",
         "String<",
         "LoadCell",
         "readCurrentAddress",
@@ -383,9 +397,6 @@ def check_sources() -> None:
         "permanentlyEnableRomZone",
         "permanentlyFreezeRomZones",
         "writeSecurityUser",
-        "gpio_set_level",
-        "freertos/task.h",
-        "app_main",
         "At21csOwner",
         "ChannelRequest",
         "ChannelResult",
@@ -414,8 +425,51 @@ def check_sources() -> None:
             fail(f"wire helper missing production-path token {token!r}")
 
 
+def check_native_source_filters(ini: str) -> None:
+    # Match build_src_filter in order, including parent environments and
+    # directory globs. PlatformIO includes all descendants of matched dirs.
+    config = configparser.ConfigParser(interpolation=None, inline_comment_prefixes=(";", "#"))
+    config.read_string(ini)
+    def setting(section: str, key: str, default: str | None = None, trail: tuple = ()) -> str:
+        if (section, key) in trail:
+            fail(f"circular PlatformIO setting: {section}.{key}")
+        pending = ["env", section] if section.startswith("env:") else [section]
+        visited = set()
+        while pending:
+            name = pending.pop()
+            if name in visited or name not in config:
+                continue
+            visited.add(name)
+            if key in config[name]:
+                return re.sub(
+                    r"\$\{([^{}.]+)\.([^{}]+)\}",
+                    lambda match: setting(match[1], match[2], trail=(*trail, (section, key))),
+                    config[name][key],
+                )
+            pending.extend(re.findall(r"[^,\s]+", config[name].get("extends", "")))
+        if default is None:
+            fail(f"unresolved PlatformIO setting: {section}.{key}")
+        return default
+
+    source_dir = ROOT / setting("platformio", "src_dir", "src")
+    native = ROOT / native_example.EXAMPLE / "main/main.cpp"
+    native_paths = {native, *native.parents}
+    for section in config.sections():
+        if not section.startswith("env:"):
+            continue
+        selected = False
+        filters = setting(section, "build_src_filter", "+<*>") or "+<*>"
+        for action, pattern in re.findall(r"([+-])<([^>]+)>", filters):
+            matches = glob.iglob(pattern.replace("\\", "/"), root_dir=source_dir, recursive=True)
+            if any((source_dir / name).resolve() in native_paths for name in matches):
+                selected = action == "+"
+        if selected:
+            fail(f"{section} selects the native ESP-IDF example")
+
+
 def check_platformio() -> None:
     ini = read_text(ROOT / "platformio.ini")
+    check_native_source_filters(ini)
     envs = set(re.findall(r"^\[env:(ex_[A-Za-z0-9_]+)\]$", ini, re.M))
     expected = {"ex_cli_s3", "ex_cli_s2", "ex_multi_s3", "ex_multi_s2"}
     if envs != expected:

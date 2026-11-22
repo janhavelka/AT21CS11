@@ -2,11 +2,41 @@
 
 The repository root is an ESP-IDF component for the AT21CS01 and AT21CS11.
 Use a source checkout for native integration. The current PlatformIO package
-ships the Arduino examples and this guide. The native example, native CI and
-component packaging are pending.
+ships the Arduino examples and this guide. Native CI and component packaging
+are pending.
 
 Example 01's command engine is framework-neutral. Its shell provides a
 millisecond clock, a non-blocking character reader and a bounded output sink.
+
+## Native example
+
+`examples/esp_idf/basic/` runs example 01's 14 commands. Build it from the
+source checkout in an ESP-IDF 6.0.1 shell. Use one build directory and one
+sdkconfig per target so switching boards preserves each configuration.
+
+```sh
+cd examples/esp_idf/basic
+idf.py -B ../../../build-example-s2 -D SDKCONFIG=../../../sdkconfig.esp32s2 set-target esp32s2 build
+idf.py -B ../../../build-example-s3 -D SDKCONFIG=../../../sdkconfig.esp32s3 set-target esp32s3 build
+```
+
+ESP32-S2 uses the native USB CDC console. ESP32-S3 uses USB Serial/JTAG.
+Both use LF passthrough for input and output, so the engine's explicit CRLF
+and LF reach the console unchanged. The startup banner identifies the
+library version, source commit and status, SDK version and target.
+The CPU0 main task owns the wire and yields one tick after each input and
+service pass. The project uses a 240 MHz CPU, a 1000 Hz tick, `-Os`, 4 MB
+flash and an 8192-byte main-task stack with power management disabled.
+The engine stores its 128-byte input line in static storage. The formatter
+uses a 256-byte stack buffer and reads use up to 32 bytes of payload.
+The runtime stack high-water mark has not been measured.
+
+Provide an external SI/O pull-up. After release, allow at most 0.60
+microseconds in High Speed or 1.00 microsecond in Standard Speed for the
+line to rise. At 3.3 V the approximate High-Speed resistance limits are
+5.8 kOhm at 100 pF, 1.7 kOhm at 330 pF and 0.58 kOhm at 1000 pF. Hardware
+wiring, board overrides and first-session commands are in the example's
+`README.md`. A native build is not hardware validation.
 
 ## Build evidence
 

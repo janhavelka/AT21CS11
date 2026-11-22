@@ -17,8 +17,8 @@ Use the documentation at that tag for the released behavior, and review
 The core API is framework-neutral. One ESP32 Backend serves Arduino-ESP32
 3.3.11 on PioArduino `platform-espressif32` 55.03.311 and native ESP-IDF
 6.0.1 on ESP32-S2 and ESP32-S3. Native evidence covers local component
-builds with power management enabled and disabled. The native example and CI
-are pending. See the [ESP-IDF integration guide](docs/ESP_IDF.md).
+builds with power management enabled and disabled, and linked images of the
+single-device CLI on both targets. See the [ESP-IDF integration guide](docs/ESP_IDF.md).
 
 The authoritative protocol source is Microchip DS20005857I:
 
@@ -305,14 +305,21 @@ qualified.
 
 ## Examples and configuration
 
-The repository and package contain exactly two Arduino examples:
+- **01, single-device CLI.** The [Arduino shell](examples/01_basic_bringup_cli/main.cpp)
+  and native ESP-IDF shell in `examples/esp_idf/basic/` share the same
+  [14-command engine](examples/common/BringupCli.h) and hot-plug service.
+- **02, two-wire/two-device CLI.** The [Arduino example](examples/02_multi_device_cli/main.cpp)
+  services two independent wires from a single owner.
 
-- [single-device CLI](examples/01_basic_bringup_cli/main.cpp)
-- [two-wire/two-device CLI](examples/02_multi_device_cli/main.cpp)
+Both programs use the same [board settings](examples/common/BoardConfig.h).
+The current package ships the Arduino shells. To build the native shell from
+a source checkout, run these commands in an ESP-IDF 6.0.1 environment.
 
-Example 01's [command engine](examples/common/BringupCli.h) handles the
-14 single-device commands and hot-plug service. The Arduino shell supplies
-the clock, input and output. Both examples use the same [board settings](examples/common/BoardConfig.h).
+```sh
+cd examples/esp_idf/basic
+idf.py -B ../../../build-example-s2 -D SDKCONFIG=../../../sdkconfig.esp32s2 set-target esp32s2 build
+idf.py -B ../../../build-example-s3 -D SDKCONFIG=../../../sdkconfig.esp32s3 set-target esp32s3 build
+```
 
 | Setting | Primary | Secondary | Committed default |
 |---|---|---|---|
@@ -322,8 +329,9 @@ the clock, input and output. Both examples use the same [board settings](example
 | address bits | `AT21CS_EXAMPLE_PRIMARY_ADDRESS_BITS` | `AT21CS_EXAMPLE_SECONDARY_ADDRESS_BITS` | `0`, `0` |
 | expected part (`1` or `11`) | `AT21CS_EXAMPLE_PRIMARY_PART` | `AT21CS_EXAMPLE_SECONDARY_PART` | `11`, `11` |
 
-Override these with PlatformIO `build_flags`. Enabled detect pins require the
-external bias described above.
+Override these with PlatformIO `build_flags` or native
+`target_compile_definitions` on the example's main component. Enabled detect
+pins require the external bias described above.
 
 Build environments are `ex_cli_s3`, `ex_cli_s2`, `ex_multi_s3` and
 `ex_multi_s2`.

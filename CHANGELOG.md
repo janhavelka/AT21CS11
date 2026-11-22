@@ -6,6 +6,10 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- Added the native ESP-IDF shell for example 01. The same 14 commands and
+  hot-plug policy run over USB CDC on ESP32-S2 and USB Serial/JTAG on ESP32-S3.
+  Both ESP-IDF 6.0.1 images link and pass the Backend IRAM object check.
+  Hardware and runtime stack measurements are pending.
 - Added a native ESP-IDF 6.0.1 component for ESP32-S2 and ESP32-S3. Local
   smoke images link with power management off and on. The [integration
   guide](docs/ESP_IDF.md) covers the build and the AT21CS01 Standard-Speed

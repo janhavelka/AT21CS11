@@ -72,7 +72,8 @@ AGENTS.md
 
 Rules:
 - `examples/common/` is not part of the library.
-- Keep example set minimal: one full single-device CLI and one multi-device CLI.
+- Keep exactly two example programs. Example 01 has Arduino and native ESP-IDF
+  shells over one shared single-device CLI engine. Example 02 is an Arduino multi-device CLI.
 - Public headers must stay in `include/AT21CS/`.
 - No board-specific pin defaults in library code.
 
@@ -181,9 +182,9 @@ Do not modify its technical content unless explicitly requested by the maintaine
 - Use `C:\esp\idf.cmd 6.0.1` for native builds on Windows, following the
   shared project instructions for isolated toolchains and short build paths.
   Never install PlatformIO's `framework-espidf` package.
-- Keep exactly two shipped Arduino examples: one full single-device CLI and one
-  concise multi-device CLI.
-- The remaining native example, CI and package work is tracked in [the promptset](docs/prompts/README.md).
+- Both shells for example 01 delegate to `examples/common/BringupCli.h`.
+  Keep the native shell in `examples/esp_idf/basic/` and example 02 Arduino-only.
+- Native CI and package work is tracked in [the promptset](docs/prompts/README.md).
 
 ## Commit and pull request attribution
 

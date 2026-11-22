@@ -1,0 +1,16 @@
+# Match the CPU frequency used for the ESP32 timing builds.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# Match the Arduino owner's 1 ms scheduler tick.
+CONFIG_FREERTOS_HZ=1000
+# Build the timing helpers with the qualified size optimization.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+# Use a fixed CPU frequency for this example.
+# CONFIG_PM_ENABLE is not set
+# Match the Arduino loop task's stack budget.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# The Arduino example environments use boards with 4 MB flash.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# Let the command parser receive CR, LF and CRLF unchanged.
+CONFIG_LIBC_STDIN_LINE_ENDING_LF=y
+# Preserve both the engine's literal CRLF and its bare LF output.
+CONFIG_LIBC_STDOUT_LINE_ENDING_LF=y

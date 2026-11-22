@@ -30,6 +30,7 @@ PROTECTED_REPORT = ROOT / "docs" / "AT21CS01_AT21CS11_complete_driver_report.md"
 PROTECTED_SHA256 = "274C934F7F828111A2E536E50B1D5C85D25B09158D6C9F7B6F273D1AD8C2A2A9"
 
 CONSUMER_DOCS = (
+    ROOT / "examples" / "esp_idf" / "basic" / "README.md",
     ROOT / "README.md",
     ROOT / "CHANGELOG.md",
     ROOT / "CONTRIBUTING.md",
@@ -66,6 +67,7 @@ PACKAGE_PREFIXES = (
 )
 
 EXAMPLES = (
+    "examples/esp_idf/basic",
     "examples/01_basic_bringup_cli",
     "examples/02_multi_device_cli",
 )
@@ -127,7 +129,6 @@ OBSOLETE_PATHS = (
     "docs/pdf-extracted-md",
     "examples/espidf_basic",
     "test/consumer/firmware_owner",
-    "tools/check_idf_example_contract.py",
     "tools/run_firmware_owner_fixture.py",
     "docs/implementation-prompts",
     "docs/validation",
@@ -301,6 +302,8 @@ def check_idf_guide(failures: list[str]) -> None:
         "--elf",
         "both wrappers reside in `.iram0.text` in the final ELF",
         "idf.py -B",
+        "examples/esp_idf/basic/",
+        "A native build is not hardware validation.",
     ):
         if expected not in text:
             failures.append(f"ESP-IDF guide missing: {expected}")

@@ -70,7 +70,7 @@ restore, merge, cherry-pick or resume any of it; build fresh on the current core
 | # | Prompt | Requires | Type | Status |
 |---:|---|---|---|---|
 | 01 | [ESP-IDF component and shared ESP32 Backend](01_IDF_COMPONENT_AND_BACKEND.md) | none | software, SDK build | DONE |
-| 02 | [Shared CLI engine and native port of example 01](02_SHARED_CLI_AND_NATIVE_EXAMPLE.md) | 01 synced | software, SDK build | NOT STARTED |
+| 02 | [Shared CLI engine and native port of example 01](02_SHARED_CLI_AND_NATIVE_EXAMPLE.md) | 01 synced | software, SDK build | DONE |
 | 03 | [CI, package, final docs and the remote-CI checkpoint](03_CI_PACKAGE_AND_CHECKPOINT.md) | 01, 02 synced | software, CI | NOT STARTED |
 
 After execution this folder stays in `docs/prompts/` as executed historical

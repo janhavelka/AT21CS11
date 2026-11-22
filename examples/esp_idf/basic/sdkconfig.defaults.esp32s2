@@ -1,0 +1,4 @@
+# Use the native USB OTG port with the ESP32-S2 ROM CDC driver.
+CONFIG_ESP_CONSOLE_USB_CDC=y
+# Route the CLI through its primary port only.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
