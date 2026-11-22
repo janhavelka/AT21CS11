@@ -29,12 +29,43 @@ REQUIRED_METHODS = (
     "Esp32Transport::_readAck(",
 )
 
+PM_LOCK_METHODS = (
+    "AT21CS::Esp32Transport::_acquireTimingLock()",
+    "AT21CS::Esp32Transport::_releaseTimingLock()",
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--objdump", required=True, type=Path)
     parser.add_argument("--object", required=True, type=Path)
+    parser.add_argument(
+        "--elf", type=Path, metavar="PM_ELF",
+        help="check PM timing lock wrappers in the linked ESP-IDF image",
+    )
+    parser.add_argument(
+        "--require-undefined", nargs="+", action="extend", default=[], metavar="SYMBOL",
+        help="require each named external reference in the object symbol table",
+    )
     return parser.parse_args()
+
+
+def symbol_table(objdump: Path, path: Path, *, demangle: bool = False) -> str:
+    command = [str(objdump), "-t"]
+    if demangle:
+        command.append("-C")
+    return subprocess.check_output(
+        [*command, str(path)], text=True, stderr=subprocess.STDOUT,
+    )
+
+
+def function_symbols(table: str) -> list[tuple[str, str]]:
+    symbols: list[tuple[str, str]] = []
+    for line in table.splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) == 6 and fields[2] == "F":
+            symbols.append((fields[3], fields[5]))
+    return symbols
 
 
 def main() -> int:
@@ -42,34 +73,20 @@ def main() -> int:
     if not args.objdump.is_file() or not args.object.is_file():
         print("IRAM section check FAILED: objdump or object is missing")
         return 2
-
-    completed = subprocess.run(
-        [str(args.objdump), "-t", "-C", str(args.object)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if completed.returncode != 0:
-        print(completed.stderr, end="")
-        return completed.returncode
-
-    raw_completed = subprocess.run(
-        [str(args.objdump), "-t", str(args.object)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if raw_completed.returncode != 0:
-        print(raw_completed.stderr, end="")
-        return raw_completed.returncode
-
-    symbols: list[tuple[str, str]] = []
-    for line in completed.stdout.splitlines():
-        fields = line.split(maxsplit=5)
-        if len(fields) == 6 and fields[2] == "F":
-            symbols.append((fields[3], fields[5]))
-
     failures: list[str] = []
+    try:
+        symbols = function_symbols(symbol_table(args.objdump, args.object, demangle=True))
+        raw_table = symbol_table(args.objdump, args.object)
+        if args.elf:
+            linked = function_symbols(symbol_table(args.objdump, args.elf, demangle=True))
+            for method in PM_LOCK_METHODS:
+                sections = {section for section, name in linked if method in name}
+                if sections != {".iram0.text"}:
+                    failures.append(f"linked {method}: expected .iram0.text, found {sorted(sections)}")
+    except subprocess.CalledProcessError as exc:
+        print(exc.output, end="")
+        return exc.returncode
+
     for method in REQUIRED_METHODS:
         matches = [entry for entry in symbols if method in entry[1]]
         if not matches:
@@ -78,15 +95,19 @@ def main() -> int:
             if not section.startswith(".iram1"):
                 failures.append(f"{section}: {name}")
 
-    raw_symbols: list[tuple[str, str]] = []
-    for line in raw_completed.stdout.splitlines():
+    undefined: set[str] = set()
+    for line in raw_table.splitlines():
         fields = line.split(maxsplit=5)
-        if len(fields) == 6 and fields[2] == "F":
-            raw_symbols.append((fields[3], fields[5]))
+        if "*UND*" in fields:
+            undefined.add(fields[-1])
+
+    for name in args.require_undefined:
+        if name not in undefined:
+            failures.append(f"missing undefined reference: {name}")
 
     transfer_callable_prefix = "_ZZN6AT21CS14Esp32Transport9_transfer"
     timing_lambdas = [
-        entry for entry in raw_symbols
+        entry for entry in function_symbols(raw_table)
         if entry[1].startswith(transfer_callable_prefix)
     ]
     for section, name in timing_lambdas:
@@ -109,6 +130,10 @@ def main() -> int:
         f"{len(REQUIRED_METHODS)} timing methods and "
         f"{len(timing_lambdas)} emitted timing lambdas"
     )
+    if args.require_undefined:
+        print("Required undefined references: " + ", ".join(args.require_undefined))
+    if args.elf:
+        print("Linked PM timing lock wrappers: .iram0.text")
     return 0
 
 

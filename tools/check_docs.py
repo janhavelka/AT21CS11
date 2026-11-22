@@ -34,6 +34,7 @@ CONSUMER_DOCS = (
     ROOT / "CHANGELOG.md",
     ROOT / "CONTRIBUTING.md",
     ROOT / "SECURITY.md",
+    ROOT / "docs" / "ESP_IDF.md",
     ROOT / "docs" / "MIGRATION.md",
     ROOT / "docs" / "IRREVERSIBLE_OPERATIONS.md",
     ROOT / "docs" / "HARDWARE_VALIDATION.md",
@@ -41,6 +42,7 @@ CONSUMER_DOCS = (
 PACKAGED_DOCS = {
     ROOT / "README.md",
     ROOT / "CHANGELOG.md",
+    ROOT / "docs" / "ESP_IDF.md",
     ROOT / "docs" / "MIGRATION.md",
     ROOT / "docs" / "IRREVERSIBLE_OPERATIONS.md",
     ROOT / "docs" / "HARDWARE_VALIDATION.md",
@@ -50,6 +52,7 @@ PACKAGE_ROOT_FILES = {
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
+    "docs/ESP_IDF.md",
     "docs/MIGRATION.md",
     "docs/IRREVERSIBLE_OPERATIONS.md",
     "docs/HARDWARE_VALIDATION.md",
@@ -258,6 +261,51 @@ def check_safety_guidance(failures: list[str]) -> None:
             failures.append(f"no-detect guidance missing: {expected}")
 
 
+def check_idf_guide(failures: list[str]) -> None:
+    guide = ROOT / "docs" / "ESP_IDF.md"
+    if not guide.is_file():
+        return  # check_links reports missing consumer documents.
+
+    text = " ".join(guide.read_text(encoding="utf-8").split())
+    for expected in (
+        "ESP-IDF 6.0.1 target",
+        "ESP32-S2 | Image linked | Image linked",
+        "ESP32-S3 | Image linked | Image linked",
+        "build evidence only",
+        "Hardware and light sleep were not run",
+        "PlatformIO's ESP-IDF framework, other targets and other SDK versions are untested",
+        "repository root is an ESP-IDF component",
+        "components/AT21CS01_AT21CS11/CMakeLists.txt",
+        "PRIV_REQUIRES esp_driver_gpio esp_hal_gpio esp_pm esp_timer",
+        "defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM)",
+        "at most 8 payload bytes",
+        "9 ms for a High-Speed transfer",
+        "24 ms for a Standard-Speed transfer",
+        "9 ms for a presence check",
+        "released-high wait of at most 10 ms",
+        "suspends the scheduler per frame",
+        "Standard-Speed segment can mask interrupts for up to about 5.8 ms",
+        "../README.md#esp32-pull-up-and-rise-time-envelope",
+        "240 MHz", "`-Os`", "1000 Hz",
+        "CONFIG_PM_ENABLE=y",
+        "`Esp32Transport::begin()` creates an `ESP_PM_CPU_FREQ_MAX` lock",
+        "holds it across the timing segments",
+        "one task pinned to one core",
+        "per-core cycle counts with interrupts enabled",
+        "main task is pinned to CPU0 by default",
+        "ISR use is unsupported",
+        "tools/check_esp32_iram_sections.py",
+        "checks IRAM placement",
+        "`_acquireTimingLock()` and `_releaseTimingLock()`",
+        "component maps both wrappers into IRAM",
+        "--elf",
+        "both wrappers reside in `.iram0.text` in the final ELF",
+        "idf.py -B",
+    ):
+        if expected not in text:
+            failures.append(f"ESP-IDF guide missing: {expected}")
+
+
 def check_examples(failures: list[str]) -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     platformio = (ROOT / "platformio.ini").read_text(encoding="utf-8")
@@ -321,6 +369,7 @@ def check_versions(failures: list[str]) -> None:
     if "HAVE_DOT               = NO" not in doxyfile:
         failures.append("Doxygen unexpectedly requires Graphviz")
     for document in (
+        "docs/ESP_IDF.md",
         "docs/IRREVERSIBLE_OPERATIONS.md",
         "docs/HARDWARE_VALIDATION.md",
     ):
@@ -392,6 +441,7 @@ def main() -> int:
         check_links(failures)
         check_public_symbols(failures)
         check_safety_guidance(failures)
+        check_idf_guide(failures)
         check_examples(failures)
         check_versions(failures)
         check_artifacts(failures)

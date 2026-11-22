@@ -8,11 +8,11 @@
 #include "AT21CS/Status.h"
 #include "AT21CS/Transport.h"
 
-#if !defined(ARDUINO_ARCH_ESP32) && !defined(AT21CS_TESTING)
-#error "Esp32Transport is available only for Arduino-ESP32"
+#if !(defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM)) && !defined(AT21CS_TESTING)
+#error "Esp32Transport requires Arduino-ESP32 or native ESP-IDF"
 #endif
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM)
 #include <esp_attr.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
@@ -164,13 +164,13 @@ class Esp32Transport {
 
   Esp32TransportConfig _config{};
   bool _initialized = false;
-#if defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM)
   portMUX_TYPE _timingMux = portMUX_INITIALIZER_UNLOCKED;
   void* _pmLock = nullptr;
 #else
   mutable uint32_t _timingMux = 0;
 #endif
-#if defined(AT21CS_TESTING) && !defined(ARDUINO_ARCH_ESP32)
+#if defined(AT21CS_TESTING) && !(defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM))
   struct TestLineEvent {
     uint32_t cycle = 0;
     bool released = true;

@@ -42,7 +42,7 @@ wrapper cannot find it, stop and report the missing installation.
 ## Role and Target
 You are a professional embedded software engineer building a production-grade driver for Microchip AT21CS01 and AT21CS11 single-wire EEPROMs.
 
-- Target: ESP32-S2 / ESP32-S3, Arduino framework, PlatformIO.
+- Targets: ESP32-S2 / ESP32-S3 with Arduino-ESP32 on PlatformIO or native ESP-IDF 6.0.1.
 - Goals: deterministic behavior, robust error handling, maintainable API, predictable field behavior.
 
 ## Repository Model (Single Library)
@@ -58,7 +58,7 @@ include/AT21CS/       - Public API headers only
   AT21CS.h
   Version.h           - Auto-generated (do not edit)
   platform/esp32/
-    Esp32Transport.h  - Arduino-ESP32 Backend API
+    Esp32Transport.h  - Shared Arduino-ESP32 and native ESP-IDF Backend API
 src/                  - Implementation (.cpp)
 examples/
   01_*/ 02_*/         - Interactive demos
@@ -166,32 +166,24 @@ Do not modify its technical content unless explicitly requested by the maintaine
 
 ---
 
-## Framework Boundary And PioArduino
+## Framework boundary and ESP32 builds
 
-- The currently supported firmware framework is Arduino on ESP32-S2/S3 through
-  this exact PioArduino platform pin:
+- Arduino builds use the pinned PioArduino platform
   `https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip`.
-- Public/core code must stay framework-neutral. A future framework may provide
-  another Backend without changing Bus or Driver, but native ESP-IDF support is
-  not implemented, built, tested, packaged, advertised, or required now.
-- Core code must not depend on Arduino runtime APIs, ESP-IDF, FreeRTOS, ESP32
-  GPIO headers, board pins, or scheduler policy.
-- The explicit ESP32 Arduino transport may use guarded Arduino-ESP32 low-level
-  SoC/FreeRTOS facilities supplied by PioArduino. It must compile only in
-  `framework = arduino` environments and must not create a parallel
-  `framework = espidf` path.
-- Do not install or select a standalone ESP-IDF SDK, download a PlatformIO
-  `framework-espidf` package, invoke `idf.py`, ship an ESP-IDF example/component,
-  or add native-IDF CI/package gates.
+- Keep the public core, Bus and Driver independent of Arduino, ESP-IDF, FreeRTOS,
+  GPIO headers, board pins and scheduler policy. Keep ESP32 dependencies inside
+  the explicit Backend. Arduino-ESP32 and native ESP-IDF 6.0.1 on ESP32-S2/S3
+  share one implementation and its timing limits. An AT21CS01 Standard-Speed
+  segment can mask interrupts for up to about 5.8 ms.
+- Register the core and Backend in the root ESP-IDF component using absolute
+  paths based on `${CMAKE_CURRENT_LIST_DIR}` and private SDK dependencies. A
+  local wrapper may include that file to give the component a fixed name.
+- Use `C:\esp\idf.cmd 6.0.1` for native builds on Windows, following the
+  shared project instructions for isolated toolchains and short build paths.
+  Never install PlatformIO's `framework-espidf` package.
 - Keep exactly two shipped Arduino examples: one full single-device CLI and one
   concise multi-device CLI.
-- Planned scope change: on 2026-11-16 the owner elected native ESP-IDF support
-  with a native example. The promptset in [`docs/prompts/`](docs/prompts/README.md)
-  plans that work. Executing it authorizes exactly the AGENTS, README, docs,
-  checker, CI and package changes its prompts list; until a prompt makes them,
-  the rules above still apply. From the start of a prompt of that set, the
-  actions it lists, including `C:\esp\idf.cmd 6.0.1` builds, are authorized
-  before its AGENTS edits land.
+- The remaining native example, CI and package work is tracked in [the promptset](docs/prompts/README.md).
 
 ## Commit and pull request attribution
 

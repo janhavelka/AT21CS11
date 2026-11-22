@@ -6,7 +6,7 @@
 
 #include "../../TransferValidation.h"
 
-#if defined(ARDUINO_ARCH_ESP32)
+#if defined(ARDUINO_ARCH_ESP32) || defined(ESP_PLATFORM)
 #include <driver/gpio.h>
 #include <esp_cpu.h>
 #include <esp_pm.h>

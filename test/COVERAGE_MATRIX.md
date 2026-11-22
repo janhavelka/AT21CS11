@@ -51,6 +51,13 @@ matrix coverage. Cached getters are covered by
   shipped examples against the pinned Arduino platform.
 - `phy_smoke_s2` and `phy_smoke_s3` compile the production ESP32 Backend; IRAM
   checks verify placement of timing-critical methods and emitted lambdas.
+- The native ESP-IDF 6.0.1 smoke consumer links on ESP32-S2 and ESP32-S3
+  with PM off and on. Check all four Backend objects for IRAM placement and
+  undefined GPIO, timer, ROM delay and scheduler references. Only the PM
+  objects reference PM lock acquire/release. Compare out-of-line IRAM
+  callees to the corresponding Arduino build. These local gates provide
+  build evidence only. Standard-Speed segments can mask interrupts for up to
+  about 5.8 ms on AT21CS01.
 - `tools/check_docs.py` validates public links, API/default records, the
   authoritative datasheet hash, irreversible-operation guidance, and Doxygen.
 - `tools/check_package.py` verifies the exact export allowlist and builds clean

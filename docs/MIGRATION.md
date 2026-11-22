@@ -99,7 +99,9 @@ scratch storage and leave the caller buffer unchanged if any frame fails.
 
 ## Supported integration
 
-The shipped adapter supports Arduino on ESP32-S2/S3 using the pinned PioArduino
-platform. Core headers remain framework-neutral; no other adapter is currently
-implemented, packaged or qualified. See the [README](../README.md) for the full
-current integration and ownership contract.
+The same ESP32 Backend builds with the pinned PioArduino platform and as a
+native ESP-IDF 6.0.1 component on ESP32-S2/S3. Existing Arduino applications
+keep their Backend, Bus and Driver bindings. For native use, pin the owner
+task to one core and budget up to about 5.8 ms of interrupt masking per
+AT21CS01 Standard-Speed segment. Native evidence covers local builds. The
+native example and CI are pending. See the [ESP-IDF integration guide](ESP_IDF.md).

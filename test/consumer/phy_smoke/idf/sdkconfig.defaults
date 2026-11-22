@@ -1,0 +1,8 @@
+# Match the CPU clock used for the Arduino timing build.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# Match the Arduino FreeRTOS tick rate.
+CONFIG_FREERTOS_HZ=1000
+# Use the same size optimization for the timing helpers.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+# The baseline Arduino build uses a fixed CPU frequency.
+# CONFIG_PM_ENABLE is not set

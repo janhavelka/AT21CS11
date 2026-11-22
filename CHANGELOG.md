@@ -4,12 +4,18 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added a native ESP-IDF 6.0.1 component for ESP32-S2 and ESP32-S3. Local
+  smoke images link with power management off and on. The [integration
+  guide](docs/ESP_IDF.md) covers the build and the AT21CS01 Standard-Speed
+  interrupt-masking budget of up to about 5.8 ms per segment.
+
 ### Changed
 
 - Unified author, copyright and contact metadata: THYMOS Solution s.r.o., Jan Havelka, info@thymos.cz.
-- Planned native ESP-IDF support with a native example in a three-prompt set
-  under `docs/prompts/`; no driver, Backend, example, package or CI behavior
-  changed yet.
+- Widened the ESP32 Backend guard to include native ESP-IDF. The Arduino
+  Backend disassembly is unchanged on both targets.
 
 ### Fixed
 

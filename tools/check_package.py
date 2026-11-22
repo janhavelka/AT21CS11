@@ -29,6 +29,7 @@ ROOT_FILES = {
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
+    "docs/ESP_IDF.md",
     "docs/MIGRATION.md",
     "docs/IRREVERSIBLE_OPERATIONS.md",
     "docs/HARDWARE_VALIDATION.md",
