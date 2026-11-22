@@ -23,6 +23,9 @@ idf.py -B ../../../build-example-s3 -D SDKCONFIG=../../../sdkconfig.esp32s3 set-
 ```
 
 ESP32-S2 uses the native USB CDC console. ESP32-S3 uses USB Serial/JTAG.
+Before starting the CLI, the S2 shell initializes the CDC read lock and
+preserves any byte already waiting. The S3 shell installs the USB Serial/JTAG
+driver so non-blocking reads can see bytes in its receive buffer.
 Both use LF passthrough for input and output, so the engine's explicit CRLF
 and LF reach the console unchanged. The startup banner identifies the
 library version, source commit and status, SDK version and target.

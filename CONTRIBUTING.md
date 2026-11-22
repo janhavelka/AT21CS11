@@ -34,12 +34,6 @@ On Windows always use `scripts\pio.cmd`; it selects the existing user-managed
 PlatformIO installation. Do not install another PlatformIO Core for this
 repository.
 
-Archive validation compares `idf_component.yml` byte for byte with the
-committed manifest. For a new Windows packaging checkout, use
-`git clone --config core.autocrlf=input <repository-url>` to preserve its LF
-line endings. In an existing checkout, the manifest used for packing must
-likewise have its committed LF bytes.
-
 For native ESP-IDF 6.0.1 builds on Windows, use the isolated launcher and
 separate short build and configuration paths for each target. Run these
 commands in PowerShell from the repository root.

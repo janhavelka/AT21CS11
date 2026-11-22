@@ -1,3 +1,5 @@
 # Keep the generated header byte-stable on every supported host.
 include/AT21CS/Version.h text eol=lf
 scripts/generate_version.py text eol=lf
+# The exported manifest must match its committed bytes.
+idf_component.yml text eol=lf

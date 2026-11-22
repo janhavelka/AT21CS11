@@ -174,6 +174,11 @@ def check_idf_component(version: str, errors: list[str]) -> None:
         return
 
     cmake = re.sub(r"#[^\n]*", "", cmake)
+    if not re.search(
+        r'\b(?i:target_compile_features)\s*\(\s*(?:"\$\{COMPONENT_LIB\}"|\$\{COMPONENT_LIB\})'
+        r'\s+PUBLIC\s+cxx_std_17\s*\)', cmake,
+    ):
+        errors.append("ESP-IDF component must export its C++17 requirement to consumers")
     registrations = re.findall(r"\bidf_component_register\s*\(([^()]*)\)", cmake)
     if len(registrations) != 1:
         errors.append("expected one idf_component_register at the repository root")

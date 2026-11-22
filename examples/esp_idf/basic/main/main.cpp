@@ -8,6 +8,11 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+#endif
+
 #include "AT21CS/Version.h"
 #include "AT21CSBuildIdentity.h"
 #include "BringupCli.h"
@@ -21,20 +26,6 @@ class ConsoleOutput final : public at21cs_example::CliOutput {
   }
 };
 
-bool configureConsole() {
-  if (std::setvbuf(stdin, nullptr, _IONBF, 0) != 0 ||
-      std::setvbuf(stdout, nullptr, _IONBF, 0) != 0) {
-    return false;
-  }
-  const int input = fileno(stdin);
-  const int flags = fcntl(input, F_GETFL, 0);
-  return flags >= 0 && fcntl(input, F_SETFL, flags | O_NONBLOCK) == 0;
-}
-
-uint32_t nowMs() {
-  return static_cast<uint32_t>(esp_timer_get_time() / 1000);
-}
-
 int readChar() {
   const int value = std::getchar();
   if (value == EOF) {
@@ -43,6 +34,37 @@ int readChar() {
     return -1;
   }
   return value;
+}
+
+bool configureConsole() {
+  if (std::setvbuf(stdin, nullptr, _IONBF, 0) != 0 ||
+      std::setvbuf(stdout, nullptr, _IONBF, 0) != 0) {
+    return false;
+  }
+  const int input = fileno(stdin);
+  const int flags = fcntl(input, F_GETFL, 0);
+  if (flags < 0 || fcntl(input, F_SETFL, flags | O_NONBLOCK) < 0) {
+    return false;
+  }
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+  // IDF 6.0.1 sizes non-blocking reads from the installed driver's RX ring.
+  usb_serial_jtag_driver_config_t config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+  if (usb_serial_jtag_driver_install(&config) != ESP_OK) {
+    return false;
+  }
+  usb_serial_jtag_vfs_use_driver();
+#elif defined(CONFIG_ESP_CONSOLE_USB_CDC)
+  // Initialize the ROM CDC VFS read lock before starting the engine.
+  const int first = readChar();
+  if (first >= 0 && std::ungetc(first, stdin) == EOF) {
+    return false;
+  }
+#endif
+  return true;
+}
+
+uint32_t nowMs() {
+  return static_cast<uint32_t>(esp_timer_get_time() / 1000);
 }
 
 at21cs_example::WireInstance wire;

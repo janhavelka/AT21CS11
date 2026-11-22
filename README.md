@@ -349,8 +349,9 @@ python scripts/generate_version.py --check
 ```
 
 The package ships the ESP-IDF component, public headers, sources, consumer
-documentation, metadata and both example programs. Run the following checks
-from a checkout.
+documentation, metadata and both example programs. Archive validation checks
+the file list and compares the component manifest byte for byte with Git.
+Run the following checks from a checkout.
 
 ```text
 .\scripts\pio.cmd test -e native

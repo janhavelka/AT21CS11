@@ -89,6 +89,19 @@ class NativeExampleContractTests(unittest.TestCase):
         self.rejected(main, "!configureConsole()", "false", "console setup must succeed")
         self.rejected(main, "vTaskDelay(1);", "if (idle) vTaskDelay(1);", "each owner iteration")
 
+    def test_nonblocking_console_paths(self) -> None:
+        main = self.example / "main/main.cpp"
+        for before, after, error in (
+            ("flags | O_NONBLOCK", "flags & ~O_NONBLOCK", "enable O_NONBLOCK"),
+            ("usb_serial_jtag_driver_install(&config)", "ESP_OK", "install and select"),
+            ("usb_serial_jtag_vfs_use_driver();", "", "install and select"),
+            ("const int first = readChar();", "const int first = -1;", "prime the USB CDC"),
+            ("std::ungetc(first, stdin)", "first", "preserve its first byte"),
+            ("std::clearerr(stdin);", "", "clearerr(stdin)"),
+        ):
+            with self.subTest(mutation=before):
+                self.rejected(main, before, after, error)
+
     def test_main_registration_inputs(self) -> None:
         cmake = self.example / "main/CMakeLists.txt"
         for token in ("main.cpp", "../../../common"):

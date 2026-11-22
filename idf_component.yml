@@ -26,3 +26,5 @@ files:
     - "docs/prompts/**/*"
     - "docs/*.pdf"
     - "**/build*/**/*"
+    - "**/sdkconfig.esp32*"
+    - "**/*.log"

@@ -241,10 +241,12 @@ def package_path_allowed(name: str) -> bool:
 def validate_archive(archive: Path) -> tuple[tarfile.TarFile, dict[str, tarfile.TarInfo]]:
     handle = tarfile.open(archive, mode="r:gz")
     members: dict[str, tarfile.TarInfo] = {}
+    directories: set[str] = set()
     try:
         for member in handle.getmembers():
             name = normalized_member(member)
             if member.isdir():
+                directories.add(name)
                 continue
             if not member.isfile():
                 raise CheckFailure(f"archive contains a non-regular file: {name}")
@@ -254,8 +256,11 @@ def validate_archive(archive: Path) -> tuple[tarfile.TarFile, dict[str, tarfile.
 
         actual = set(members)
         expected = expected_files()
+        allowed_directories = {
+            parent.as_posix() for name in expected for parent in PurePosixPath(name).parents
+        }
         missing = sorted(expected - actual)
-        extra = sorted(actual - expected)
+        extra = sorted((actual - expected) | {f"{name}/" for name in directories - allowed_directories})
         if missing or extra:
             lines = ["package contents do not match the explicit allowlist"]
             lines.extend(f"missing: {name}" for name in missing)
@@ -609,24 +614,40 @@ def export_archive(archive: Path, destination: Path) -> None:
     destination = destination.resolve()
     paths = (destination / ARCHIVE_NAME, destination / "SHA256SUMS")
     if destination.is_relative_to(ROOT):
+        if any(destination.is_relative_to(ROOT / prefix) for prefix in ALLOWED_PREFIXES):
+            raise CheckFailure("package export directory must be outside the packaged source directories")
         relative = [path.relative_to(ROOT).as_posix() for path in paths]
         if destination.is_relative_to(ROOT / ".git") or git_output("ls-files", "--", *relative):
             raise CheckFailure("refusing to replace repository files with a package export")
     destination.mkdir(parents=True, exist_ok=True)
     target, checksum = paths
-    if any(path.is_symlink() for path in paths):
-        raise CheckFailure("package export files must not be symlinks")
-    if target.exists() or checksum.exists():
-        if (not target.is_file() or not checksum.is_file()
-                or checksum.read_text(encoding="ascii") != archive_checksum(target)):
-            raise CheckFailure(f"refusing to overwrite unrelated files in {destination}")
-    with tempfile.TemporaryDirectory(dir=destination) as stage:
-        staged = Path(stage) / ARCHIVE_NAME
+    # A fixed staging directory also reserves the destination between the two renames.
+    stage = destination / f".{ARCHIVE_NAME}.staging"
+    stage.mkdir()
+    try:
+        if any(path.is_symlink() for path in paths):
+            raise CheckFailure("package export files must not be symlinks")
+        previous = stage / "previous.tar.gz"
+        if target.exists() or checksum.exists():
+            if (not target.is_file() or not checksum.is_file()
+                    or checksum.read_text(encoding="ascii") != archive_checksum(target)):
+                raise CheckFailure(f"refusing to overwrite unrelated files in {destination}")
+            shutil.copy2(target, previous)
+        staged = stage / ARCHIVE_NAME
         shutil.copyfile(archive, staged)
-        sums = Path(stage) / "SHA256SUMS"
+        sums = stage / "SHA256SUMS"
         sums.write_text(archive_checksum(staged), encoding="ascii", newline="\n")
         staged.replace(target)
-        sums.replace(checksum)
+        try:
+            sums.replace(checksum)
+        except OSError:
+            if previous.exists():
+                previous.replace(target)
+            else:
+                target.unlink()
+            raise
+    finally:
+        shutil.rmtree(stage)
     print(f"exported validated {target} and {checksum.name}")
 
 

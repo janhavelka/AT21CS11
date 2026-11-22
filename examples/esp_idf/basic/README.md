@@ -47,7 +47,7 @@ idf.py -B ../../../build-example-s3 -D SDKCONFIG=../../../sdkconfig.esp32s3 set-
 ```
 
 Connect the board's native USB port. ESP32-S2 uses USB CDC and ESP32-S3
-uses USB Serial/JTAG. The console is unbuffered, with non-blocking input.
+uses USB Serial/JTAG. Both use unbuffered stdio with non-blocking input.
 LF passthrough preserves the engine's CRLF and LF output. The input parser
 accepts CR, LF and CRLF. To flash and open the monitor, substitute the board's
 port for `PORT` and run the line for your target.

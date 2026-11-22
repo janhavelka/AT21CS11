@@ -32,6 +32,13 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- Enabled non-blocking CLI input on ESP32-S3 by installing the USB Serial/JTAG
+  receive driver. ESP32-S2 initializes its CDC read lock before the CLI starts
+  and preserves the first input byte.
+- Preserved the packaged component manifest's committed bytes on Windows.
+  Native component exports exclude generated target configurations and logs.
+  Archive validation rejects unexpected directories, and a failed checksum
+  replacement restores the previous export.
 - Made AT21CS01 Standard Speed exclusive to one physical-wire Bus claim so
   mixed-speed multi-drop operation is rejected before device traffic.
 - Corrected Standard-Speed reservation ownership across same-address rebinds

@@ -191,6 +191,9 @@ jobs:
               elf_args=(--elf build/at21cs_phy_smoke.elf)
             fi
             idf.py -D "SDKCONFIG_DEFAULTS=$defaults" set-target "$IDF_TARGET" build
+            grep -Fx "CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=240" sdkconfig
+            grep -Fx "CONFIG_FREERTOS_HZ=1000" sdkconfig
+            grep -Fx "CONFIG_COMPILER_OPTIMIZATION_SIZE=y" sdkconfig
             objdump="$(command -v "xtensa-$IDF_TARGET-elf-objdump")"
             object="$(find build -type f -name Esp32Transport.cpp.obj)"
             python ../../../../tools/check_esp32_iram_sections.py --objdump "$objdump" --object "$object" \

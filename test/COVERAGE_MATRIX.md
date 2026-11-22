@@ -56,10 +56,12 @@ matrix coverage. Cached getters are covered by
   Their Backend objects pass the IRAM and undefined-reference checks.
   `tools/check_cli_contract.py` checks shared command ownership and shell delegation.
   `tools/check_idf_example_contract.py` checks the wrapper, console, yield,
-  defaults, guides and native CI jobs. Its mutation suite exercises rejected configurations
-  on temporary copies. Native hardware and runtime stack high-water marks are unmeasured.
+  defaults, guides and native CI jobs. Its mutations cover missing S3 receive-driver
+  setup and loss of the first S2 input byte. Native hardware and runtime stack
+  high-water marks are unmeasured.
 - `esp-idf-smoke` links the native ESP-IDF 6.0.1 smoke consumer on ESP32-S2 and ESP32-S3
-  with PM off and on. Check all four Backend objects for IRAM placement and
+  with PM off and on. CI checks the generated 240 MHz, 1000 Hz and size-optimization
+  settings. Check all four Backend objects for IRAM placement and
   undefined GPIO, timer, ROM delay and scheduler references. Only the PM
   objects reference PM lock acquire/release. Compare out-of-line IRAM
   callees to the corresponding Arduino build. These checks provide

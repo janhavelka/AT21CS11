@@ -110,6 +110,20 @@ def check_cmake(project: Path, root: Path) -> None:
             raise ContractError(f"main/CMakeLists.txt: missing REQUIRES {name}")
 
 
+def check_console(main: str) -> None:
+    setup = main.partition("bool configureConsole()")[2].partition("\n}")[0]
+    common, _, targets = setup.partition("#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)")
+    jtag, _, cdc = targets.partition("#elif defined(CONFIG_ESP_CONSOLE_USB_CDC)")
+    if not re.search(r"\|\s*O_NONBLOCK\b", common):
+        raise ContractError("main.cpp: enable O_NONBLOCK before preparing USB input")
+    install = jtag.find("usb_serial_jtag_driver_install(")
+    if install < 0 or jtag.find("usb_serial_jtag_vfs_use_driver(") < install:
+        raise ContractError("main.cpp: install and select the USB Serial/JTAG driver for non-blocking RX")
+    prime = cdc.find("readChar()")
+    if prime < 0 or cdc.find("ungetc(") < prime:
+        raise ContractError("main.cpp: prime the USB CDC input lock and preserve its first byte")
+
+
 def check_shell(project: Path) -> None:
     main = (project / "main/main.cpp").read_text(encoding="utf-8")
     for token in ARDUINO_TOKENS:
@@ -118,11 +132,12 @@ def check_shell(project: Path) -> None:
     main = re.sub(r"//[^\n]*|/\*.*?\*/", "", main, flags=re.S)
     for token in (
         'extern "C" void app_main()', '#include "BringupCli.h"', "getchar()",
-        "fcntl(", "O_NONBLOCK", "F_GETFL", "F_SETFL", "setvbuf(stdin", "setvbuf(stdout",
+        "fcntl(", "O_NONBLOCK", "F_GETFL", "F_SETFL", "setvbuf(stdin", "setvbuf(stdout", "clearerr(stdin)",
         "_IONBF", "vTaskDelay(1)", "esp_timer_get_time()", "esp_get_idf_version()",
         "AT21CS::VERSION", "CONFIG_IDF_TARGET", "AT21CS_GIT_COMMIT", "AT21CS_GIT_STATUS",
     ):
         require(main, token, "main.cpp")
+    check_console(main)
     forbidden = re.search(
         r"\b(?:CommandRegistration|REGISTRATIONS|dispatch|handle\w+|gpio_\w+|"
         r"xTaskCreate\w*|pthread_create|std::thread)\b", main,
