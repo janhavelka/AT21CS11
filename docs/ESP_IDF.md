@@ -5,6 +5,9 @@ Use a source checkout for native integration. The current PlatformIO package
 ships the Arduino examples and this guide. The native example, native CI and
 component packaging are pending.
 
+Example 01's command engine is framework-neutral. Its shell provides a
+millisecond clock, a non-blocking character reader and a bounded output sink.
+
 ## Build evidence
 
 | ESP-IDF 6.0.1 target | PM disabled | `CONFIG_PM_ENABLE=y` |

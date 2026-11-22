@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "AT21CS/AT21CS.h"
+#include "ArduinoCliOutput.h"
 #include "BoardConfig.h"
 #include "BoundedCli.h"
 #include "CommandContract.h"
@@ -33,6 +34,7 @@ struct Application {
 };
 
 Application app;
+ArduinoCliOutput output;
 
 WireInstance* selectWire(const char* text) {
   if (std::strcmp(text, "A") == 0) {
@@ -60,7 +62,7 @@ void handleStatus(void*, const Arguments& arguments) {
     Serial.println("invalid wire; use A or B");
     return;
   }
-  printInstanceStatus(wireName(wire), *wire);
+  printInstanceStatus(output, wireName(wire), *wire);
 }
 
 void handlePresence(void*, const Arguments& arguments) {
@@ -79,7 +81,7 @@ void handlePresence(void*, const Arguments& arguments) {
   }
   const ServiceResult result =
       wire->samplePresence(millis(), board::DETECT_DEBOUNCE_MS);
-  printStatus("presence", result.status);
+  printStatus(output, "presence", result.status);
   if (result.presenceKnown) {
     Serial.printf("[%s] logical presence: %s\n", wireName(wire),
                   result.presence ? "present" : "absent");
@@ -92,7 +94,7 @@ void handleProbe(void*, const Arguments& arguments) {
     Serial.println("invalid wire; use A or B");
     return;
   }
-  printStatus("probe", wire->driver.probe());
+  printStatus(output, "probe", wire->driver.probe());
 }
 
 void handleSerial(void*, const Arguments& arguments) {
@@ -102,9 +104,9 @@ void handleSerial(void*, const Arguments& arguments) {
     return;
   }
   const ServiceResult result = wire->readSerial();
-  printStatus("serial", result.status);
+  printStatus(output, "serial", result.status);
   if (result.status.ok()) {
-    printIdentity(result.identity);
+    printIdentity(output, result.identity);
   }
 }
 
@@ -128,9 +130,9 @@ void handleReadEeprom(void*, const Arguments& arguments) {
   uint8_t data[READ_BUFFER_BYTES] = {};
   const AT21CS::Status status = wire->driver.readEeprom(
       static_cast<uint8_t>(address), data, static_cast<size_t>(length));
-  printStatus("read-eeprom", status);
+  printStatus(output, "read-eeprom", status);
   if (status.ok()) {
-    printBytes(data, static_cast<size_t>(length));
+    printBytes(output, data, static_cast<size_t>(length));
   }
 }
 
@@ -141,7 +143,7 @@ void handleRecover(void*, const Arguments& arguments) {
     return;
   }
   const ServiceResult result = wire->recover(millis());
-  printStatus("recover", result.status);
+  printStatus(output, "recover", result.status);
   if (result.status.ok()) {
     Serial.printf("[%s] serial comparison scheduled\n", wireName(wire));
   }
@@ -149,7 +151,7 @@ void handleRecover(void*, const Arguments& arguments) {
 
 void handleShutdown(void*, const Arguments& arguments) {
   if (std::strcmp(arguments.values[1], "all") == 0) {
-    printStatus("shutdown A", app.wireA.shutdown());
+    printStatus(output, "shutdown A", app.wireA.shutdown());
     app.shutdownBPending = true;
     return;
   }
@@ -158,7 +160,7 @@ void handleShutdown(void*, const Arguments& arguments) {
     Serial.println("invalid shutdown target; use A, B, or all");
     return;
   }
-  printStatus(wire == &app.wireA ? "shutdown A" : "shutdown B",
+  printStatus(output, wire == &app.wireA ? "shutdown A" : "shutdown B",
               wire->shutdown());
 }
 
@@ -239,7 +241,7 @@ bool serviceAutomatic(uint32_t nowMs) {
     return true;
   }
   if (app.shutdownBPending) {
-    printStatus("shutdown B", app.wireB.shutdown());
+    printStatus(output, "shutdown B", app.wireB.shutdown());
     app.shutdownBPending = false;
     return true;
   }
@@ -258,7 +260,7 @@ bool serviceAutomatic(uint32_t nowMs) {
   const ServiceResult result = wire.serviceHotPlug(
       nowMs, board::DETECT_SAMPLE_MS, board::DETECT_DEBOUNCE_MS,
       board::HOTPLUG_POLL_MS);
-  printServiceResult(name, result);
+  printServiceResult(output, name, result);
   app.wireArbiter.completed(choice);
   return result.performed;
 }
@@ -299,7 +301,7 @@ void setup() {
       at21cs_example::board::ADDRESS_BITS_PRIMARY,
       at21cs_example::board::OFFLINE_THRESHOLD_PRIMARY,
       at21cs_example::board::EXPECTED_PART_PRIMARY);
-  at21cs_example::printStatus("startup A", statusA);
+  at21cs_example::printStatus(output, "startup A", statusA);
 
   const AT21CS::Status statusB = startWire(
       app.wireB, at21cs_example::board::SIO_SECONDARY,
@@ -308,7 +310,7 @@ void setup() {
       at21cs_example::board::ADDRESS_BITS_SECONDARY,
       at21cs_example::board::OFFLINE_THRESHOLD_SECONDARY,
       at21cs_example::board::EXPECTED_PART_SECONDARY);
-  at21cs_example::printStatus("startup B", statusB);
+  at21cs_example::printStatus(output, "startup B", statusB);
   Serial.println("A and B are separate wires; address zero is valid on both.");
   printHelp();
 }

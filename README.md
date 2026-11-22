@@ -310,8 +310,9 @@ The repository and package contain exactly two Arduino examples:
 - [single-device CLI](examples/01_basic_bringup_cli/main.cpp)
 - [two-wire/two-device CLI](examples/02_multi_device_cli/main.cpp)
 
-Both use [shared bounded helpers](examples/common/BoardConfig.h). Their
-build-time overrides are:
+Example 01's [command engine](examples/common/BringupCli.h) handles the
+14 single-device commands and hot-plug service. The Arduino shell supplies
+the clock, input and output. Both examples use the same [board settings](examples/common/BoardConfig.h).
 
 | Setting | Primary | Secondary | Committed default |
 |---|---|---|---|

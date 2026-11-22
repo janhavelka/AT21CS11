@@ -13,6 +13,9 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- Extracted example 01's 14-command CLI and hot-plug service into an
+  example-only engine. Both Arduino programs retain their console output,
+  including the original CRLF and LF line endings.
 - Unified author, copyright and contact metadata: THYMOS Solution s.r.o., Jan Havelka, info@thymos.cz.
 - Widened the ESP32 Backend guard to include native ESP-IDF. The Arduino
   Backend disassembly is unchanged on both targets.

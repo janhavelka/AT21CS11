@@ -10,8 +10,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXPECTED_EXAMPLE_FILES = {
     "01_basic_bringup_cli/main.cpp",
     "02_multi_device_cli/main.cpp",
+    "common/ArduinoCliOutput.h",
     "common/BoardConfig.h",
     "common/BoundedCli.h",
+    "common/BringupCli.h",
+    "common/CliOutput.h",
     "common/CommandContract.h",
     "common/StatusText.h",
     "common/WireInstance.h",
@@ -70,7 +73,7 @@ SINGLE_ACTION_MARKERS = {
     "handleSecurityLocked": "readSecurityLockState(",
     "handleRomZone": "readRomZoneState(",
     "handleSpeed": "setSpeedMode(",
-    "handleRecover": "recover(millis())",
+    "handleRecover": "recover(",
     "handleWritePage": "writeEepromPage(",
     "handleShutdown": "wire.shutdown()",
 }
@@ -142,6 +145,11 @@ def read_text(path: pathlib.Path) -> str:
     if not path.is_file():
         fail(f"missing file: {path.relative_to(ROOT).as_posix()}")
     return path.read_text(encoding="utf-8", errors="strict")
+
+
+def cpp_source(path: pathlib.Path) -> str:
+    # Commented-out calls and registrations do not implement commands.
+    return re.sub(r"//[^\n]*|/\*.*?\*/", "", read_text(path), flags=re.S)
 
 
 def check_layout() -> None:
@@ -246,17 +254,19 @@ def function_body(source: str, function_name: str) -> str:
 
 
 def registrations(main: str, form: str) -> list[tuple[str, str]]:
-    match = re.search(
-        r"static const CommandRegistration REGISTRATIONS\[\]\s*=\s*\{(.*?)\n\};",
+    tables = re.findall(
+        r"\bCommandRegistration\s+REGISTRATIONS\[\]\s*=\s*\{(.*?)^\s*\};",
         main,
-        re.S,
+        re.M | re.S,
     )
-    if match is None:
-        fail(f"missing {form.lower()} registration table")
-    rows = re.findall(
-        rf"\{{CommandId::([A-Z_]+),\s*CommandForm::{form},\s*(handle[A-Za-z0-9_]+)\}}",
-        match.group(1),
+    if len(tables) != 1:
+        fail(f"expected one {form.lower()} registration table")
+    entry = re.compile(
+        rf"\{{CommandId::([A-Z_]+),\s*CommandForm::{form},\s*(handle[A-Za-z0-9_]+)\}}"
     )
+    rows = entry.findall(tables[0])
+    if entry.sub("", tables[0]).strip(" \t\r\n,"):
+        fail(f"unexpected entry in {form.lower()} registration table")
     if len(rows) != len(set(rows)):
         fail(f"duplicate {form.lower()} registration")
     for _, handler in rows:
@@ -278,6 +288,26 @@ def registrations(main: str, form: str) -> list[tuple[str, str]]:
     return rows
 
 
+def check_shell(path: pathlib.Path, startup: str, owner: str) -> None:
+    source = cpp_source(path)
+    label = path.relative_to(ROOT).as_posix()
+    if '#include "BringupCli.h"' not in source:
+        fail(f"{label} must include BringupCli.h")
+    engine = re.search(r"\bBringupCli\s+(\w+)\s*[({]", source)
+    if engine is None:
+        fail(f"{label} must construct the shared command engine")
+    instance = re.escape(engine.group(1))
+    if not re.search(rf"\b{instance}\.start\s*\(", function_body(source, startup)):
+        fail(f"{label} must start the shared command engine")
+    if not re.search(
+        rf"\b{instance}\.pollInput\(\)\s*;\s*{instance}\.step\(\)",
+        function_body(source, owner),
+    ):
+        fail(f"{label} must poll input and step the same command engine")
+    if re.search(r"\b(?:CommandRegistration|REGISTRATIONS|dispatch)\b|\bhandle\w+\s*\(", source):
+        fail(f"{label} must delegate all command handling to BringupCli")
+
+
 def check_command_contract() -> None:
     contract = read_text(ROOT / "examples" / "common" / "CommandContract.h")
     rows = catalog_rows(contract)
@@ -297,8 +327,11 @@ def check_command_contract() -> None:
         if literal not in contract:
             fail(f"command contract missing {literal!r}")
 
-    single = read_text(ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp")
-    multi = read_text(ROOT / "examples" / "02_multi_device_cli" / "main.cpp")
+    single = cpp_source(ROOT / "examples" / "common" / "BringupCli.h")
+    multi = cpp_source(ROOT / "examples" / "02_multi_device_cli" / "main.cpp")
+    check_shell(ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp", "setup", "loop")
+    if not re.search(r"\bdispatch\(\s*REGISTRATIONS\s*,", function_body(single, "step")):
+        fail("BringupCli must dispatch its single-device registration table")
     if registrations(single, "SINGLE") != SINGLE_REGISTRATIONS:
         fail("single-device registration is not the frozen command surface")
     if registrations(multi, "MULTI") != MULTI_REGISTRATIONS:
@@ -313,11 +346,11 @@ def check_command_contract() -> None:
 
 def check_sources() -> None:
     paths = [
-        ROOT / "examples" / "01_basic_bringup_cli" / "main.cpp",
+        ROOT / "examples" / "common" / "BringupCli.h",
         ROOT / "examples" / "02_multi_device_cli" / "main.cpp",
     ]
-    texts = [read_text(path) for path in paths]
-    for path, source in zip(paths, texts):
+    for path in paths:
+        source = cpp_source(path)
         for header in (
             "BoardConfig.h",
             "BoundedCli.h",
@@ -327,6 +360,13 @@ def check_sources() -> None:
         ):
             if f'#include "{header}"' not in source:
                 fail(f"{path.relative_to(ROOT)} must include {header} locally")
+    for path in (ROOT / "examples" / "common").glob("*.h"):
+        if path.name == "ArduinoCliOutput.h":
+            continue
+        source = read_text(path)
+        for token in ("Arduino.h", "Serial.", "millis(", "delay("):
+            if token in source:
+                fail(f"framework token in shared CLI code: {path.name}: {token!r}")
     combined = "\n".join(
         read_text(path)
         for path in (ROOT / "examples").rglob("*")

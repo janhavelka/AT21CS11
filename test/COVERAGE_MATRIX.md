@@ -42,6 +42,7 @@ matrix coverage. Cached getters are covered by
 | State admission and saturating health | table-driven lifecycle/state tests; `test_health_saturates_and_last_error_persists_across_success` |
 | No v1/dead public surface | `test_v1_surface_is_absent`; static production-placeholder checker |
 | Example parser, hot-plug policy and fairness | `test_example_cli.cpp`; `test_example_policy.cpp`; `tools/check_cli_contract.py` |
+| Single-device CLI console bytes and validation before I/O | Host recording sink checks help, dispatch errors, invalid arguments, absent startup, presence, shutdown and output truncation. Backend line-event counts cover rejected arguments. |
 
 ## Build and documentation gates
 

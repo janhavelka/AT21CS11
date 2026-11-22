@@ -1,11 +1,10 @@
 #pragma once
 
-#include <Arduino.h>
-
 #include <cstddef>
 #include <cstdint>
 
 #include "AT21CS/AT21CS.h"
+#include "CliOutput.h"
 #include "WireInstance.h"
 
 namespace at21cs_example {
@@ -31,8 +30,9 @@ inline const char* toString(IdentityChange change) {
   return "unknown";
 }
 
-inline void printStatus(const char* label, const AT21CS::Status& status) {
-  Serial.printf("%s: %s detail=%ld phase=%s index=%u msg=%s\n", label,
+inline void printStatus(CliOutput& output, const char* label,
+                        const AT21CS::Status& status) {
+  output.printf("%s: %s detail=%ld phase=%s index=%u msg=%s\n", label,
                 AT21CS::toString(status.code),
                 static_cast<long>(status.detail),
                 AT21CS::toString(AT21CS::protocolDetailPhase(status.detail)),
@@ -41,50 +41,53 @@ inline void printStatus(const char* label, const AT21CS::Status& status) {
                 status.msg == nullptr ? "" : status.msg);
 }
 
-inline void printBytes(const uint8_t* bytes, size_t length) {
+inline void printBytes(CliOutput& output, const uint8_t* bytes, size_t length) {
   for (size_t index = 0; index < length; ++index) {
     if (index != 0) {
-      Serial.print(' ');
+      output.write(" ", 1);
     }
-    Serial.printf("%02X", static_cast<unsigned>(bytes[index]));
+    output.printf("%02X", static_cast<unsigned>(bytes[index]));
   }
-  Serial.println();
+  output.println();
 }
 
-inline void printIdentity(const IdentityObservation& observation) {
-  Serial.printf("identity: %s\n", toString(observation.change));
+inline void printIdentity(CliOutput& output,
+                          const IdentityObservation& observation) {
+  output.printf("identity: %s\n", toString(observation.change));
   if (observation.change == IdentityChange::DIFFERENT_DEVICE) {
-    Serial.print("old: ");
-    printBytes(observation.previous, AT21CS::cmd::SECURITY_SERIAL_SIZE);
+    output.print("old: ");
+    printBytes(output, observation.previous, AT21CS::cmd::SECURITY_SERIAL_SIZE);
   }
   if (observation.change != IdentityChange::NONE) {
-    Serial.print("serial: ");
-    printBytes(observation.current, AT21CS::cmd::SECURITY_SERIAL_SIZE);
+    output.print("serial: ");
+    printBytes(output, observation.current, AT21CS::cmd::SECURITY_SERIAL_SIZE);
   }
 }
 
-inline void printServiceResult(const char* wire, const ServiceResult& result) {
+inline void printServiceResult(CliOutput& output, const char* wire,
+                               const ServiceResult& result) {
   if (!result.performed || !result.report) {
     return;
   }
-  Serial.printf("[%s automatic %s] ", wire, toString(result.action));
-  Serial.printf("%s detail=%ld\n", AT21CS::toString(result.status.code),
+  output.printf("[%s automatic %s] ", wire, toString(result.action));
+  output.printf("%s detail=%ld\n", AT21CS::toString(result.status.code),
                 static_cast<long>(result.status.detail));
   if (result.action == AutomaticAction::SAMPLE_PRESENCE &&
       result.presenceKnown) {
-    Serial.printf("[%s presence] %s\n", wire,
+    output.printf("[%s presence] %s\n", wire,
                   result.presence ? "present" : "absent");
   }
   if (result.action == AutomaticAction::READ_SERIAL && result.status.ok()) {
-    printIdentity(result.identity);
+    printIdentity(output, result.identity);
   }
 }
 
-inline void printInstanceStatus(const char* wire, const WireInstance& instance) {
+inline void printInstanceStatus(CliOutput& output, const char* wire,
+                                const WireInstance& instance) {
   const AT21CS::SettingsSnapshot driver = instance.driver.snapshot();
   const AT21CS::BusSnapshot bus = instance.bus.snapshot();
   const HotPlugPolicy& policy = instance.policy();
-  Serial.printf(
+  output.printf(
       "[%s] active=%s bus=%s driver=%s initialized=%s state=%s "
       "address=%u failures=%u automatic-blocked=%s recovery-pending=%s\n",
       wire, instance.active() ? "yes" : "no", bus.bound ? "bound" : "unbound",
@@ -94,7 +97,7 @@ inline void printInstanceStatus(const char* wire, const WireInstance& instance) 
       static_cast<unsigned>(driver.consecutiveFailures),
       policy.automaticBlocked() ? "yes" : "no",
       policy.recoveryPending() ? "yes" : "no");
-  Serial.printf(
+  output.printf(
       "[%s] expected=%s detected=%s manufacturer=0x%06lX revision=%u "
       "speed=%s known=%s generation=%llu\n",
       wire, AT21CS::toString(driver.expectedPart),
@@ -103,24 +106,25 @@ inline void printInstanceStatus(const char* wire, const WireInstance& instance) 
       static_cast<unsigned>(driver.siliconRevision),
       AT21CS::toString(driver.activeSpeed), driver.speedKnown ? "yes" : "no",
       static_cast<unsigned long long>(bus.generation));
-  Serial.printf("[%s] identity-known=%s current=%s presence=", wire,
+  output.printf("[%s] identity-known=%s current=%s presence=", wire,
                 policy.identityKnown() ? "yes" : "no",
                 policy.identityCurrent() ? "yes" : "no");
   if (!instance.bus.hasPresenceIndicator()) {
-    Serial.println("disabled");
+    output.println("disabled");
   } else if (!policy.debouncedKnown()) {
-    Serial.println("unknown");
+    output.println("unknown");
   } else {
-    Serial.println(policy.debouncedPresent() ? "present" : "absent");
+    output.println(policy.debouncedPresent() ? "present" : "absent");
   }
-  Serial.printf("[%s] last-automatic=%s status=%s detail=%ld\n", wire,
+  output.printf("[%s] last-automatic=%s status=%s detail=%ld\n", wire,
                 toString(policy.lastAction()),
                 AT21CS::toString(policy.lastStatus().code),
                 static_cast<long>(policy.lastStatus().detail));
 }
 
-inline void printWriteResult(const AT21CS::WriteResult& result) {
-  Serial.printf("write: committed=%u accepted-last-page=%u effect=%s\n",
+inline void printWriteResult(CliOutput& output,
+                             const AT21CS::WriteResult& result) {
+  output.printf("write: committed=%u accepted-last-page=%u effect=%s\n",
                 static_cast<unsigned>(result.bytesCommitted),
                 static_cast<unsigned>(result.lastPageBytesAccepted),
                 AT21CS::toString(result.lastPageEffect));
