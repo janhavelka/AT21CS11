@@ -2,7 +2,8 @@
 
 Run the checks that cover your change from the repository root. To find tests
 for a driver operation, see the [coverage matrix](https://github.com/janhavelka/AT21CS11/blob/main/test/COVERAGE_MATRIX.md).
-For the original native ESP-IDF requirements, see the [completed prompt index](https://github.com/janhavelka/AT21CS11/blob/main/docs/prompts/README.md).
+The completed ESP-IDF prompts and resolved driver audits are available in the
+[documentation archive](https://github.com/janhavelka/AT21CS11/tree/e1d7640c15d208c46d2740f14d978b19507f348f/docs).
 
 ## Host tests and documentation
 
